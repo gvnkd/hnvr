@@ -1,0 +1,11 @@
+-- | NATS bus abstraction.
+--
+-- Implementation lands in Phase 0. Backend will be @nats-queue@ Hackage
+-- package or @hs-nats@ — whichever builds cleanly on GHC 9.12. If both prove
+-- unworkable, fall back to the official @nats@ Go binary wrapped via
+-- subprocess.
+--
+-- See:
+--   * @design_docs/01-architecture.md@ — NATS subjects table, topology
+--   * @design_docs/02-tech-stack.md@   — library choice + alternatives
+module Hnvr.Nats.Bus () where

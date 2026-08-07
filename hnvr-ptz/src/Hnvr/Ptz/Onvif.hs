@@ -1,0 +1,17 @@
+-- | ONVIF Profile PT SOAP client (~500 LOC target).
+--
+-- Hand-rolled — no Hackage ONVIF package is mature enough to depend on.
+-- The PTZ subset we cover:
+--
+--   * GetServices, GetCapabilities (device service) — discover PTZ service URL
+--   * GetPresets, GotoPreset, SetPreset, RemovePreset
+--   * ContinuousMove, Stop (manual joystick)
+--   * AbsoluteMove (for goto_preset and home return)
+--   * GetStatus, GetConfiguration, GetConfigurationOptions
+--
+-- Auth: WS-Security UsernameToken in SOAP header (SHA-1 digest of
+-- @base64(nonce) + created_timestamp + plaintext_password@). Reuse camera
+-- username/password if @ptz_username@ is null.
+--
+-- See @design_docs/02-tech-stack.md@ ("PTZ" section).
+module Hnvr.Ptz.Onvif () where

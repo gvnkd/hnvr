@@ -1,0 +1,12 @@
+-- | Line crossing + zone intrusion rules engine.
+--
+-- Pure Haskell. Consumes @Vector Track@ from the SORT tracker, emits @Event@
+-- on transitions only (line crossed, zone entered/exited). Per-rule cooldown
+-- state is kept in @tPerRuleState :: IntMap RuleState@ on each track.
+--
+-- All geometry in /normalized/ image coordinates (0..1) — independent of
+-- analysis resolution. UI draws on top of a 640×360 still from MediaMTX and we
+-- convert.
+--
+-- Implementation lands in Phase 4.
+module Hnvr.Cv.Rules () where

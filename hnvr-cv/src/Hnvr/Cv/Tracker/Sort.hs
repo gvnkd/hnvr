@@ -1,0 +1,11 @@
+-- | SORT tracker (Bewley et al., ICIP 2016).
+--
+-- Pure Haskell, ~250 LOC target. Constant-velocity Kalman filter (state
+-- @[x,y,s,r,dx,dy]@, measurement @[x,y,s,r]@) per track + Hungarian
+-- assignment on IoU between predicted track boxes and new detections.
+--
+-- Birth policy: 3 consecutive hits to confirm. Death: 30 missed frames.
+-- Killed tracks emit @track_end@ events if @cameras.emit_track_lifecycle@.
+--
+-- Implementation lands in Phase 3.
+module Hnvr.Cv.Tracker.Sort () where

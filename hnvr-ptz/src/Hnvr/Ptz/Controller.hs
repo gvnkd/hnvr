@@ -1,0 +1,39 @@
+-- | Per-PTZ-camera state machine.
+--
+-- One async thread per PTZ-enabled camera, owned by @PtzSupervisor@ on the
+-- host that owns the camera. Subscribes @hnvr.commands.ptz.<cam>@ and
+-- dispatches via the 'PtzDriver' typeclass.
+--
+-- State machine:
+--
+-- @
+--                 ┌──────────┐
+--       ┌────────▶│   Idle   │◀── on boot, on Stop, on goto_preset complete
+--       │         └────┬─────┘
+--       │              │ continuous_move from UI
+--       │              ▼
+--       │         ┌──────────────┐
+--       │         │ ManualMove   │  ── ContinuousMove every 200ms while held
+--       │         └────┬─────────┘
+--       │              │ Stop or joystick release
+--       │              ▼
+--       │         ┌──────────────┐
+--       │         │ ReturningHome│  ── if ptz_idle_timeout_s > 0
+--       │         └────┬─────────┘
+--       │              │ home preset reached
+--       └──────────────┘
+--       (any state)
+--              │ goto_preset from UI
+--              ▼
+--         ┌──────────────┐
+--         │ GoingToPreset│
+--         └────┬─────────┘
+--              │ reached
+--              ▼
+--            Idle
+--
+--   v1.1 addition: AutoTracking (manual input always preempts)
+-- @
+--
+-- Implementation lands in Phase 5 (v1 manual) and Phase 7 (v1.1 auto-track).
+module Hnvr.Ptz.Controller () where

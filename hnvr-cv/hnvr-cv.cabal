@@ -1,0 +1,21 @@
+cabal-version: 2.4
+name:         hnvr-cv
+version:      0.1.0.0
+synopsis:     HNVR computer vision: ONNX runtime, YOLO decode, SORT tracker, rules
+license:      BSD-3-Clause
+build-type:   Simple
+
+library
+    exposed-modules:
+        Hnvr.Cv.OnnxRuntime
+        Hnvr.Cv.Preprocess
+        Hnvr.Cv.Decode
+        Hnvr.Cv.Rules
+        Hnvr.Cv.AutoTrack
+        Hnvr.Cv.Tracker.Sort
+    build-depends:
+        base              >= 4.18 && < 5
+      , containers
+      , hnvr-core
+    hs-source-dirs:   src
+    default-language: Haskell2010

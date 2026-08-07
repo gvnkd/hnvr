@@ -1,0 +1,12 @@
+-- | Frame preprocessing for YOLO.
+--
+-- @letterbox@ matches Ultralytics' preprocessing: scale + center-pad so a
+-- frame of arbitrary aspect ratio fits into a square YOLO input (320×320 or
+-- 640×640) without distortion. NHWC → NCHW transpose and /255 normalize also
+-- live here.
+--
+-- Uses @massiv@ (Stencil + Array S B). Same code path for sub-stream frames
+-- and main-stream-with-scale fallback frames — input resolution is irrelevant.
+--
+-- Implementation lands in Phase 3.
+module Hnvr.Cv.Preprocess () where

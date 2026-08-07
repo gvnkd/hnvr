@@ -1,0 +1,14 @@
+-- | YOLOv8 anchor decode + non-maximum suppression.
+--
+-- YOLOv8 output is @[1, 84, 2100]@ float32 (84 = 4 box + 80 COCO classes,
+-- 2100 anchors for 320×320 input). This module turns that into
+-- @Vector Detection@ via:
+--
+--   1. Per-anchor box decode (cx, cy, w, h + class scores)
+--   2. Confidence threshold (per-camera, default 0.35)
+--   3. Per-class NMS @IoU 0.45
+--
+-- Pure, no IO. Tested independently of the ONNX runtime.
+--
+-- Implementation lands in Phase 3.
+module Hnvr.Cv.Decode () where

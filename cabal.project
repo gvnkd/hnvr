@@ -1,0 +1,29 @@
+packages:
+  ./hnvr-core
+  ./hnvr-nats
+  ./hnvr-storage
+  ./hnvr-capture
+  ./hnvr-cv
+  ./hnvr-ptz
+  ./hnvr-web
+
+-- Bleeding-edge: GHC 9.12 needs upper-bound relaxations on stale packages.
+-- Extend this list as `cabal build all` discovers failures.
+allow-newer:
+  amazonka-s3:base,
+  amazonka-core:base,
+  amazonka-core:bytestring,
+  massiv:base
+
+test-show-details: direct
+
+package *
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wredundant-constraints
+
+-- onnxruntime C library lives in nixpkgs; cabal FFI wiring lands in Phase 3.

@@ -1,0 +1,22 @@
+cabal-version: 2.4
+name:         hnvr-capture
+version:      0.1.0.0
+synopsis:     HNVR RTSP capture: ffmpeg supervision + fMP4 segmenter
+license:      BSD-3-Clause
+build-type:   Simple
+
+library
+    exposed-modules:
+        Hnvr.Capture.Ffmpeg
+        Hnvr.Capture.Fmp4
+        Hnvr.Capture.Worker
+    build-depends:
+        base              >= 4.18 && < 5
+      , bytestring
+      , text
+      , time
+      , hnvr-core
+      , hnvr-nats
+      , hnvr-storage
+    hs-source-dirs:   src
+    default-language: Haskell2010

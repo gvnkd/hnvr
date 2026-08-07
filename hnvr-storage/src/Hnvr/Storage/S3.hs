@@ -1,0 +1,17 @@
+-- | SeaweedFS (S3-API) client wrapper.
+--
+-- Implementation lands in Phase 1. Wraps @amazonka-s3 2.0@ with path-style
+-- addressing (SeaweedFS doesn't support virtual-hosted-style). Provides:
+--
+--   * 'putObject'        — segment upload, retries with backoff
+--   * 'getObject'        — used by ExportWorker
+--   * 'deleteObjects'    — used by RetentionSweeper
+--   * 'presignUrl'       — 1-hour signed URLs for archive HLS playback
+--   * 'listObjectsV2'    — paginated, used by sweep
+--
+-- Connection info comes from env vars @HNVR_S3_ENDPOINT@, @HNVR_S3_ACCESS_KEY@,
+-- @HNVR_S3_SECRET_KEY@ (set by systemd via sops-nix).
+--
+-- See @design_docs/03-capture-and-storage.md@ ("Fragment → SeaweedFS write
+-- protocol") and @design_docs/05-web-and-live-view.md@ ("Archive playback").
+module Hnvr.Storage.S3 () where

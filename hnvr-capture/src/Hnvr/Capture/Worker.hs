@@ -1,0 +1,14 @@
+-- | Per-camera capture worker state machine.
+--
+-- Owns:
+--   * One recording ffmpeg  (main stream, @-c:v copy@ → fMP4 → SeaweedFS)
+--   * One analysis ffmpeg   (sub-stream, decode → RGB → in-process TChan)
+--   * Optional audio ffmpeg (if @cameras.record_audio = true@)
+--
+-- State machine and failure modes documented in
+-- @design_docs/01-architecture.md@ ("Failure modes and guarantees") and
+-- @design_docs/03-capture-and-storage.md@ ("Supervision: the CaptureWorker
+-- state machine").
+--
+-- Implementation lands in Phase 1.
+module Hnvr.Capture.Worker () where

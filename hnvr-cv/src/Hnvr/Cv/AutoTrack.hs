@@ -1,0 +1,14 @@
+-- | Auto-track consumer (v1.1 milestone).
+--
+-- Separate consumer of tracker output, parallel to the rules engine. Picks
+-- the largest matching bbox (per @cameras.autotrack_classes@), feeds a PID
+-- controller per axis (pan, tilt, zoom), publishes @continuous_move@ commands
+-- on @hnvr.commands.ptz.<cam>@ every 200 ms.
+--
+-- Dead band + rate limit + windup guard prevent jitter. Lost-target timeout
+-- → @Stop@; extended-loss timeout → @ReturningHome@.
+--
+-- Manual PTZ input always preempts auto-track.
+--
+-- See @design_docs/04-cv-pipeline.md@ ("Auto-track consumer").
+module Hnvr.Cv.AutoTrack () where

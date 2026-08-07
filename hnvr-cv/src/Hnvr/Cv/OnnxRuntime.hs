@@ -1,0 +1,23 @@
+-- | Minimal Haskell binding to ONNX Runtime C API (~150 LOC target).
+--
+-- We deliberately /do not/ depend on @hs-onnxruntime-capi@ from Hackage — it
+-- is stale and won't build on GHC 9.12. The ONNX Runtime C API is a single
+-- vtable struct obtained via @OrtGetApiBase()->GetApi(API_VERSION)@. We dlopen
+-- @libonnxruntime.so@ (provided by nixpkgs @onnxruntime@) once at startup and
+-- wrap each function pointer with @foreign import ccall \"dynamic\"@.
+--
+-- Public surface (planned):
+--
+-- @
+-- data Session
+-- data ExecutionProvider = CPU | CUDA | TensorRT
+--
+-- withSession :: Maybe Text -> [ExecutionProvider] -> (Session -> IO r) -> IO r
+-- infer      :: Session -> Tensor -> IO Tensor
+-- @
+--
+-- EP selection at runtime from @HNVR_EXEC_PROVIDERS@ env var
+-- (default per-host: @hnvr-1@ = @cuda,cpu@; @hnvr-2@ = @tensorrt,cuda,cpu@).
+--
+-- See @design_docs/04-cv-pipeline.md@ ("ONNX Runtime Haskell binding").
+module Hnvr.Cv.OnnxRuntime () where
