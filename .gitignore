@@ -1,0 +1,112 @@
+############################################
+# Haskell / Cabal / GHC
+############################################
+dist/
+dist-newstyle/
+.ghc.environment.*
+*.hi
+*.o
+*.p_hi
+*.prof
+*.aux
+*.hie
+.hie/
+# Local cabal config (per-developer overrides); we DO commit:
+#   cabal.project
+#   cabal.project.freeze        (for reproducible builds)
+cabal.project.local
+cabal.project.local~
+cabal.project.local~
+
+# GHCi history (per-developer)
+.ghci.history
+
+############################################
+# Nix
+############################################
+result
+result-*
+.direnv/
+.nix-shell/
+.devenv/
+.envrc.local
+
+############################################
+# IHP
+############################################
+build/
+# static/vendor/ — committed for IHP; do NOT ignore
+# Application/Schema.sql — committed; IHP regenerates Haskell from it
+# Generated/ — committed; IHP auto-generated Haskell types
+
+############################################
+# sops-nix
+############################################
+# secrets/secrets.yaml is encrypted and COMMITTED
+# .sops.yaml config is COMMITTED
+# Only ignore plaintext variants and per-host overrides
+secrets/*.plain
+secrets/*.yaml.local
+secrets/local/
+
+############################################
+# Models / TensorRT engines
+############################################
+# Fetched via Nix derivations (fetchurl, pinned by sha256)
+*.onnx
+*.engine
+*.plan
+engines/
+models-cache/
+
+############################################
+# Project runtime / spool / scratch
+############################################
+/var/
+spool/
+tmp/
+*.log
+*.log.*
+*.secret
+
+############################################
+# Local overrides
+############################################
+*.local.nix
+*.local.yaml
+*.local.toml
+
+############################################
+# Editor / IDE
+############################################
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.\#*
+\#*
+# VS Code workspace files (per-developer)
+*.code-workspace
+
+############################################
+# OS
+############################################
+.DS_Store
+Thumbs.db
+
+############################################
+# Agentic tooling (per-session state, not project config)
+############################################
+.opencode/
+.aider*
+.claude/
+
+############################################
+# Coverage / test artifacts
+############################################
+hpc/
+*.tix
+coverage/
+.coverage
+html-report/
