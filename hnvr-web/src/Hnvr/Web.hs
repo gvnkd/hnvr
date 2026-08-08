@@ -2,14 +2,14 @@
 
 -- | HNVR web/leader shared library.
 --
--- Currently minimal — exposes only 'version'. Real IHP application
--- scaffolding (FrontController, Controllers, Views, Schema.sql) lands in
--- Phase 0 / Phase 1 via @ihp new@ against this package.
---
--- See @design_docs/05-web-and-live-view.md@ for the eventual structure.
+-- This module exposes a tiny stable API ('version') for embedders (the
+-- @hnvr-leader@ and @hnvr-node@ binaries). IHP wiring lives in
+-- 'Hnvr.Web.Config' and 'Hnvr.Web.FrontController'; pull those in
+-- transitively by depending on the @hnvr-web@ package directly.
 module Hnvr.Web
-  ( version
-  ) where
+  ( version,
+  )
+where
 
 import Data.Text (Text)
 

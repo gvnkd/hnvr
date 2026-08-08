@@ -98,9 +98,18 @@ Thumbs.db
 ############################################
 # Agentic tooling (per-session state, not project config)
 ############################################
-.opencode/
+# Ignore everything inside .opencode/ except MEMORIES.md (project memory).
+# Using /* (not /) so git still descends into the directory and the
+# negation pattern below can re-include a single file.
+.opencode/*
+!.opencode/MEMORIES.md
 .aider*
 .claude/
+
+############################################
+# Pre-commit-hooks.nix regenerates this as a nix-store symlink
+############################################
+.pre-commit-config.yaml
 
 ############################################
 # Coverage / test artifacts

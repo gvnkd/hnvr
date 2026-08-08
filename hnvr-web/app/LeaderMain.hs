@@ -10,13 +10,14 @@
 --   * AssignmentCoordinator (camera → host)
 --   * LeaderLease (JetStream KV TTL)
 --
--- Implementation lands in Phase 0 (bootstrap) and grows per roadmap.
+-- Phase 0 wires IHP and the @/healthz@ route; the rest lands per roadmap.
 module Main (main) where
 
-import qualified Data.Text as T
-import qualified Hnvr.Web
+import Hnvr.Web.Config (config)
+import Hnvr.Web.FrontController ()
+import qualified IHP.Server
+
+-- brings FrontController/Worker RootApplication instances
 
 main :: IO ()
-main = do
-  putStrLn $ "hnvr-leader v" <> T.unpack Hnvr.Web.version
-  putStrLn "Bootstrap stub. See design_docs/08-roadmap.md for implementation phases."
+main = IHP.Server.run config
