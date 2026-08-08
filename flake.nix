@@ -123,12 +123,25 @@
 
       mkWorkerVmModules = [
         baseVmConfig
+        self.nixosModules.hnvr-nats
         ({ pkgs, ... }: {
-          systemd.services.hnvr-node-stub = {
-            description = "HNVR worker (stub — NATS wiring lands in Phase 2)";
+          # Worker VM runs its own local NATS for Phase 0 demo purposes
+          # (so the node has something to connect to without inter-VM
+          # networking). Real deployments only run NATS on the leader;
+          # the worker reaches it over the LAN.
+          services.hnvr.nats.enable = true;
+
+          systemd.services.hnvr-node = {
+            description = "HNVR worker (Phase 0 stub — real dispatch lands in Phase 2)";
+            after = [ "network.target" "hnvr-nats.service" ];
+            wants = [ "hnvr-nats.service" ];
             wantedBy = [ "multi-user.target" ];
-            serviceConfig.ExecStart = "${pkgs.hnvr-web}/bin/hnvr-node";
-            serviceConfig.Restart = "on-failure";
+            environment.HNVR_NATS_URI = "nats://nats:nats@localhost:4222";
+            serviceConfig = {
+              ExecStart = "${pkgs.hnvr-web}/bin/hnvr-node";
+              Restart = "on-failure";
+              RestartSec = 5;
+            };
           };
         })
       ];
@@ -175,9 +188,17 @@
             pkgs.ormolu
             hpkgs.cabal-fmt
             pkgs.nixpkgs-fmt
+            # ---- Runtime deps for local testing ----------------------
             pkgs.ffmpeg_7-full
             pkgs.onnxruntime
             pkgs.nats-server
+            # NOTE: cabal build all needs pg_config for postgresql-libpq-configure.
+            # We currently can't pull postgresql/libpq here without enabling
+            # nix's experimental pipe-operators feature (nixpkgs at our pinned
+            # rev uses `<|` syntax in the postgresql family). cabal build all
+            # is therefore verified in CI only (CI uses Nix 2.35+).<|code_middle|><d076e6aa>
+
+            # ---- Utilities -------------------------------------------
             pkgs.curl
             pkgs.jq
             pkgs.direnv

@@ -6,6 +6,19 @@ packages:
   ./hnvr-cv
   ./hnvr-ptz
   ./hnvr-web
+  ./vendored/nats-queue
+
+-- NOTE: nats-queue is vendored under ./vendored/nats-queue with the
+-- single-line sClose → close fix applied (network >= 3.x rename). Keeping
+-- the patched copy in-tree is simpler than fighting cabal's
+-- source-repository-package --patch-dir (unreliable on cabal 3.16).
+-- flake.nix still uses Hackage + overrideAttrs for nix build.
+--
+-- cabal build all works for hnvr-core/hnvr-nats/hnvr-storage/hnvr-capture/
+-- hnvr-cv/hnvr-ptz. Building hnvr-web via cabal currently fails because
+-- IHP's transitive deps need version pins that IHP's nix overlay applies
+-- but cabal doesn't see. CI uses `nix build` exclusively for hnvr-web.
+-- Use `nix build .#hnvr-web` for the canonical web build.
 
 -- Bleeding-edge: GHC 9.12 needs upper-bound relaxations on stale packages.
 -- Extend this list as `cabal build all` discovers failures.
@@ -13,7 +26,18 @@ allow-newer:
   amazonka-s3:base,
   amazonka-core:base,
   amazonka-core:bytestring,
-  massiv:base
+  massiv:base,
+  nats-queue:base,
+  nats-queue:bytestring,
+  nats-queue:network,
+  nats-queue:text,
+  nats-queue:aeson,
+  nats-queue:containers,
+  nats-queue:dequeue,
+  nats-queue:network-uri,
+  nats-queue:random,
+  cabal-test-quickcheck:base,
+  cabal-test-quickcheck:QuickCheck
 
 test-show-details: direct
 
