@@ -13,6 +13,11 @@ library
     build-depends:
         base              >= 4.18 && < 5
       , bytestring
+      , cryptonite
+      , directory
+      , memory
+      , minio-hs
+      , process
       , text
       , time
       , typed-process
@@ -36,5 +41,18 @@ executable hnvr-record-frames
       , time
       , hnvr-core
       , hnvr-capture
+    hs-source-dirs:   app
+    default-language: Haskell2010
+
+executable hnvr-capture-loop
+    main-is:          CaptureLoop.hs
+    build-depends:
+        base              >= 4.18 && < 5
+      , text
+      , uuid
+      , hnvr-core
+      , hnvr-capture
+      , hnvr-nats
+      , hnvr-storage
     hs-source-dirs:   app
     default-language: Haskell2010

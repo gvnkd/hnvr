@@ -79,6 +79,22 @@ S3BIN=$(find dist-newstyle -name 'hnvr-s3-upload' -type f -executable | head -1)
 $S3BIN http://localhost:9100 minioadmin minioadmin hnvr-recordings \
   /tmp/hnvr-out/cam-197/init.mp4 cam-197/init.mp4
 
+# Phase 1 supervised capture worker (full vertical slice)
+cabal build hnvr-capture-loop
+LOOPBIN=$(find dist-newstyle -name 'hnvr-capture-loop' -type f -executable | head -1)
+# Local MinIO + NATS needed (see above +:
+#   printf 'port: 4222\nhttp_port: 8222\nauthorization {\n  user: n\n  password: n\n}\n' > /tmp/nats.conf
+#   nats-server -c /tmp/nats.conf -m 8222 &)
+$LOOPBIN floor_2_5 tcp 'rtsp://192.168.0.197:554/user=admin&password=123456&channel=0&stream=MainStream' \
+  --nats 'nats://n:n@localhost:4222' \
+  --s3 http://localhost:9100 minioadmin minioadmin hnvr-recordings \
+  --spool-dir /tmp/hnvr-spool \
+  --host hnvr-2
+# Verify: mc ls --recursive local/hnvr-recordings/floor_2_5/
+#         curl -s http://localhost:8222/varz | grep in_msgs (should increment ~1/s/cam)
+# Test backoff: pass a broken rtsp_url; watch the [cam INFO] log show
+#                "ffmpeg exit → Backoff #N for Xs" with X = 2,4,8,16,30,...
+
 # Run the binaries
 HNVR_NATS_URI="nats://nats:nats@localhost:4222" PORT=18001 \
   ./result/bin/hnvr-leader  # IHP app + NATS connect; /healthz on PORT
@@ -122,8 +138,10 @@ hnvr/
 ├── hnvr-nats/           REAL Bus (nats-queue wrapper) + Subjects
 ├── hnvr-storage/        REAL S3 wrapper (minio-hs, NOT amazonka — see pitfall #28)
 │                        + hnvr-s3-upload integration binary
-├── hnvr-capture/        Fmp4 (REAL pure parser), Ffmpeg (REAL recording args),
-│                        Worker (stub); exe hnvr-record-frames (REAL)
+├── hnvr-capture/        Fmp4 (REAL), Ffmpeg (REAL), Worker (REAL state machine);
+│                        exes: hnvr-record-frames (capture→disk),
+│                              hnvr-s3-upload (file→S3),
+│                              hnvr-capture-loop (full pipeline w/ NATS+S3+backoff)
 ├── hnvr-cv/             OnnxRuntime, Preprocess, Decode, Rules, AutoTrack,
 │                        Tracker/Sort (all stubs)
 ├── hnvr-ptz/            Driver (REAL typeclass), Onvif (stub), Controller (stub)
@@ -324,6 +342,11 @@ ffprobe notes:
     `nix build --impure --expr '(import <nixpkgs> { config.permittedInsecurePackages = [ "minio-..." ]; }).minio'`.
     For local testing of the S3 wrapper. Production uses SeaweedFS SaaS.
 
+31. **`Hnvr.Nats.Bus.hostFromUri` requires `user:pass@host:port`** — bare
+    `nats://localhost:4222` produces an empty host and crashes the nats-queue
+    connection with `Network.Socket.getAddrInfo ... does not exist`. Always
+    include dummy creds in the URI when the server has no auth.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -340,7 +363,7 @@ ffprobe notes:
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
-- [~] **Phase 1** — Recording MVP. **Slice 1+2 done (Aug 9 2026)**:
+- [~] **Phase 1** — Recording MVP. **Slice 1+2+3 done (Aug 9 2026)**:
       - ✅ Cameras probed (see fixture table above)
       - ✅ `Hnvr.Core.{Id, Time, Segment}` — Sha256 hex JSON, `Segment`
             type + `SegmentWritten` NATS envelope, time/object-key helpers
@@ -355,8 +378,21 @@ ffprobe notes:
             `listObjectKeys`/`deleteObject`. Verified roundtrip against
             local MinIO: init.mp4 + a fragment upload, byte-compare MATCH,
             HLS-concat of uploaded fragment still plays (h264 3840×2160).
+      - ✅ `Hnvr.Capture.Worker` — CaptureWorker state machine
+            (Pending/Running/Backoff/FailedPermanent/Stopped). Catches all
+            exceptions in `runOnce`; exponential backoff (2/4/8/16/30s
+            capped); 5 failures/60s → FailedPermanent (5-min cooldown).
+            Per-fragment: sha256 + S3 put (with local spool fallback on S3
+            failure) + NATS publish of `SegmentWritten` on `hnvr.events`.
+            Verified via `hnvr-capture-loop` integration binary: 10s run
+            produced 10 S3 uploads + 9 NATS publishes (matching ~1 fps/cam
+            on 197). Backoff verified by passing broken RTSP URL.
       - ⏳ `CaptureWorker` state machine, schema, IHP cameras CRUD,
             EventWriter, archive view, Crypto, sops-nix
+            Remaining Phase 1: Schema.sql + IHP cameras CRUD + ffprobe
+            button (Slice 4), EventWriter on leader (Slice 5),
+            Archive view + m3u8 + hls.js (Slice 6),
+            Hnvr.Core.Crypto + sops-nix (Slice 7).
 - [ ] Phase 1 — Recording MVP
 - [ ] Phase 2 — Live view + multi-host
 - [ ] Phase 3 — CV detection + tracking
