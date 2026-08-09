@@ -1,10 +1,94 @@
--- | ffmpeg subprocess management.
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+-- | ffmpeg subprocess construction for the recording pipeline.
 --
--- Two ffmpeg invocations per camera (record main + analyze sub), plus an
--- optional third for muxed audio. All flags are documented in
--- @design_docs/03-capture-and-storage.md@.
+-- Two invocations per camera exist in the full design (record + analyze);
+-- this module covers the /recording/ ffmpeg only — the analysis ffmpeg
+-- lands with the CV pipeline in Phase 3.
 --
--- Implementation lands in Phase 1. Uses @typed-process@ for safe subprocess
--- construction. The CaptureWorker owns the process handles; on exit
--- (graceful or otherwise) it must @waitForProcess@ to avoid zombies.
-module Hnvr.Capture.Ffmpeg () where
+-- The recording ffmpeg performs @-c:v copy@ (zero decode, zero encode) and
+-- emits HLS-ready fMP4 fragments on stdout. We read those bytes, slice them
+-- at @moof@\/@mdat@ boundaries via "Hnvr.Capture.Fmp4", and upload each
+-- fragment to SeaweedFS.
+--
+-- All flags are documented in @design_docs/03-capture-and-storage.md@
+-- (\"Per-camera capture pipeline\"). The flag set MUST stay in sync with
+-- that document — the fMP4 fragmenter and the HLS player both depend on
+-- the exact @movflags@ we use here.
+module Hnvr.Capture.Ffmpeg
+  ( -- * Configuration
+    Transport (..),
+    RecordingConfig (..),
+
+    -- * Args
+    recordingArgs,
+
+    -- * Process (typed-process)
+    recordingProc,
+  )
+where
+
+import Data.Text (Text)
+import qualified Data.Text as T
+import System.Process.Typed (ProcessConfig, proc)
+
+-- | RTSP transport selection. Most cameras work over TCP interleaved
+-- (no UDP packet loss on LAN). Camera 196 in Sergey's test set requires
+-- UDP — TCP setup is rejected with @Connection reset by peer@.
+data Transport = TcpTransport | UdpTransport
+  deriving stock (Eq, Show)
+
+-- | Configuration for the recording ffmpeg.
+data RecordingConfig = RecordingConfig
+  { -- | Full RTSP URL with embedded credentials.
+    rcUrl :: !Text,
+    -- | Transport. Mismatched transport fails fast at RTSP SETUP.
+    rcTransport :: !Transport
+  }
+  deriving stock (Eq, Show)
+
+-- | Raw argv list for the recording ffmpeg. Use this if you want to spawn
+-- the process via "System.Process" or your own runtime; prefer
+-- 'recordingProc' for typed-process callers.
+recordingArgs :: RecordingConfig -> [String]
+recordingArgs cfg =
+  [ "-hide_banner",
+    "-loglevel",
+    "warning",
+    "-rtsp_transport",
+    transportArg (rcTransport cfg),
+    "-timeout",
+    "5000000",
+    "-i",
+    T.unpack (rcUrl cfg),
+    "-user_agent",
+    "HNVR/0.1",
+    "-reconnect",
+    "1",
+    "-reconnect_streamed",
+    "1",
+    "-reconnect_delay_max",
+    "5",
+    "-an",
+    "-c:v",
+    "copy",
+    "-f",
+    "mp4",
+    "-movflags",
+    "+frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset+faststart",
+    "-frag_duration",
+    "1000000",
+    "-reset_timestamps",
+    "1",
+    "pipe:1"
+  ]
+  where
+    transportArg TcpTransport = "tcp"
+    transportArg UdpTransport = "udp"
+
+-- | Build the recording ffmpeg process spec via @typed-process@. Stdin and
+-- stderr are inherited; stdout is left as 'Inherited' so the caller can
+-- redirect or pipe it (typically @setStdout createSource@).
+recordingProc :: RecordingConfig -> ProcessConfig () () ()
+recordingProc cfg = proc "ffmpeg" (recordingArgs cfg)

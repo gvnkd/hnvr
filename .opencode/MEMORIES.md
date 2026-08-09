@@ -57,6 +57,16 @@ nix develop
 # Cabal-side build of our own packages (NOT hnvr-web — see pitfalls #14):
 cabal build hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz
 
+# Phase 1 capture pipeline integration binary (ffmpeg → Fmp4 → disk)
+cabal build hnvr-record-frames
+BIN=$(find dist-newstyle -name 'hnvr-record-frames' -type f -executable | head -1)
+# Cam 197 (TCP), 196 (UDP!), 198 (TCP, XM firmware):
+$BIN cam-197 tcp 'rtsp://admin:123456@192.168.0.197:554/h264PreviewCh01' /tmp/hnvr-out
+$BIN cam-196 udp 'rtsp://admin:123456@192.168.0.196:554/h264PreviewCh01' /tmp/hnvr-out
+$BIN cam-198 tcp 'rtsp://admin:io27pJ3wui@192.168.0.198:554/stream=0' /tmp/hnvr-out
+# Output: /tmp/hnvr-out/<slug>/init.mp4 + /tmp/hnvr-out/<slug>/<YYYY-MM-DD>/<HH-MM-SS.MMM>.mp4
+# Verify: cat init.mp4 frag.mp4 | ffprobe -   (fMP4 fragments need init segment)
+
 # Run the binaries
 HNVR_NATS_URI="nats://nats:nats@localhost:4222" PORT=18001 \
   ./result/bin/hnvr-leader  # IHP app + NATS connect; /healthz on PORT
@@ -96,10 +106,11 @@ hnvr/
 │   └── nats-server.nix  NixOS module: NATS + JetStream
 ├── vendored/
 │   └── nats-queue/      2017 lib + sClose → close patch baked in
-├── hnvr-core/           REAL types: Id, Geometry, Logging, Prelude
+├── hnvr-core/           REAL types: Id, Geometry, Logging, Prelude, Time, Segment
 ├── hnvr-nats/           REAL Bus (nats-queue wrapper) + Subjects
 ├── hnvr-storage/        S3 client (stub)
-├── hnvr-capture/        Ffmpeg, Fmp4, Worker (all stubs)
+├── hnvr-capture/        Fmp4 (REAL pure parser), Ffmpeg (REAL recording args),
+│                        Worker (stub); exe hnvr-record-frames (REAL)
 ├── hnvr-cv/             OnnxRuntime, Preprocess, Decode, Rules, AutoTrack,
 │                        Tracker/Sort (all stubs)
 ├── hnvr-ptz/            Driver (REAL typeclass), Onvif (stub), Controller (stub)
@@ -121,16 +132,41 @@ hnvr/
 We own: schema migrations (`hnvr-web/Application/Schema.sql` — TBD), backups
 coordination. We do NOT own: PG ops, SeaweedFS ops, replication, vacuum.
 
-## Sergey's cameras (test fixtures)
+## Sergey's cameras (test fixtures — probed Aug 9 2026)
 
-| IP | Codec | Res | FPS | Stream URL scheme |
-|----|-------|-----|-----|-------------------|
-| 192.168.0.196 | HEVC | 4000×3000 | 15 | `stream=MainStream` (try `stream=SubStream`) |
-| 192.168.0.197 | H.264 | 3840×2160 | 15 | `stream=MainStream` |
-| 192.168.0.198 | HEVC | 3072×2048 | 25 | `stream=0` (try `stream=1`) |
-| All | RTSP TCP | | | Credentials: `admin` per camera |
+**Use Sergey's canonical URL form** (`user=admin&password=...&channel=0&stream=...`) —
+it gives the true configured fps for every camera AND works over TCP for all
+three (the alternative `h264PreviewCh01` URL on 196 is UDP-only and gives a
+non-standard 25fps profile; the alternative `stream=0` on 198 gives 12fps
+instead of 15 — both are probe artifacts of the wrong URL form).
 
-**Verify before Phase 1**: probe sub-streams + ONVIF PTZ with ffprobe.
+| Slug | IP | User | Password | Main URL | Main codec/res/fps | Sub URL | Sub codec/res/fps |
+|------|----|------|----------|----------|--------------------|---------|-------------------|
+| low_ent | 192.168.0.198 | admin | `io27pJ3wui` | `rtsp://192.168.0.198:554/user=admin&password=io27pJ3wui&channel=0&stream=0` | HEVC 3072×2048 @15 | `...&stream=1` | HEVC 704×576 @5 (low for CV) |
+| backyard | 192.168.0.196 | admin | `123456` | `rtsp://192.168.0.196:554/user=admin&password=123456&channel=0&stream=MainStream` | HEVC 4000×3000 @15 | `...&stream=SubStream` | HEVC 704×576 @5 |
+| floor_2_5 | 192.168.0.197 | admin | `123456` | `rtsp://192.168.0.197:554/user=admin&password=123456&channel=0&stream=MainStream` | H.264 3840×2160 @15 | `...&stream=SubStream` | H.264 720×480 @15 |
+
+All three work over `-rtsp_transport tcp`. Audio present on all three
+(196: pcm_mulaw; 197: pcm_mulaw; 198: pcm_alaw). Phase 1 ignores audio.
+
+**Vendor notes for later phases**:
+- All three expose the H264DVR-style URL form above (`/user=&password=&channel=&stream=`),
+  common to XM / icamra / generic Chinese OEM firmware.
+- 196 + 197 also respond to ONVIF at `http://192.168.0.196/onvif/device_service`
+  (gSOAP/2.8 server, Hikvision OEM namespaces) with WS-Security auth — useful
+  for Phase 5 PTZ probe. 198 has no ONVIF.
+- 198 also exposes XMeye NetSDK on port 34567 (proprietary — out of scope).
+- Encoder fps is only configurable via each camera's web admin UI.
+
+**Sub-stream fps is low on 196 + 198 (5fps)** — borderline for CV. The
+design's fallback path (`use_substream_for_analysis=false` →
+main-stream-with-scale, design_docs/03 §2b) covers this. Decide per-camera
+at Phase 3 kickoff.
+
+ffprobe notes:
+- ffmpeg 7.x renamed `-stimeout` → `-timeout` (use `-timeout 5000000` for RTSP).
+- The H264DVR URL form uses `&` separators inside the path; quote the whole
+  URL when passing to shell or ffmpeg.
 
 ## Sergey's hardware
 
@@ -239,6 +275,25 @@ coordination. We do NOT own: PG ops, SeaweedFS ops, replication, vacuum.
     `(?context :: FrameworkConfig, ?modelContext :: ModelContext) => IO ()`
     — `ModelContext` is a specific type, not polymorphic.
 
+25. **HEVC cameras emit 2+ fMP4 fragments per wall-clock second** —
+    ffmpeg's `-frag_duration 1000000` requests 1s but the
+    `+frag_keyframe` flag splits at every keyframe, and HEVC cameras
+    (cam-196 in particular) keyframe more often than once per second.
+    Object keys MUST use millisecond precision
+    (`formatSegmentObjectKeyMs`), otherwise later fragments in the same
+    second overwrite earlier ones on disk and in S3.
+
+26. **fMP4 fragments are NOT independently playable** — ffprobe on a
+    single `moof+mdat` file errors with `trun track id unknown, no tfhd
+    was found`. That's expected; the track config lives in the
+    `ftyp+moov` init segment. Verify by concatenating `init.mp4` with
+    one or more fragments before probing. The HLS player does this
+    naturally.
+
+27. **`Data.Fixed.Milli` is a TYPE alias, not a constructor** —
+    `Milli = Fixed E3`. To pattern-match the underlying Integer, use
+    `MkFixed` from `Data.Fixed`: `let ms = realToFrac dt; MkInteger n = ms`.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -248,13 +303,25 @@ coordination. We do NOT own: PG ops, SeaweedFS ops, replication, vacuum.
 - Wants to design for horizontal scale even when v1 doesn't need it (hence
   NATS from day one).
 
-## Roadmap status (Aug 8 2026)
+## Roadmap status (Aug 9 2026)
 
 - [x] Design docs complete
 - [x] Cabal scaffold + flake.nix
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
+- [~] **Phase 1** — Recording MVP. **Slice 1 done (Aug 9 2026)**:
+      - ✅ Cameras probed (see fixture table above)
+      - ✅ `Hnvr.Core.{Id, Time, Segment}` — Sha256 hex JSON, `Segment`
+            type + `SegmentWritten` NATS envelope, time/object-key helpers
+      - ✅ `Hnvr.Capture.Fmp4` — pure streaming box parser (chunk-invariant)
+      - ✅ `Hnvr.Capture.Ffmpeg` — recording args (typed-process + raw)
+      - ✅ `hnvr-record-frames` integration binary — verified end-to-end
+            against all 3 of Sergey's cameras (HEVC UDP, H264 TCP,
+            HEVC TCP/XM). Init + media fragments play via HLS-style concat
+            with init.mp4 (single fragments need init to know track cfg).
+      - ⏳ `Hnvr.Storage.S3`, `CaptureWorker` state machine, schema, IHP
+            cameras CRUD, EventWriter, archive view, Crypto, sops-nix
 - [ ] Phase 1 — Recording MVP
 - [ ] Phase 2 — Live view + multi-host
 - [ ] Phase 3 — CV detection + tracking
@@ -265,8 +332,10 @@ coordination. We do NOT own: PG ops, SeaweedFS ops, replication, vacuum.
 - [ ] Phase 8 — Polish
 
 Phase 1 kickoff notes:
-- Camera sub-streams (`stream=SubStream`, `stream=1`) need ffprobe
-  verification before CaptureWorker real impl.
+- **DONE (Aug 9 2026)**: Camera sub-streams verified via ffprobe. All three
+  cameras have a usable sub-stream; see "Sergey's cameras" fixture table
+  above for Sergey's canonical URL form. Sub-stream fps is 5 on 196 + 198
+  (may need main-stream-with-scale fallback for CV in Phase 3).
 - The leader's NATS connection is best-effort (won't crash IHP on
   failure); when wiring EventWriter in Phase 1, store the Bus in an
   MVar so it's accessible to publish sites.
@@ -286,8 +355,15 @@ See `design_docs/08-roadmap.md` for the full plan with demos and decision points
 3. Skim `design_docs/00-overview.md` for the decisions table.
 4. Check `git log --oneline` for what's new since last session.
 5. `nix develop` to enter dev shell.
-6. **Phase 1 kickoff**: probe Sergey's cameras' sub-streams with ffprobe;
-   then start `Hnvr.Capture.Ffmpeg` real impl + `CaptureWorker` state
-   machine. The hnvr-nats `Bus` module is wired but its handle isn't
-   shared yet — thread it through an MVar when Phase 1 starts publishing
-   on `hnvr.events`.
+6. **Phase 1 Slice 1 done** (Aug 9 2026): capture pipeline vertical
+   slice works end-to-end against all 3 cameras via the
+   `hnvr-record-frames` binary. Next slices in priority order:
+   - Slice 2: `Hnvr.Storage.S3` (amazonka-s3 path-style) + segment publish
+   - Slice 3: `CaptureWorker` state machine (Pending/Running/Backoff/
+     Stopped/FailedPermanent) wrapping ffmpeg + Fmp4 + S3 + NATS publish
+   - Slice 4: `Schema.sql` + IHP cameras CRUD + ffprobe button
+   - Slice 5: EventWriter on leader consuming `hnvr.events`
+   - Slice 6: Archive view + m3u8 + hls.js
+   - Slice 7: `Hnvr.Core.Crypto` AES-256-GCM + sops-nix wiring
+   The hnvr-nats `Bus` handle isn't shared yet — thread it through an
+   MVar when Slice 3 starts publishing on `hnvr.events`.
