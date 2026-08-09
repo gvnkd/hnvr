@@ -149,9 +149,13 @@ hnvr/
 │                        ├── Application/Schema.sql   IHP schema source of truth
 │                        ├── regen.sh                 regen+patch IHP codegen (see pitfall #32)
 │                        ├── gen/Generated/...        IHP-generated types (committed)
-│                        ├── src/Hnvr/Web.hs          version stub
-│                        ├── src/Hnvr/Web/Config.hs   IHP config + healthz + NATS init
-│                        ├── src/Hnvr/Web/FrontController.hs RootApplication instances
+│                        ├── src/Hnvr/Web.hs                 version stub
+│                        ├── src/Hnvr/Web/Config.hs          IHP config + healthz + NATS init
+│                        ├── src/Hnvr/Web/FrontController.hs RootApplication + parseRoute @CamerasController
+│                        ├── src/Hnvr/Web/Controller/Cameras.hs      CRUD + Probe action
+│                        ├── src/Hnvr/Web/Controller/Cameras/Probe.hs ffprobe JSON parser
+│                        ├── src/Hnvr/Web/View/Layout.hs             default HTML layout
+│                        ├── src/Hnvr/Web/View/Cameras/{Index,New,Edit,Show}.hs
 │                        ├── app/LeaderMain.hs        IHP.Server.run + NATS via addInitializer
 │                        └── app/NodeMain.hs          withBus + subscribe hnvr.commands.>
 ```
@@ -369,6 +373,29 @@ ffprobe notes:
     `final.callHackageDirect` with the tarball hash. Bump hash if
     hasql-mapping re-releases.
 
+35. **IHP HSX can't parse nested record patterns** — `pathTo FooAction { id = x }`
+    inside an HSX expression hole fails with "parse error (possibly
+    incorrect indentation or mismatched brackets)". Workaround: extract
+    the path to a `let`/`where` binding and reference it as a single var.
+
+36. **IHP `Html` type carries implicit-param constraint**
+    `(?context :: RequestContext, ?request :: Request)` — so any function
+    with `Html` in its signature needs the params in scope, which means
+    either (a) no explicit signature (let GHC infer), or (b) RankNTypes.
+    Easiest in views: omit signatures on local helpers.
+
+37. **IHP controllers need `Data` + `AutoRoute` instances** —
+    declaring `data CamerasController = IndexAction | ... ` is not enough;
+    add `deriving stock (Eq, Show, Data)` (needs DeriveDataTypeable) plus
+    `instance AutoRoute CamerasController` to get `parseRoute` dispatch.
+    Route helpers like `redirectTo EditAction {..}` use the data
+    constructor names directly (not `EditCameraAction`-style auto-aliases).
+
+38. **cabal `exposed-modules` MUST NOT have duplicate entries** — even
+    comment lines between two listings of the same module produce a
+    Cabal-5559 "duplicate-modules" error at configure time. Watch for
+    stale list copies when refactoring.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -385,7 +412,7 @@ ffprobe notes:
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
-- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b-done-done (Aug 9 2026)**:
+- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c done (Aug 9 2026)**:
       - ✅ Cameras probed (see fixture table above)
       - ✅ `Hnvr.Core.{Id, Time, Segment}` — Sha256 hex JSON, `Segment`
             type + `SegmentWritten` NATS envelope, time/object-key helpers
@@ -401,7 +428,11 @@ ffprobe notes:
             the codegen bug). `nix build .#hnvr-web` succeeds, producing
             `hnvr-leader` + `hnvr-node` binaries with Generated.Camera /
             Generated.Host types available.
-      - ⏳ Slice 4c: Cameras CRUD controllers + HSX views + ffprobe button
+      - ✅ Slice 4c: Cameras CRUD controller + HSX views (Index/Show/New/Edit)
+            + Probe action (shells out to ffprobe, parses JSON, updates codec).
+            FrontController wired with `parseRoute @CamerasController`.
+            Builds verified via `nix build`. Live test pending (needs leader VM
+            + Postgres — Sergey operates).
       - ⏳ Slice 5: EventWriter on leader consuming hnvr.events
       - ⏳ Slice 6: Archive view + m3u8 + hls.js
       - ⏳ Slice 7: Hnvr.Core.Crypto AES-256-GCM + sops-nix wiring
