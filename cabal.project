@@ -21,10 +21,22 @@ packages:
 -- Use `nix build .#hnvr-web` for the canonical web build.
 
 -- Bleeding-edge: GHC 9.12 needs upper-bound relaxations on stale packages.
--- Extend this list as `cabal build all` discovers failures.
+-- IHP's nix overlay jailbreaks these for `nix build`; cabal needs the same
+-- relaxations mirrored here for `cabal build`. Extend this list as
+-- `cabal build` discovers failures.
 allow-newer:
-  amazonka-s3:base,
-  amazonka-core:base,
+  *:base,
+  *:bytestring,
+  *:containers,
+  *:text,
+  *:time,
+  *:transformers,
+  *:template-haskell,
+  *:deepseq,
+  *:binary,
+  *:unix,
+  *:directory,
+  *:process,
   amazonka-core:bytestring,
   massiv:base,
   nats-queue:base,
@@ -40,6 +52,11 @@ allow-newer:
   cabal-test-quickcheck:QuickCheck
 
 test-show-details: direct
+
+-- Force versions that compile under GHC 9.12. The default solver picks
+-- older transitive deps (e.g. socks-0.5.6) which use pre-MonadFail APIs.
+constraints:
+  socks >= 0.6.0
 
 package *
   ghc-options:

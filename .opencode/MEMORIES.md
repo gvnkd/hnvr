@@ -67,6 +67,18 @@ $BIN cam-198 tcp 'rtsp://admin:io27pJ3wui@192.168.0.198:554/stream=0' /tmp/hnvr-
 # Output: /tmp/hnvr-out/<slug>/init.mp4 + /tmp/hnvr-out/<slug>/<YYYY-MM-DD>/<HH-MM-SS.MMM>.mp4
 # Verify: cat init.mp4 frag.mp4 | ffprobe -   (fMP4 fragments need init segment)
 
+# Phase 1 S3 wrapper integration binary (file → MinIO/SeaweedFS)
+cabal build hnvr-s3-upload
+S3BIN=$(find dist-newstyle -name 'hnvr-s3-upload' -type f -executable | head -1)
+# Start MinIO locally (see pitfall #30 for the insecure-package bypass):
+#   nix build --impure --expr '(import <nixpkgs> { ... }).minio'
+#   MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin minio \
+#     server /tmp/minio-data --address :9100 &
+#   mc alias set local http://localhost:9100 minioadmin minioadmin
+#   mc mb local/hnvr-recordings
+$S3BIN http://localhost:9100 minioadmin minioadmin hnvr-recordings \
+  /tmp/hnvr-out/cam-197/init.mp4 cam-197/init.mp4
+
 # Run the binaries
 HNVR_NATS_URI="nats://nats:nats@localhost:4222" PORT=18001 \
   ./result/bin/hnvr-leader  # IHP app + NATS connect; /healthz on PORT
@@ -108,7 +120,8 @@ hnvr/
 │   └── nats-queue/      2017 lib + sClose → close patch baked in
 ├── hnvr-core/           REAL types: Id, Geometry, Logging, Prelude, Time, Segment
 ├── hnvr-nats/           REAL Bus (nats-queue wrapper) + Subjects
-├── hnvr-storage/        S3 client (stub)
+├── hnvr-storage/        REAL S3 wrapper (minio-hs, NOT amazonka — see pitfall #28)
+│                        + hnvr-s3-upload integration binary
 ├── hnvr-capture/        Fmp4 (REAL pure parser), Ffmpeg (REAL recording args),
 │                        Worker (stub); exe hnvr-record-frames (REAL)
 ├── hnvr-cv/             OnnxRuntime, Preprocess, Decode, Rules, AutoTrack,
@@ -294,6 +307,23 @@ ffprobe notes:
     `Milli = Fixed E3`. To pattern-match the underlying Integer, use
     `MkFixed` from `Data.Fixed`: `let ms = realToFrac dt; MkInteger n = ms`.
 
+28. **`amazonka-s3 2.0` doesn't compile under GHC 9.12 via cabal** — its
+    generated STS modules use `DuplicateRecordFields` patterns that fail
+    without the extension enabled. IHP's nix overlay patches this for
+    `nix build`, but cabal can't mirror it. **`Hnvr.Storage.S3` uses
+    `minio-hs` instead** — purpose-built for S3-compatible storage with
+    path-style by default. Same API surface (putObject/getObject/
+    presignUrl/listObjects/removeObject), no AWS-SDK baggage. Design
+    doc `02-tech-stack.md` still says amazonka; treat as superseded.
+
+29. **socks-0.5.6 doesn't compile under GHC 9.12** (pre-MonadFail API).
+    `cabal.project` has `constraints: socks >= 0.6.0` to force the
+    fixed version. minio-hs's upper bound doesn't reflect this.
+
+30. **MinIO is `marked insecure` in nixpkgs** — must build/bypass with
+    `nix build --impure --expr '(import <nixpkgs> { config.permittedInsecurePackages = [ "minio-..." ]; }).minio'`.
+    For local testing of the S3 wrapper. Production uses SeaweedFS SaaS.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -310,7 +340,7 @@ ffprobe notes:
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
-- [~] **Phase 1** — Recording MVP. **Slice 1 done (Aug 9 2026)**:
+- [~] **Phase 1** — Recording MVP. **Slice 1+2 done (Aug 9 2026)**:
       - ✅ Cameras probed (see fixture table above)
       - ✅ `Hnvr.Core.{Id, Time, Segment}` — Sha256 hex JSON, `Segment`
             type + `SegmentWritten` NATS envelope, time/object-key helpers
@@ -320,8 +350,13 @@ ffprobe notes:
             against all 3 of Sergey's cameras (HEVC UDP, H264 TCP,
             HEVC TCP/XM). Init + media fragments play via HLS-style concat
             with init.mp4 (single fragments need init to know track cfg).
-      - ⏳ `Hnvr.Storage.S3`, `CaptureWorker` state machine, schema, IHP
-            cameras CRUD, EventWriter, archive view, Crypto, sops-nix
+      - ✅ `Hnvr.Storage.S3` — minio-hs wrapper (NOT amazonka, see pitfall
+            #28). `putObjectBytes`/`getObjectBytes`/`presignGetUrl`/
+            `listObjectKeys`/`deleteObject`. Verified roundtrip against
+            local MinIO: init.mp4 + a fragment upload, byte-compare MATCH,
+            HLS-concat of uploaded fragment still plays (h264 3840×2160).
+      - ⏳ `CaptureWorker` state machine, schema, IHP cameras CRUD,
+            EventWriter, archive view, Crypto, sops-nix
 - [ ] Phase 1 — Recording MVP
 - [ ] Phase 2 — Live view + multi-host
 - [ ] Phase 3 — CV detection + tracking
