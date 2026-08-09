@@ -30,7 +30,7 @@ CREATE TABLE cameras (
     name            TEXT NOT NULL,
     rtsp_url        TEXT NOT NULL,
     rtsp_template   TEXT,
-    host            INET,
+    host            TEXT,
     port            INT NOT NULL DEFAULT 554,
     username        TEXT,
     password        TEXT,

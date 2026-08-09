@@ -14,7 +14,7 @@
     # Haskell overlay (jailbreaks, hasql pinning, etc.) evaluates against
     # the same nixpkgs rev as the rest of the flake.
     ihp = {
-      url = "github:digitallyinduced/ihp/7de9e445a64f08d316536d46c14ae2458e4a83c9";
+      url = "github:digitallyinduced/ihp/v1.6.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -46,6 +46,18 @@
         }));
         cabal-test-quickcheck =
           libHs.dontCheck (libHs.doJailbreak (libHs.markUnbroken prev.cabal-test-quickcheck));
+
+        # IHP codegen output (e.g. Generated/Statements/UpdateHost.hs) needs
+        # the IsScalar.encoder signature from hasql-mapping 0.1.0.2; older
+        # versions in nixpkgs don't have it. callHackageDirect bypasses the
+        # stale all-cabal-hashes index pinned in nixpkgs.
+        hasql-mapping = libHs.dontCheck (final.callHackageDirect
+          {
+            pkg = "hasql-mapping";
+            ver = "0.1.0.2";
+            sha256 = "1fliljpkm223hakd43jsi9bgiyahxn23j8a85j9cqlazwd5v8yaj";
+          }
+          { });
 
         # IHP ships without profiling libs; matching that here avoids
         # "Could not load module … Perhaps you haven't installed the
@@ -166,11 +178,23 @@
             hlint = hpkgs.hlint;
           };
           hooks = {
-            ormolu.enable = true;
-            hlint.enable = true;
+            ormolu = {
+              enable = true;
+              excludes = [ "^hnvr-web/gen/" "^vendored/" ];
+            };
+            hlint = {
+              enable = true;
+              excludes = [ "^hnvr-web/gen/" "^vendored/" ];
+            };
             nixpkgs-fmt.enable = true;
-            end-of-file-fixer.enable = true;
-            trim-trailing-whitespace.enable = true;
+            end-of-file-fixer = {
+              enable = true;
+              excludes = [ "^hnvr-web/gen/" "^vendored/" ];
+            };
+            trim-trailing-whitespace = {
+              enable = true;
+              excludes = [ "^hnvr-web/gen/" "^vendored/" ];
+            };
           };
         };
       in

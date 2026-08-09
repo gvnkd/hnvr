@@ -33,7 +33,7 @@ phased plan. This file is the cheat-sheet; the design docs are authoritative.
 | | |
 |---|---|
 | Language | Haskell, **GHC 9.12.3** (nixpkgs `haskell.packages.ghc912`, IHP overlay applied) |
-| Web | **IHP HEAD pinned at `7de9e44`** (Aug 7 2026) — wired via flake input |
+| Web | **IHP v1.6.0** (pinned via flake input `github:digitallyinduced/ihp/v1.6.0`) |
 | Build | cabal multi-package + Nix flake |
 | IPC | **NATS + JetStream** via @nats-queue@ (2017-era lib, patched for `network` >= 3.x; JetStream **deferred**) |
 | Capture | ffmpeg subprocess (record `-c:v copy` main; analysis decode sub) |
@@ -145,12 +145,15 @@ hnvr/
 ├── hnvr-cv/             OnnxRuntime, Preprocess, Decode, Rules, AutoTrack,
 │                        Tracker/Sort (all stubs)
 ├── hnvr-ptz/            Driver (REAL typeclass), Onvif (stub), Controller (stub)
-└── hnvr-web/            Library + 2 executables (LeaderMain, NodeMain)
-                         ├── src/Hnvr/Web.hs                 version stub
-                         ├── src/Hnvr/Web/Config.hs          IHP config + healthz + NATS init
-                         ├── src/Hnvr/Web/FrontController.hs RootApplication instances
-                         ├── app/LeaderMain.hs               IHP.Server.run + NATS via addInitializer
-                         └── app/NodeMain.hs                 withBus + subscribe hnvr.commands.>
+├── hnvr-web/            Library + 2 executables (LeaderMain, NodeMain)
+│                        ├── Application/Schema.sql   IHP schema source of truth
+│                        ├── regen.sh                 regen+patch IHP codegen (see pitfall #32)
+│                        ├── gen/Generated/...        IHP-generated types (committed)
+│                        ├── src/Hnvr/Web.hs          version stub
+│                        ├── src/Hnvr/Web/Config.hs   IHP config + healthz + NATS init
+│                        ├── src/Hnvr/Web/FrontController.hs RootApplication instances
+│                        ├── app/LeaderMain.hs        IHP.Server.run + NATS via addInitializer
+│                        └── app/NodeMain.hs          withBus + subscribe hnvr.commands.>
 ```
 
 ## External services (SaaS — Sergey operates, not us)
@@ -347,6 +350,25 @@ ffprobe notes:
     connection with `Network.Socket.getAddrInfo ... does not exist`. Always
     include dummy creds in the URI when the server has no auth.
 
+32. **IHP v1.6.0 codegen has a primary-key encoder bug** — Create*/Update*
+    /Fetch* statements wrap PK in `Encoders.nullable Mapping.encoder`
+    instead of `Encoders.nonNullable Mapping.encoder`. The build fails
+    with `Couldn't match type Id' "<table>" with Maybe a0`. Workaround:
+    run `hnvr-web/regen.sh` after every Schema.sql change — it patches
+    the generated files. Upstream IHP PR TBD.
+
+33. **IHP v1.6.0 generated types require many cabal default-extensions** —
+    when wiring `gen/` into hs-source-dirs, the cabal library stanza
+    needs `OverloadedStrings, OverloadedLabels, DuplicateRecordFields,
+    DisambiguateRecordFields, OverloadedRecordDot, NoFieldSelectors,
+    ImplicitParams` plus the IHP-standard set. See hnvr-web.cabal.
+
+34. **`hasql-mapping` 0.1.0.2 needed for IHP v1.6.0 generated code** —
+    nixpkgs pins 0.1.0.1 which lacks the `IsScalar.encoder` signature
+    the codegen expects. The flake.nix `hnvrHaskellOverlay` overrides via
+    `final.callHackageDirect` with the tarball hash. Bump hash if
+    hasql-mapping re-releases.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -363,36 +385,26 @@ ffprobe notes:
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
-- [~] **Phase 1** — Recording MVP. **Slice 1+2+3 done (Aug 9 2026)**:
+- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b-done-done (Aug 9 2026)**:
       - ✅ Cameras probed (see fixture table above)
       - ✅ `Hnvr.Core.{Id, Time, Segment}` — Sha256 hex JSON, `Segment`
             type + `SegmentWritten` NATS envelope, time/object-key helpers
       - ✅ `Hnvr.Capture.Fmp4` — pure streaming box parser (chunk-invariant)
       - ✅ `Hnvr.Capture.Ffmpeg` — recording args (typed-process + raw)
       - ✅ `hnvr-record-frames` integration binary — verified end-to-end
-            against all 3 of Sergey's cameras (HEVC UDP, H264 TCP,
-            HEVC TCP/XM). Init + media fragments play via HLS-style concat
-            with init.mp4 (single fragments need init to know track cfg).
-      - ✅ `Hnvr.Storage.S3` — minio-hs wrapper (NOT amazonka, see pitfall
-            #28). `putObjectBytes`/`getObjectBytes`/`presignGetUrl`/
-            `listObjectKeys`/`deleteObject`. Verified roundtrip against
-            local MinIO: init.mp4 + a fragment upload, byte-compare MATCH,
-            HLS-concat of uploaded fragment still plays (h264 3840×2160).
-      - ✅ `Hnvr.Capture.Worker` — CaptureWorker state machine
-            (Pending/Running/Backoff/FailedPermanent/Stopped). Catches all
-            exceptions in `runOnce`; exponential backoff (2/4/8/16/30s
-            capped); 5 failures/60s → FailedPermanent (5-min cooldown).
-            Per-fragment: sha256 + S3 put (with local spool fallback on S3
-            failure) + NATS publish of `SegmentWritten` on `hnvr.events`.
-            Verified via `hnvr-capture-loop` integration binary: 10s run
-            produced 10 S3 uploads + 9 NATS publishes (matching ~1 fps/cam
-            on 197). Backoff verified by passing broken RTSP URL.
-      - ⏳ `CaptureWorker` state machine, schema, IHP cameras CRUD,
-            EventWriter, archive view, Crypto, sops-nix
-            Remaining Phase 1: Schema.sql + IHP cameras CRUD + ffprobe
-            button (Slice 4), EventWriter on leader (Slice 5),
-            Archive view + m3u8 + hls.js (Slice 6),
-            Hnvr.Core.Crypto + sops-nix (Slice 7).
+            against all 3 of Sergey's cameras.
+      - ✅ `Hnvr.Storage.S3` — minio-hs wrapper.
+      - ✅ `Hnvr.Capture.Worker` — CaptureWorker state machine.
+            `hnvr-capture-loop` integration binary.
+      - ✅ `Application/Schema.sql` — Phase 1 subset (cameras + hosts).
+      - ✅ IHP v1.6.0 Generated types wired into hnvr-web (regen.sh patches
+            the codegen bug). `nix build .#hnvr-web` succeeds, producing
+            `hnvr-leader` + `hnvr-node` binaries with Generated.Camera /
+            Generated.Host types available.
+      - ⏳ Slice 4c: Cameras CRUD controllers + HSX views + ffprobe button
+      - ⏳ Slice 5: EventWriter on leader consuming hnvr.events
+      - ⏳ Slice 6: Archive view + m3u8 + hls.js
+      - ⏳ Slice 7: Hnvr.Core.Crypto AES-256-GCM + sops-nix wiring
 - [ ] Phase 1 — Recording MVP
 - [ ] Phase 2 — Live view + multi-host
 - [ ] Phase 3 — CV detection + tracking

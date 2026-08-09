@@ -1,0 +1,59 @@
+-- This file is auto generated and will be overriden regulary. Please edit `Application/Schema.sql` to change the Types\n"
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, InstanceSigs, MultiParamTypeClasses, TypeFamilies, DataKinds, TypeOperators, UndecidableInstances, ConstraintKinds, StandaloneDeriving  #-}
+{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches -Wno-ambiguous-fields #-}
+module Generated.ActualTypes.Camera where
+import IHP.HaskellSupport
+import IHP.ModelSupport
+import CorePrelude hiding (id)
+import Data.Time.Clock
+import Data.Time.LocalTime
+import qualified Data.Time.Calendar
+import qualified Data.List as List
+import qualified Data.ByteString as ByteString
+import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple.FromRow
+import Database.PostgreSQL.Simple.FromField hiding (Field, name)
+import Database.PostgreSQL.Simple.ToField hiding (Field)
+import qualified IHP.Controller.Param
+import GHC.TypeLits
+import Data.UUID (UUID)
+import Data.Default
+import qualified IHP.QueryBuilder as QueryBuilder
+import qualified Data.Proxy
+import GHC.Records
+import Data.Data
+import qualified Data.String.Conversions
+import qualified Data.Text.Encoding
+import qualified Data.Aeson
+import Database.PostgreSQL.Simple.Types (Query (Query), Binary ( .. ))
+import qualified Database.PostgreSQL.Simple.Types
+import IHP.Job.Types
+import IHP.Job.Queue (textToEnumJobStatus)
+import qualified Control.DeepSeq as DeepSeq
+import qualified Data.Dynamic
+import Data.Scientific
+import IHP.Hasql.FromRow (FromRowHasql(..))
+import qualified Hasql.Decoders as Decoders
+import qualified Hasql.Encoders
+import qualified Hasql.Implicits.Encoders
+import IHP.Hasql.Encoders ()
+import qualified Hasql.Mapping.IsScalar as Mapping
+import Hasql.PostgresqlTypes ()
+import Data.Bits ((.&.), (.|.))
+import Control.Monad (unless)
+import Generated.Enums
+import Generated.ActualTypes.PrimaryKeys
+data Camera' = Camera {id :: (Id' "cameras"), slug :: Text, name :: Text, rtspUrl :: Text, rtspTemplate :: (Maybe Text), host :: (Maybe Text), port :: Int, username :: (Maybe Text), password :: (Maybe Text), codec :: CodecKind, rtspSubUrl :: (Maybe Text), rtspSubTemplate :: (Maybe Text), useSubstreamForAnalysis :: Bool, substreamCodec :: CodecKind, substreamWidth :: (Maybe Int), substreamHeight :: (Maybe Int), recordAudio :: Bool, analysisFps :: Int, enabled :: Bool, retentionDays :: Int, assignedHost :: (Maybe Text), manualAssign :: Bool, createdAt :: UTCTime, updatedAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+
+type Camera = Camera'
+
+type instance GetTableName (Camera') = "cameras"
+type instance GetModelByTableName "cameras" = Camera
+
+
+instance IHP.ModelSupport.Table (Camera') where
+    tableName = "cameras"
+    columnNames = ["id","slug","name","rtsp_url","rtsp_template","host","port","username","password","codec","rtsp_sub_url","rtsp_sub_template","use_substream_for_analysis","substream_codec","substream_width","substream_height","record_audio","analysis_fps","enabled","retention_days","assigned_host","manual_assign","created_at","updated_at"]
+    primaryKeyColumnNames = ["id"]
+
+

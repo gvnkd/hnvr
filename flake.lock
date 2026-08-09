@@ -1082,17 +1082,17 @@
         "systems": "systems_8"
       },
       "locked": {
-        "lastModified": 1786084902,
-        "narHash": "sha256-AMvpH4wjveYev+ToR7JdSG48JFTdwxlsZ4/lICVnXuc=",
+        "lastModified": 1782035057,
+        "narHash": "sha256-rrIzC8FHmNsWcWgMtjjIAFGlvznzu9iAk06rtU3i5+4=",
         "owner": "digitallyinduced",
         "repo": "ihp",
-        "rev": "7de9e445a64f08d316536d46c14ae2458e4a83c9",
+        "rev": "71b7bb685d2a60b20cd19c8a810c8931369e5efb",
         "type": "github"
       },
       "original": {
         "owner": "digitallyinduced",
+        "ref": "v1.6.0",
         "repo": "ihp",
-        "rev": "7de9e445a64f08d316536d46c14ae2458e4a83c9",
         "type": "github"
       }
     },
