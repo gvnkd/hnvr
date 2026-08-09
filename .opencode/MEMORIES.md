@@ -131,10 +131,11 @@ hnvr/
 ├── flake.lock           pinned nixpkgs + flake-utils + pre-commit-hooks + ihp
 ├── nix/
 │   ├── module.nix       NixOS module: hnvr-leader service
-│   └── nats-server.nix  NixOS module: NATS + JetStream
+│   ├── nats-server.nix  NixOS module: NATS + JetStream
+│   └── secrets-template.yaml  sops-nix template (HNVR_DATA_KEY + S3 + DB)
 ├── vendored/
 │   └── nats-queue/      2017 lib + sClose → close patch baked in
-├── hnvr-core/           REAL types: Id, Geometry, Logging, Prelude, Time, Segment
+├── hnvr-core/           REAL types: Id, Geometry, Logging, Prelude, Time, Segment, Crypto
 ├── hnvr-nats/           REAL Bus (nats-queue wrapper) + Subjects
 ├── hnvr-storage/        REAL S3 wrapper (minio-hs, NOT amazonka — see pitfall #28)
 │                        + hnvr-s3-upload integration binary
@@ -414,22 +415,25 @@ ffprobe notes:
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
-- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c+5+6 done (Aug 9 2026)**:
+- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c+5+6+7a done (Aug 9 2026)**:
       - ✅ Cameras probed; core types; Fmp4; Ffmpeg; record-frames;
             minio-hs S3 wrapper; CaptureWorker + capture-loop binary
       - ✅ Schema.sql + IHP v1.6.0 Generated types + Cameras CRUD +
             ffprobe button
-      - ✅ Slice 5: `Hnvr.Web.EventWriter` — NATS → Postgres drain loop
-            (inserts SegmentWritten envelopes into `segments` table).
-      - ✅ Slice 6: `Hnvr.Web.Controller.Archive` — `PlayerAction`
-            renders @\<video\>@ + hls.js (CDN); `PlaylistAction`
-            generates VOD m3u8 with presigned S3 GET URLs for each
-            segment (1-hour expiry, EXT-X-VERSION:6 + EXT-X-MAP for
-            fMP4 init.mp4). "Watch archive" button on camera Show view.
-            S3 config read from env vars per request (HNVR_S3_*) until
-            Slice 7 (sops-nix).
-      - ⏳ Slice 7: Hnvr.Core.Crypto AES-256-GCM + sops-nix wiring
-- [ ] Phase 1 — Recording MVP
+      - ✅ Slice 5: EventWriter (NATS → PG drain loop)
+      - ✅ Slice 6: Archive playback (m3u8 + hls.js)
+      - ✅ Slice 7a: `Hnvr.Core.Crypto` AES-256-GCM (cryptonite via
+            lower-level aeadAppendHeader/aeadEncrypt/aeadFinalize API —
+            `aeadSimpleEncrypt`/`aeadSimpleDecrypt` have a tag-format
+            bug in cryptonite-0.30 that fails auth). Round-trip
+            verified via `hnvr-crypto-test` binary against both
+            generated and explicit keys. sops-nix template at
+            `nix/secrets-template.yaml` (Sergey fills in production).
+      - ⏳ Slice 7b: Schema migration (`password TEXT` →
+            `password_enc BYTEA` + `password_nonce BYTEA`) + Cameras
+            CRUD wiring to encrypt on Create/Update, decrypt on Probe
+- [ ] Phase 1 — Recording MVP (functionally complete; Slice 7b is the
+      operational security gate)
 - [ ] Phase 2 — Live view + multi-host
 - [ ] Phase 3 — CV detection + tracking
 - [ ] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate
