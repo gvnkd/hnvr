@@ -9,7 +9,12 @@ module Generated.Statements (
     module Generated.Statements.CreateCamera,
     module Generated.Statements.UpdateCamera,
     module Generated.Statements.FetchCamera,
-    module Generated.Statements.CreateManyCamera
+    module Generated.Statements.CreateManyCamera,
+    module Generated.Statements.RowDecoderSegment,
+    module Generated.Statements.CreateSegment,
+    module Generated.Statements.UpdateSegment,
+    module Generated.Statements.FetchSegment,
+    module Generated.Statements.CreateManySegment
 ) where
 import qualified Generated.Statements.RowDecoderHost
 import qualified Generated.Statements.CreateHost
@@ -21,4 +26,9 @@ import qualified Generated.Statements.CreateCamera
 import qualified Generated.Statements.UpdateCamera
 import qualified Generated.Statements.FetchCamera
 import qualified Generated.Statements.CreateManyCamera
+import qualified Generated.Statements.RowDecoderSegment
+import qualified Generated.Statements.CreateSegment
+import qualified Generated.Statements.UpdateSegment
+import qualified Generated.Statements.FetchSegment
+import qualified Generated.Statements.CreateManySegment
 

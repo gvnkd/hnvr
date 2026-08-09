@@ -22,6 +22,7 @@ where
 
 import qualified Control.Exception as E
 import qualified Hnvr.Nats.Bus as Bus
+import Hnvr.Web.EventWriter (startEventWriter)
 import IHP.FrameworkConfig
 import IHP.FrameworkConfig.Types (FrameworkConfig)
 import IHP.ModelSupport (ModelContext)
@@ -35,21 +36,22 @@ import qualified System.Environment as Env
 config :: ConfigBuilder
 config = do
   option $ CustomMiddleware healthzMiddleware
-  addInitializer connectNats
+  addInitializer connectNatsAndStartEventWriter
 
--- | Connect to the NATS bus using @HNVR_NATS_URI@ (default localhost).
--- Best-effort: if NATS is unreachable (race with systemd ordering, network
--- not yet up, broker down), we log and continue. Phase 0 needs /healthz to
--- succeed even when NATS is flapping. systemd's @Restart=on-failure@ will
--- still catch real crashes. The bus handle is intentionally not stored
--- anywhere yet; Phase 1's EventWriter will thread it through an MVar.
-connectNats :: (?context :: FrameworkConfig, ?modelContext :: ModelContext) => IO ()
-connectNats = do
+-- | Connect to the NATS bus using @HNVR_NATS_URI@ (default localhost),
+-- then spawn the EventWriter drain loop on the same bus. Best-effort: if
+-- NATS is unreachable (race with systemd ordering, network not yet up,
+-- broker down), we log and continue. Phase 0 needs /healthz to succeed
+-- even when NATS is flapping. systemd's @Restart=on-failure@ will still
+-- catch real crashes.
+connectNatsAndStartEventWriter :: (?context :: FrameworkConfig, ?modelContext :: ModelContext) => IO ()
+connectNatsAndStartEventWriter = do
   let defaultUri = "nats://nats:nats@localhost:4222"
   uri <- maybe defaultUri id <$> Env.lookupEnv "HNVR_NATS_URI"
   let connect' = do
-        _bus <- Bus.connect Bus.defaultConfig {Bus.busUri = uri}
+        bus <- Bus.connect Bus.defaultConfig {Bus.busUri = uri}
         putStrLn ("HNVR leader connected to NATS: " <> cs (uri :: String))
+        startEventWriter bus ?modelContext
   connect' `E.catch` \(e :: E.SomeException) ->
     putStrLn ("HNVR leader: NATS connect failed (continuing without bus): " <> cs (show e))
 

@@ -1,7 +1,7 @@
 -- This file is auto generated and will be overriden regulary. Please edit `Application/Schema.sql` to change the Types\n"
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, InstanceSigs, MultiParamTypeClasses, TypeFamilies, DataKinds, TypeOperators, UndecidableInstances, ConstraintKinds, StandaloneDeriving  #-}
-{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches #-}
-module Generated.ActualTypes.PrimaryKeys where
+{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches -Wno-ambiguous-fields #-}
+module Generated.ActualTypes.Segment where
 import IHP.HaskellSupport
 import IHP.ModelSupport
 import CorePrelude hiding (id)
@@ -42,9 +42,18 @@ import Hasql.PostgresqlTypes ()
 import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
-type instance PrimaryKey "hosts" = Text
-instance Default (Id' "hosts") where def = Id def
-type instance PrimaryKey "cameras" = UUID
-instance Default (Id' "cameras") where def = Id def
-type instance PrimaryKey "segments" = UUID
-instance Default (Id' "segments") where def = Id def
+import Generated.ActualTypes.PrimaryKeys
+data Segment' = Segment {id :: (Id' "segments"), cameraId :: UUID, startTs :: UTCTime, endTs :: UTCTime, hostId :: (Maybe Text), objectKey :: Text, bytes :: Integer, sha256 :: Text, hasAudio :: Bool, createdAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+
+type Segment = Segment'
+
+type instance GetTableName (Segment') = "segments"
+type instance GetModelByTableName "segments" = Segment
+
+
+instance IHP.ModelSupport.Table (Segment') where
+    tableName = "segments"
+    columnNames = ["id","camera_id","start_ts","end_ts","host_id","object_key","bytes","sha256","has_audio","created_at"]
+    primaryKeyColumnNames = ["id"]
+
+

@@ -54,5 +54,23 @@ CREATE TABLE cameras (
 
 CREATE INDEX cameras_assigned_idx ON cameras (assigned_host) WHERE enabled;
 
+CREATE TABLE segments (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id       UUID NOT NULL,
+    start_ts        TIMESTAMP WITH TIME ZONE NOT NULL,
+    end_ts          TIMESTAMP WITH TIME ZONE NOT NULL,
+    host_id         TEXT,
+    object_key      TEXT NOT NULL,
+    bytes           BIGINT NOT NULL,
+    sha256          TEXT NOT NULL,
+    has_audio       BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+    FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE SET NULL,
+    UNIQUE (camera_id, start_ts)
+);
+
+CREATE INDEX segments_cam_start_idx ON segments (camera_id, start_ts DESC);
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";

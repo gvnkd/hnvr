@@ -412,28 +412,18 @@ ffprobe notes:
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
-- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c done (Aug 9 2026)**:
-      - ✅ Cameras probed (see fixture table above)
-      - ✅ `Hnvr.Core.{Id, Time, Segment}` — Sha256 hex JSON, `Segment`
-            type + `SegmentWritten` NATS envelope, time/object-key helpers
-      - ✅ `Hnvr.Capture.Fmp4` — pure streaming box parser (chunk-invariant)
-      - ✅ `Hnvr.Capture.Ffmpeg` — recording args (typed-process + raw)
-      - ✅ `hnvr-record-frames` integration binary — verified end-to-end
-            against all 3 of Sergey's cameras.
-      - ✅ `Hnvr.Storage.S3` — minio-hs wrapper.
-      - ✅ `Hnvr.Capture.Worker` — CaptureWorker state machine.
-            `hnvr-capture-loop` integration binary.
-      - ✅ `Application/Schema.sql` — Phase 1 subset (cameras + hosts).
-      - ✅ IHP v1.6.0 Generated types wired into hnvr-web (regen.sh patches
-            the codegen bug). `nix build .#hnvr-web` succeeds, producing
-            `hnvr-leader` + `hnvr-node` binaries with Generated.Camera /
-            Generated.Host types available.
-      - ✅ Slice 4c: Cameras CRUD controller + HSX views (Index/Show/New/Edit)
-            + Probe action (shells out to ffprobe, parses JSON, updates codec).
-            FrontController wired with `parseRoute @CamerasController`.
-            Builds verified via `nix build`. Live test pending (needs leader VM
-            + Postgres — Sergey operates).
-      - ⏳ Slice 5: EventWriter on leader consuming hnvr.events
+- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c+5 done (Aug 9 2026)**:
+      - ✅ Cameras probed; core types; Fmp4; Ffmpeg; record-frames;
+            minio-hs S3 wrapper; CaptureWorker + capture-loop binary
+      - ✅ Schema.sql + IHP v1.6.0 Generated types + Cameras CRUD +
+            ffprobe button
+      - ✅ Slice 5: `Hnvr.Web.EventWriter` — subscribes to
+            `hnvr.events`, parses `SegmentWritten` JSON, inserts into
+            `segments` table via IHP `createRecord`. Drain loop runs in
+            background `async` started by the leader's
+            `connectNatsAndStartEventWriter` initializer. Idempotent via
+            `UNIQUE (camera_id, start_ts)` constraint + per-message
+            `catch` handler.
       - ⏳ Slice 6: Archive view + m3u8 + hls.js
       - ⏳ Slice 7: Hnvr.Core.Crypto AES-256-GCM + sops-nix wiring
 - [ ] Phase 1 — Recording MVP
