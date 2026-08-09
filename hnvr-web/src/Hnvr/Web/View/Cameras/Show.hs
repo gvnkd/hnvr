@@ -18,7 +18,10 @@ instance View ShowView where
     [hsx|
       <div class="header">
         <h1>{camera.slug}</h1>
-        <a class="btn" href={editUrl}>Edit</a>
+        <span>
+          <a class="btn" href={editUrl}>Edit</a>
+          <a class="btn" href={archiveUrl}>Watch archive</a>
+        </span>
       </div>
       <table>
         <tr><th>Name</th><td>{camera.name}</td></tr>
@@ -39,3 +42,4 @@ instance View ShowView where
     |]
     where
       editUrl = "/cameras/" <> tshow camera.id <> "/edit"
+      archiveUrl = "/cameras/" <> tshow camera.id <> "/archive"

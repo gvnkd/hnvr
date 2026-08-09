@@ -13,11 +13,13 @@ library
         Hnvr.Web.FrontController
         Hnvr.Web.Controller.Cameras
         Hnvr.Web.Controller.Cameras.Probe
+        Hnvr.Web.Controller.Archive
         Hnvr.Web.View.Layout
         Hnvr.Web.View.Cameras.Index
         Hnvr.Web.View.Cameras.New
         Hnvr.Web.View.Cameras.Edit
         Hnvr.Web.View.Cameras.Show
+        Hnvr.Web.View.Archive.Player
         -- IHP-generated from Application/Schema.sql.
         -- Regenerate via:
         --   cd hnvr-web && nix run --accept-flake-config \

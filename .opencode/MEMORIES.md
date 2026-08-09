@@ -154,8 +154,10 @@ hnvr/
 │                        ├── src/Hnvr/Web/FrontController.hs RootApplication + parseRoute @CamerasController
 │                        ├── src/Hnvr/Web/Controller/Cameras.hs      CRUD + Probe action
 │                        ├── src/Hnvr/Web/Controller/Cameras/Probe.hs ffprobe JSON parser
+│                        ├── src/Hnvr/Web/Controller/Archive.hs       PlayerAction + m3u8 PlaylistAction
 │                        ├── src/Hnvr/Web/View/Layout.hs             default HTML layout
 │                        ├── src/Hnvr/Web/View/Cameras/{Index,New,Edit,Show}.hs
+│                        ├── src/Hnvr/Web/View/Archive/Player.hs      @\<video\>@ + hls.js
 │                        ├── app/LeaderMain.hs        IHP.Server.run + NATS via addInitializer
 │                        └── app/NodeMain.hs          withBus + subscribe hnvr.commands.>
 ```
@@ -412,19 +414,20 @@ ffprobe notes:
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
-- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c+5 done (Aug 9 2026)**:
+- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c+5+6 done (Aug 9 2026)**:
       - ✅ Cameras probed; core types; Fmp4; Ffmpeg; record-frames;
             minio-hs S3 wrapper; CaptureWorker + capture-loop binary
       - ✅ Schema.sql + IHP v1.6.0 Generated types + Cameras CRUD +
             ffprobe button
-      - ✅ Slice 5: `Hnvr.Web.EventWriter` — subscribes to
-            `hnvr.events`, parses `SegmentWritten` JSON, inserts into
-            `segments` table via IHP `createRecord`. Drain loop runs in
-            background `async` started by the leader's
-            `connectNatsAndStartEventWriter` initializer. Idempotent via
-            `UNIQUE (camera_id, start_ts)` constraint + per-message
-            `catch` handler.
-      - ⏳ Slice 6: Archive view + m3u8 + hls.js
+      - ✅ Slice 5: `Hnvr.Web.EventWriter` — NATS → Postgres drain loop
+            (inserts SegmentWritten envelopes into `segments` table).
+      - ✅ Slice 6: `Hnvr.Web.Controller.Archive` — `PlayerAction`
+            renders @\<video\>@ + hls.js (CDN); `PlaylistAction`
+            generates VOD m3u8 with presigned S3 GET URLs for each
+            segment (1-hour expiry, EXT-X-VERSION:6 + EXT-X-MAP for
+            fMP4 init.mp4). "Watch archive" button on camera Show view.
+            S3 config read from env vars per request (HNVR_S3_*) until
+            Slice 7 (sops-nix).
       - ⏳ Slice 7: Hnvr.Core.Crypto AES-256-GCM + sops-nix wiring
 - [ ] Phase 1 — Recording MVP
 - [ ] Phase 2 — Live view + multi-host
