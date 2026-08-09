@@ -30,7 +30,7 @@ instance View NewView where
             {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl}
             {textFieldFor "rtspSubUrl" "RTSP URL (sub, optional)" (fromMaybe "" camera.rtspSubUrl)}
             {textFieldFor "username" "Username" (fromMaybe "" camera.username)}
-            {textFieldFor "password" "Password" (fromMaybe "" camera.password)}
+            {textFieldFor "password" "Password (stored encrypted)" ("" :: Text)}
             {textFieldFor "host" "Host IP" (fromMaybe "" camera.host)}
             {textFieldFor "port" "Port" (tshow camera.port)}
             <div class="field-row">

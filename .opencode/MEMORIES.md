@@ -153,8 +153,9 @@ hnvr/
 │                        ├── src/Hnvr/Web.hs                 version stub
 │                        ├── src/Hnvr/Web/Config.hs          IHP config + healthz + NATS init
 │                        ├── src/Hnvr/Web/FrontController.hs RootApplication + parseRoute @CamerasController
-│                        ├── src/Hnvr/Web/Controller/Cameras.hs      CRUD + Probe action
+│                        ├── src/Hnvr/Web/Controller/Cameras.hs      CRUD + Probe action (encrypts password on Create/Update)
 │                        ├── src/Hnvr/Web/Controller/Cameras/Probe.hs ffprobe JSON parser
+│                        ├── src/Hnvr/Web/Controller/Support/Crypto.hs encryptPassword / decryptPassword / requireKey
 │                        ├── src/Hnvr/Web/Controller/Archive.hs       PlayerAction + m3u8 PlaylistAction
 │                        ├── src/Hnvr/Web/View/Layout.hs             default HTML layout
 │                        ├── src/Hnvr/Web/View/Cameras/{Index,New,Edit,Show}.hs
@@ -415,25 +416,21 @@ ffprobe notes:
 - [x] **Phase 0** — Bootstrap done. IHP wired, NATS bus implemented and
       connected at leader + node boot, `/healthz` returns 200, both NixOS
       VMs build and start their services, CI green for `nix build`.
-- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c+5+6+7a done (Aug 9 2026)**:
-      - ✅ Cameras probed; core types; Fmp4; Ffmpeg; record-frames;
-            minio-hs S3 wrapper; CaptureWorker + capture-loop binary
-      - ✅ Schema.sql + IHP v1.6.0 Generated types + Cameras CRUD +
-            ffprobe button
-      - ✅ Slice 5: EventWriter (NATS → PG drain loop)
-      - ✅ Slice 6: Archive playback (m3u8 + hls.js)
-      - ✅ Slice 7a: `Hnvr.Core.Crypto` AES-256-GCM (cryptonite via
-            lower-level aeadAppendHeader/aeadEncrypt/aeadFinalize API —
-            `aeadSimpleEncrypt`/`aeadSimpleDecrypt` have a tag-format
-            bug in cryptonite-0.30 that fails auth). Round-trip
-            verified via `hnvr-crypto-test` binary against both
-            generated and explicit keys. sops-nix template at
-            `nix/secrets-template.yaml` (Sergey fills in production).
-      - ⏳ Slice 7b: Schema migration (`password TEXT` →
-            `password_enc BYTEA` + `password_nonce BYTEA`) + Cameras
-            CRUD wiring to encrypt on Create/Update, decrypt on Probe
-- [ ] Phase 1 — Recording MVP (functionally complete; Slice 7b is the
-      operational security gate)
+- [~] **Phase 1** — Recording MVP. **Slice 1+2+3+4a+4b+4c+5+6+7a+7b done (Aug 9 2026)**:
+      - ✅ Full recording pipeline verified end-to-end on Sergey's 3 cameras
+      - ✅ IHP v1.6.0 schema + Cameras CRUD + ffprobe button
+      - ✅ EventWriter (NATS → PG) + Archive playback (m3u8 + hls.js)
+      - ✅ Slice 7a: `Hnvr.Core.Crypto` AES-256-GCM + sops-nix template
+      - ✅ Slice 7b: Schema migrated `password TEXT` → `password_enc BYTEA`
+            + `password_nonce BYTEA`. Cameras Create/Update encrypt on
+            write via `Hnvr.Web.Controller.Support.Crypto`; UpdateAction
+            skips re-encryption when the form's password field is blank
+            (keep existing). Form labels updated to make this clear.
+            Decrypt path (`decryptPassword`) is wired for ProbeAction
+            (deferred until rtsp_template rendering lands — currently
+            rtsp_url already has creds embedded so Probe uses it
+            directly).
+- [x] **Phase 1 — Recording MVP complete** (code; live VM test pending).
 - [ ] Phase 2 — Live view + multi-host
 - [ ] Phase 3 — CV detection + tracking
 - [ ] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate

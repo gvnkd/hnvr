@@ -12,6 +12,7 @@ module Hnvr.Web.Controller.Cameras
 
 import Generated.Types
 import Hnvr.Web.Controller.Cameras.Probe (ProbeInfo (..), probe)
+import Hnvr.Web.Controller.Support.Crypto (decryptPassword, encryptPassword)
 import Hnvr.Web.View.Cameras.Edit
 import Hnvr.Web.View.Cameras.Index
 import Hnvr.Web.View.Cameras.New
@@ -55,9 +56,14 @@ instance Controller CamerasController where
     render EditView {..}
 
   action CreateAction = do
-    let camera =
+    let camera0 =
           newRecord @Camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "host", "port", "username", "password", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "enabled", "retentionDays", "assignedHost", "manualAssign"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "enabled", "retentionDays", "assignedHost", "manualAssign"]
+        plaintext = paramOrDefault ("" :: Text) "password"
+    (enc, nonce) <- liftIO (encryptPassword plaintext)
+    let camera = camera0
+          |> set #passwordEnc (Just enc)
+          |> set #passwordNonce (Just nonce)
     if camera |> isValid
       then do
         camera <- camera |> createRecord
@@ -69,13 +75,22 @@ instance Controller CamerasController where
     camera <- fetch cameraId
     let camera' =
           camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "host", "port", "username", "password", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "enabled", "retentionDays", "assignedHost", "manualAssign"]
-    if camera' |> isValid
+            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "enabled", "retentionDays", "assignedHost", "manualAssign"]
+        plaintext = paramOrNothing "password" :: Maybe Text
+    camera'' <- case plaintext of
+      Nothing -> pure camera'
+      Just "" -> pure camera'
+      Just pw -> do
+        (enc, nonce) <- liftIO (encryptPassword pw)
+        pure (camera'
+                |> set #passwordEnc (Just enc)
+                |> set #passwordNonce (Just nonce))
+    if camera'' |> isValid
       then do
-        camera'' <- camera' |> updateRecord
+        camera''' <- camera'' |> updateRecord
         setSuccessMessage "Camera updated"
-        redirectTo ShowAction {cameraId = camera''.id}
-      else render EditView {camera = camera'}
+        redirectTo ShowAction {cameraId = camera'''.id}
+      else render EditView {camera = camera''}
 
   action DeleteAction {cameraId} = do
     camera <- fetch cameraId

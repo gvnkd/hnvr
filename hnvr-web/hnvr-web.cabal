@@ -14,6 +14,7 @@ library
         Hnvr.Web.Controller.Cameras
         Hnvr.Web.Controller.Cameras.Probe
         Hnvr.Web.Controller.Archive
+        Hnvr.Web.Controller.Support.Crypto
         Hnvr.Web.View.Layout
         Hnvr.Web.View.Cameras.Index
         Hnvr.Web.View.Cameras.New
