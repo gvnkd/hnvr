@@ -31,6 +31,7 @@ import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime)
+import Hnvr.Core.Logging (logInfo)
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (health)
@@ -68,7 +69,7 @@ instance ToJSON Health where
 startHealthReporter :: Bus -> Text -> IO ()
 startHealthReporter bus host = do
   _ <- async loop
-  putStrLn ("HNVR HealthReporter: publishing hnvr.health." <> T.unpack host <> " every 5s")
+  logInfo ("HealthReporter: publishing hnvr.health." <> host <> " every 5s")
   where
     loop = forever $ do
       now <- getCurrentTime

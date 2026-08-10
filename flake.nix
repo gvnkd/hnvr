@@ -53,6 +53,7 @@
           postPatch = (old.postPatch or "") + ''
             substituteInPlace Network/Nats.hs --replace "S.sClose" "S.close"
           '';
+          patches = (old.patches or [ ]) ++ [ ./nix/nats-queue-ipv6-fallback.patch ];
         }));
         cabal-test-quickcheck =
           libHs.dontCheck (libHs.doJailbreak (libHs.markUnbroken prev.cabal-test-quickcheck));
@@ -389,6 +390,7 @@
                 initialDatabases = [{
                   name = "hnvr";
                   user = "hnvr";
+                  schema = ./hnvr-web/Application/Schema.sql;
                 }];
                 hbaConf = ''
                   local all all trust

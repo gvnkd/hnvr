@@ -20,6 +20,7 @@ import Control.Monad (forever, void)
 import Data.Maybe (maybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Hnvr.Core.Logging (logInfo)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Node.ConfigWatcher (startConfigWatcher)
 import Hnvr.Node.HealthReporter (startHealthReporter)
@@ -33,6 +34,6 @@ main = do
     host <- maybe "hnvr-1" T.pack <$> Env.lookupEnv "HNVR_HOST"
     startHealthReporter bus host
     startConfigWatcher bus host
-    putStrLn $ "hnvr-node connected to NATS: " <> T.unpack uri
+    logInfo ("node: connected to NATS: " <> uri)
     void $ forever $ do
       threadDelay 1000000000

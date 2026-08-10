@@ -27,7 +27,7 @@ module Hnvr.Web.MediaMTXConfigSyncer
 where
 
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException, catch)
+import Control.Exception (SomeException, bracket, catch)
 import Control.Monad (forever, void, when)
 import Data.Aeson (Value (..), object, (.=))
 import qualified Data.Aeson as Aeson
@@ -43,9 +43,10 @@ import Database.PostgreSQL.Simple (Connection)
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Database.PostgreSQL.Simple.Notification as PG
 import Generated.Types
+import Hnvr.Core.Logging (logError, logInfo)
 import IHP.Fetch (fetch)
 import IHP.HaskellSupport ((|>))
-import IHP.ModelSupport (ModelContext, sqlExec)
+import IHP.ModelSupport (ModelContext)
 import IHP.QueryBuilder (orderByAsc, query)
 import Network.HTTP.Client (Manager, RequestBody (..))
 import qualified Network.HTTP.Client as HC
@@ -73,15 +74,21 @@ startMediaMTXConfigSyncer :: (?modelContext :: ModelContext) => IO ()
 startMediaMTXConfigSyncer = do
   ensureTrigger
   _ <- async listenLoop
-  putStrLn "HNVR MediaMTXConfigSyncer: started, listening on cameras_events"
+  logInfo "MediaMTXConfigSyncer: started, listening on cameras_events"
 
 -- | Idempotently install the @cameras_events@ NOTIFY trigger. Safe to
 -- call on every leader boot.
-ensureTrigger :: (?modelContext :: ModelContext) => IO ()
+--
+-- Bypasses Hasql (IHP's @unsafeSqlExec @ is a no-row decoder alias and
+-- fails DDL with @UnexpectedResultStatementError "Empty bytes"@ on
+-- IHP v1.6.0 — see project pitfall #42). Uses postgresql-simple on a
+-- one-shot connection instead; the same lib already powers our LISTEN
+-- loop below.
+ensureTrigger :: IO ()
 ensureTrigger = do
-  void $ sqlExec triggerFuncSql ()
-  void $ sqlExec dropTriggerSql ()
-  void $ sqlExec createTriggerSql ()
+  dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
+  bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn ->
+    mapM_ (PG.execute_ conn) [triggerFuncSql, dropTriggerSql, createTriggerSql]
   where
     triggerFuncSql =
       "CREATE OR REPLACE FUNCTION hnvr_notify_cameras_events()\
@@ -116,7 +123,7 @@ listenLoop = do
   syncOnce mgr apiBase cfgPath
   listenWith dbUrl (const $ syncOnce mgr apiBase cfgPath)
     `catch` \(e :: SomeException) ->
-      putStrLn ("HNVR MediaMTXConfigSyncer: LISTEN loop died: " <> show e)
+      logError ("MediaMTXConfigSyncer: LISTEN loop died: " <> T.pack (show e))
 
 -- | Default DB URL matches IHP's. Real deployments set DATABASE_URL.
 defaultDbUrl :: String
@@ -127,7 +134,7 @@ listenWith :: BS.ByteString -> (PG.Notification -> IO ()) -> IO ()
 listenWith dbUrl onNotif = do
   conn <- PG.connectPostgreSQL dbUrl
   _ <- PG.execute_ conn "LISTEN cameras_events"
-  putStrLn "HNVR MediaMTXConfigSyncer: LISTEN cameras_events"
+  logInfo "MediaMTXConfigSyncer: LISTEN cameras_events"
   forever $ do
     n <- PG.getNotification conn
     onNotif n
@@ -144,7 +151,7 @@ syncOnce mgr apiBase cfgPath = do
   writeAtomic cfgPath yaml
   pushPaths mgr apiBase cameras
     `catch` \(e :: SomeException) ->
-      putStrLn ("HNVR MediaMTXConfigSyncer: REST push failed (file still written): " <> show e)
+      logError ("MediaMTXConfigSyncer: REST push failed (file still written): " <> T.pack (show e))
 
 -- | Atomic file write: write to @<path>.tmp@ then rename. Avoids mediamtx
 -- reading a partially-written file on SIGHUP/restart.
@@ -201,11 +208,12 @@ pushPaths mgr apiBase cameras = do
   mapM_ (uncurry (putPath mgr apiBase)) toPut
   mapM_ (deletePath mgr apiBase) toDelete
   when (not (null toPut) || not (null toDelete)) $
-    putStrLn $
-      "HNVR MediaMTXConfigSyncer: pushed "
-        <> show (length toPut)
-        <> " paths, deleted "
-        <> show (length toDelete)
+    logInfo
+      ( "MediaMTXConfigSyncer: pushed "
+          <> T.pack (show (length toPut))
+          <> " paths, deleted "
+          <> T.pack (show (length toDelete))
+      )
 
 -- | @GET /v2/config/paths@ → list of path IDs. mediamtx returns a JSON
 -- object whose top-level keys are path names.

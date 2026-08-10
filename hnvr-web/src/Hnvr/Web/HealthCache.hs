@@ -38,6 +38,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import Data.Time.Clock (getCurrentTime)
+import Hnvr.Core.Logging (logError, logInfo)
 import Hnvr.Nats.Bus (Bus, Message (..), Subscription)
 import qualified Hnvr.Nats.Bus as Bus
 import IHP.ModelSupport (ModelContext, sqlExec)
@@ -60,7 +61,7 @@ startHealthCache bus = do
   ref <- newIORef Map.empty
   sub <- Bus.subscribe bus "hnvr.health.>"
   _ <- async (drain sub ref)
-  putStrLn "HNVR HealthCache: subscribed to hnvr.health.>"
+  logInfo "HealthCache: subscribed to hnvr.health.>"
   pure (HealthCache ref)
 
 drain :: (?modelContext :: ModelContext) => Subscription -> IORef HealthSnapshot -> IO ()
@@ -69,7 +70,7 @@ drain sub ref = forever $ do
   case Aeson.decodeStrict' (msgPayload msg) :: Maybe Aeson.Value of
     Just v ->
       handleHealth msg v ref `catch` \(e :: SomeException) ->
-        putStrLn ("HNVR HealthCache: handle failed: " <> show e)
+        logError ("HealthCache: handle failed: " <> T.pack (show e))
     Nothing -> pure ()
 
 -- | Parse host from the subject (@hnvr.health.<host>@), update IORef,

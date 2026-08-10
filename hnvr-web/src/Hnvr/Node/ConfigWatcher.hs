@@ -28,7 +28,7 @@ import Data.Aeson.Types (withObject, (.:))
 import qualified Data.ByteString as B
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
+import Hnvr.Core.Logging (logInfo, logWarn)
 import Hnvr.Nats.Bus (Bus, Message (..))
 import qualified Hnvr.Nats.Bus as Bus
 
@@ -68,12 +68,12 @@ startConfigWatcher bus host = do
   _ <- async assignLoop
   _ <- async (controlLoop host)
   _ <- async configLoop
-  putStrLn
-    ( "HNVR ConfigWatcher: subscribed to hnvr.commands.assign.>, \
+  logInfo
+    ( "ConfigWatcher: subscribed to hnvr.commands.assign.>, \
       \hnvr.commands.control."
-        <> T.unpack host
+        <> host
         <> ".>, and hnvr.config.cameras.> as "
-        <> T.unpack host
+        <> host
     )
   where
     assignLoop =
@@ -102,15 +102,15 @@ handleAssign host msg =
   case decodeStrict' (msgPayload msg) :: Maybe AssignMsg of
     Just am -> do
       let ours = am.amHost == host
-      TIO.putStrLn $
-        "[ConfigWatcher] assign "
-          <> am.amSlug
-          <> " -> "
-          <> am.amHost
-          <> (if ours then " (ours)" else " (not ours)")
+      logInfo
+        ( "ConfigWatcher: assign "
+            <> am.amSlug
+            <> " -> "
+            <> am.amHost
+            <> (if ours then " (ours)" else " (not ours)")
+        )
     Nothing ->
-      TIO.putStrLn $
-        "[ConfigWatcher] failed to decode assign payload on " <> msgSubject msg
+      logWarn ("ConfigWatcher: failed to decode assign payload on " <> msgSubject msg)
 
 -- | Decode a control directive. Slice 5 stub: just log. Phase 3 will
 -- dispatch start/stop/restart to the CaptureSupervisor owning the
@@ -120,16 +120,16 @@ handleControl msg =
   case decodeStrict' (msgPayload msg) :: Maybe ControlMsg of
     Just cm ->
       when (cm.cmAction == "start" || cm.cmAction == "stop" || cm.cmAction == "restart") $
-        TIO.putStrLn $
-          "[ConfigWatcher] control "
-            <> cm.cmSlug
-            <> " "
-            <> cm.cmAction
-            <> " (CaptureSupervisor dispatch lands in Phase 3) on "
-            <> msgSubject msg
+        logInfo
+          ( "ConfigWatcher: control "
+              <> cm.cmSlug
+              <> " "
+              <> cm.cmAction
+              <> " (CaptureSupervisor dispatch lands in Phase 3) on "
+              <> msgSubject msg
+          )
     Nothing ->
-      TIO.putStrLn $
-        "[ConfigWatcher] failed to decode control payload on " <> msgSubject msg
+      logWarn ("ConfigWatcher: failed to decode control payload on " <> msgSubject msg)
 
 -- | Receive a broadcast camera row from the leader's
 -- 'Hnvr.Web.ConfigBroadcaster'. The payload is the raw JSON the
@@ -142,12 +142,13 @@ handleControl msg =
 handleConfig :: Message -> IO ()
 handleConfig msg = do
   let slug = lastDotToken (msgSubject msg)
-  TIO.putStrLn $
-    "[ConfigWatcher] config broadcast for "
-      <> slug
-      <> " ("
-      <> T.pack (show (B.length (msgPayload msg)))
-      <> " bytes; Phase 3 will populate the IORef)"
+  logInfo
+    ( "ConfigWatcher: config broadcast for "
+        <> slug
+        <> " ("
+        <> T.pack (show (B.length (msgPayload msg)))
+        <> " bytes; Phase 3 will populate the IORef)"
+    )
   where
     lastDotToken s = case T.breakOnEnd "." s of
       ("", _) -> s

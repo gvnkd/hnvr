@@ -9,7 +9,10 @@
 -- columns to Phase 3.
 --
 -- IMPORTANT: IHP schema parser does not accept comments INSIDE CREATE
--- TABLE bodies. Keep column docs in the module Haddocks or in design_docs.
+-- TABLE bodies. Keep column docs in the module Haddocs or in design_docs.
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE hosts (
     id              TEXT PRIMARY KEY,
@@ -86,6 +89,3 @@ CREATE TABLE users (
     last_login_at           TIMESTAMP WITH TIME ZONE,
     created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
-
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";

@@ -463,11 +463,19 @@ ffprobe notes:
        receive notifies). `PG.getNotification` blocks; wrap in
        `forever`.
 
-   42. **`sqlExec` is deprecated in IHP v1.6.0** — emits
-       `-Wdeprecations` warnings, still works. The recommended
-       replacement is `[typedSql|...|]` + `sqlExecTyped` from
-       `IHP.TypedSql`. We accept the warnings for now (DDL stays
-       untyped; the typed quoter doesn't cover `CREATE FUNCTION` etc.).
+    42. **IHP v1.6.0 `sqlExec`/`unsafeSqlExec` are broken for DDL** — emits
+        `-Wdeprecations` warnings AND fails at runtime on DDL
+        (`CREATE FUNCTION`, `CREATE TRIGGER`, `DROP TRIGGER IF EXISTS`)
+        with `UnexpectedResultStatementError "Empty bytes"`: the IHP
+        Statement is built with a row-expecting decoder regardless of
+        the doc claim that `unsafeSqlExec` is the DDL escape hatch —
+        they're true aliases. **Workaround: use `postgresql-simple`
+        (already in IHP's transitive deps) for any DDL.** Open a
+        one-shot `PG.connectPostgreSQL` connection, `PG.execute_` the
+        statements, `PG.close`. `Hnvr.Web.MediaMTXConfigSyncer.ensureTrigger`
+        is the canonical example. The recommended `[typedSql|...|]`
+        + `sqlExecTyped` quasi-quoter doesn't cover `CREATE FUNCTION`
+        either, so DDL stays on pg-simple indefinitely.
 
    43. **IHP HSX `<video playsinline>` is rejected** — parser allows
        only a fixed attribute whitelist. Drop `playsinline` (Chrome

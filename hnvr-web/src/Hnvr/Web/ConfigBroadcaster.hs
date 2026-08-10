@@ -33,10 +33,10 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import Database.PostgreSQL.Simple (Connection, Only (..))
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Database.PostgreSQL.Simple.Notification as PG
+import Hnvr.Core.Logging (logError, logInfo, logWarn)
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (configCameras)
@@ -50,13 +50,13 @@ import qualified System.Environment as Env
 startConfigBroadcaster :: (?modelContext :: ModelContext) => Bus -> IO ()
 startConfigBroadcaster bus = do
   _ <- async listenLoop
-  putStrLn "HNVR ConfigBroadcaster: started, listening on cameras_events"
+  logInfo "ConfigBroadcaster: started, listening on cameras_events"
   where
     listenLoop = do
       dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
       listenWith dbUrl (handleNotif bus)
         `catch` \(e :: SomeException) ->
-          putStrLn ("HNVR ConfigBroadcaster: LISTEN loop died: " <> show e)
+          logError ("ConfigBroadcaster: LISTEN loop died: " <> T.pack (show e))
 
 -- | Default DB URL matches IHP's. Real deployments set DATABASE_URL.
 defaultDbUrl :: String
@@ -68,7 +68,7 @@ listenWith :: BSC.ByteString -> (PG.Notification -> IO ()) -> IO ()
 listenWith dbUrl onNotif = do
   conn <- PG.connectPostgreSQL dbUrl
   _ <- PG.execute_ conn "LISTEN cameras_events"
-  putStrLn "HNVR ConfigBroadcaster: LISTEN cameras_events"
+  logInfo "ConfigBroadcaster: LISTEN cameras_events"
   forever $ do
     n <- PG.getNotification conn
     onNotif n
@@ -93,11 +93,9 @@ handleNotif bus notif =
             Just rowJson ->
               Bus.publishJson bus (configCameras slug) rowJson
             Nothing ->
-              TIO.putStrLn $
-                "[ConfigBroadcaster] could not fetch row JSON for slug " <> slug
+              logWarn ("ConfigBroadcaster: could not fetch row JSON for slug " <> slug)
     Nothing ->
-      TIO.putStrLn
-        "[ConfigBroadcaster] failed to decode cameras_events payload"
+      logWarn "ConfigBroadcaster: failed to decode cameras_events payload"
 
 -- | Trigger payload shape emitted by @hnvr_notify_cameras_events()@.
 data NotifPayload = NotifPayload

@@ -36,8 +36,10 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import Generated.Types
+import Hnvr.Core.Logging (logError, logInfo)
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (commandAssign, commandControl)
@@ -60,13 +62,13 @@ pollIntervalMicros = 5_000_000
 startAssignmentCoordinator :: (?modelContext :: ModelContext) => Bus -> IO ()
 startAssignmentCoordinator bus = do
   _ <- async loop
-  putStrLn "HNVR AssignmentCoordinator: started (5s poll, 15s host-down timeout)"
+  logInfo "AssignmentCoordinator: started (5s poll, 15s host-down timeout)"
   where
     loop =
       forever $ do
         reconcile bus
           `catch` \(e :: SomeException) ->
-            putStrLn ("HNVR AssignmentCoordinator: reconcile failed: " <> show e)
+            logError ("AssignmentCoordinator: reconcile failed: " <> T.pack (show e))
         threadDelay pollIntervalMicros
 
 -- | One reconciliation pass.
@@ -85,10 +87,11 @@ reconcile bus = do
       let reassigned = mapMaybe (pickTarget hosts) cameras
       mapM_ (applyAssignment bus) reassigned
       unless (null reassigned) $
-        putStrLn $
-          "HNVR AssignmentCoordinator: reassigned "
-            <> show (length reassigned)
-            <> " camera(s)"
+        logInfo
+          ( "AssignmentCoordinator: reassigned "
+              <> T.pack (show (length reassigned))
+              <> " camera(s)"
+          )
 
 -- | Decide whether a camera needs reassignment, and to which host.
 -- Returns (camera, new host, slug) when a change is needed; Nothing

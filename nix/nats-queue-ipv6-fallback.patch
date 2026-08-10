@@ -1,0 +1,62 @@
+--- a/Network/Nats.hs
++++ b/Network/Nats.hs
+@@ -93,7 +93,7 @@
+                                              Handler (..), IOException,
+                                              SomeException, bracket,
+                                              bracketOnError, catch, catches,
+-                                             throwIO)
++                                             throwIO, try)
+ import           Control.Monad              (forever, replicateM, unless, void,
+                                              when, mzero)
+ import           Data.Dequeue               as D
+@@ -323,24 +323,32 @@
+ connectToServer :: String -> Int -> IO Handle
+ connectToServer hostname port = do
+     addrinfos <- getAddrInfo Nothing (Just hostname) Nothing
+-    let serveraddr = head addrinfos
+-    -- Create a socket
+-    bracketOnError
+-        (S.socket (S.addrFamily serveraddr) S.Stream S.defaultProtocol)
+-        S.sClose
+-        (\sock -> do
+-
+-            setSocketOption sock KeepAlive 1
+-            setSocketOption sock NoDelay 1
+-            let connaddr = case S.addrAddress serveraddr of
+-                    SockAddrInet _ haddr -> SockAddrInet (fromInteger $ toInteger port) haddr
+-                    SockAddrInet6 _ finfo haddr scopeid -> SockAddrInet6 (fromInteger $ toInteger port) finfo haddr scopeid
+-                    other -> other
+-            S.connect sock connaddr
+-            h <- S.socketToHandle sock ReadWriteMode
+-            hSetBuffering h NoBuffering
+-            return h
+-        )
++    case addrinfos of
++        []  -> ioError $ userError ("connectToServer: no addresses for " ++ hostname)
++        _   -> go addrinfos
++  where
++    go [] = ioError $ userError ("connectToServer: all addresses refused for " ++ hostname)
++    go (serveraddr : rest) = do
++        r <- try (connectAddr serveraddr) :: IO (Either SomeException Handle)
++        case r of
++            Right h -> return h
++            Left _  -> go rest
++    connectAddr serveraddr =
++        bracketOnError
++            (S.socket (S.addrFamily serveraddr) S.Stream S.defaultProtocol)
++            S.sClose
++            (\sock -> do
++                setSocketOption sock KeepAlive 1
++                setSocketOption sock NoDelay 1
++                let connaddr = case S.addrAddress serveraddr of
++                        SockAddrInet _ haddr -> SockAddrInet (fromInteger $ toInteger port) haddr
++                        SockAddrInet6 _ finfo haddr scopeid -> SockAddrInet6 (fromInteger $ toInteger port) finfo haddr scopeid
++                        other -> other
++                S.connect sock connaddr
++                h <- S.socketToHandle sock ReadWriteMode
++                hSetBuffering h NoBuffering
++                return h
++            )
+
+
+ ensureConnection :: Nats

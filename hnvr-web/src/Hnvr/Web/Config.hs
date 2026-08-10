@@ -25,6 +25,7 @@ import Control.Monad (void)
 import Data.Maybe (fromMaybe, maybe)
 import qualified Data.Text as T
 import Generated.Types
+import Hnvr.Core.Logging (logError, logInfo)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Node.HealthReporter (startHealthReporter)
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
@@ -71,8 +72,8 @@ seedAdminUser = do
           \ VALUES (?, ?, TRUE) \
           \ ON CONFLICT (email) DO NOTHING"
           (email, hash)
-      putStrLn ("HNVR leader: ensured admin user " <> cs (email :: String))
-    _ -> putStrLn "HNVR leader: INITIAL_ADMIN_EMAIL/PASSWORD unset; skipping admin seed"
+      logInfo ("leader: ensured admin user " <> cs (email :: String))
+    _ -> logInfo "leader: INITIAL_ADMIN_EMAIL/PASSWORD unset; skipping admin seed"
 
 -- | Connect to the NATS bus using @HNVR_NATS_URI@ (default localhost),
 -- then spawn the EventWriter drain loop on the same bus. Best-effort: if
@@ -86,12 +87,12 @@ connectNatsAndStartEventWriter :: (?context :: FrameworkConfig, ?modelContext ::
 connectNatsAndStartEventWriter = do
   startMediaMTXConfigSyncer
     `E.catch` \(e :: E.SomeException) ->
-      putStrLn ("HNVR leader: MediaMTXConfigSyncer start failed: " <> cs (show e))
+      logError ("leader: MediaMTXConfigSyncer start failed: " <> cs (show e))
   let defaultUri = "nats://nats:nats@localhost:4222"
   uri <- fromMaybe defaultUri <$> Env.lookupEnv "HNVR_NATS_URI"
   let connect' = do
         bus <- Bus.connect Bus.defaultConfig {Bus.busUri = uri}
-        putStrLn ("HNVR leader connected to NATS: " <> cs (uri :: String))
+        logInfo ("leader: connected to NATS: " <> cs (uri :: String))
         startEventWriter bus ?modelContext
         _ <- startHealthCache bus
         startAssignmentCoordinator bus
@@ -99,7 +100,7 @@ connectNatsAndStartEventWriter = do
         host <- maybe "hnvr-2" T.pack <$> Env.lookupEnv "HNVR_HOST"
         startHealthReporter bus host
   connect' `E.catch` \(e :: E.SomeException) ->
-    putStrLn ("HNVR leader: NATS connect failed (continuing without bus): " <> cs (show e))
+    logError ("leader: NATS connect failed (continuing without bus): " <> cs (show e))
 
 -- | WAI middleware that short-circuits @/healthz@ and @/_healthz@ with 200 OK.
 -- Falls through to the inner IHP app for everything else.

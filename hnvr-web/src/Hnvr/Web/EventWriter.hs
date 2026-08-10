@@ -32,6 +32,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.UUID (UUID)
 import Hnvr.Core.Id (CameraId (..), HostId (..), sha256ToHex)
+import Hnvr.Core.Logging (logError, logInfo)
 import Hnvr.Core.Segment (SegmentWritten (..))
 import Hnvr.Nats.Bus (Bus, Message (..), Subscription)
 import qualified Hnvr.Nats.Bus as Bus
@@ -48,7 +49,7 @@ startEventWriter bus mc = do
   sub <- Bus.subscribe bus events
   let ?modelContext = mc
   _ <- async (drainLoop sub)
-  putStrLn "HNVR EventWriter: subscribed to hnvr.events"
+  logInfo "EventWriter: subscribed to hnvr.events"
 
 drainLoop :: (?modelContext :: ModelContext) => Subscription -> IO ()
 drainLoop sub = forever $ do
@@ -57,11 +58,11 @@ drainLoop sub = forever $ do
     Just sw ->
       insertSegment sw
         `catch` \(e :: SomeException) ->
-          putStrLn
-            ( "HNVR EventWriter: insert failed for "
-                <> T.unpack (swSlug sw)
+          logError
+            ( "EventWriter: insert failed for "
+                <> swSlug sw
                 <> ": "
-                <> show e
+                <> T.pack (show e)
             )
     Nothing ->
       -- Not a SegmentWritten envelope (or parse error). Future event
