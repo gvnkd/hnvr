@@ -103,6 +103,7 @@ Thumbs.db
 # negation pattern below can re-include a single file.
 .opencode/*
 !.opencode/MEMORIES.md
+!.opencode/PHASE_AUDIT_REPORT.md
 .aider*
 .claude/
 
