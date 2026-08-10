@@ -22,8 +22,8 @@ renderLayout inner =
   <body>
     <nav class="topnav">
       <a href="/" class="brand">HNVR</a>
-      <a href="/cameras">Cameras</a>
-      <a href="/hosts">Hosts</a>
+      <a href="/Cameras">Cameras</a>
+      <a href="/Hosts">Hosts</a>
       <span class="nav-spacer"></span>
       {userLink}
     </nav>

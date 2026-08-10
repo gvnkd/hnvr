@@ -6,8 +6,8 @@
 -- | ffprobe integration: spawn ffprobe against an RTSP URL, parse the JSON
 -- output, and extract the stream info we need to populate camera rows.
 --
--- Used by 'Hnvr.Web.Controller.Cameras.ProbeAction'.
-module Hnvr.Web.Controller.Cameras.Probe
+-- Used by 'Web.Controller.Cameras.ProbeCameraAction'.
+module Web.Controller.Cameras.Probe
   ( ProbeInfo (..),
     probe,
   )

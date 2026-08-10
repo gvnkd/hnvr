@@ -3,8 +3,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
--- | /hosts — per-host status with assignment overview.
-module Hnvr.Web.Controller.Hosts
+-- | /Hosts — per-host status with assignment overview. AutoRoute maps
+-- @HostsAction@ → @/Hosts@.
+module Web.Controller.Hosts
   ( HostsController (..),
   )
 where
@@ -14,13 +15,13 @@ import Hnvr.Web.View.Hosts.Index
 import IHP.ControllerPrelude
 
 data HostsController
-  = IndexAction
+  = HostsAction
   deriving stock (Eq, Show, Data)
 
 instance AutoRoute HostsController
 
 instance Controller HostsController where
-  action IndexAction = do
+  action HostsAction = do
     hosts <-
       query @Host
         |> orderByAsc #id

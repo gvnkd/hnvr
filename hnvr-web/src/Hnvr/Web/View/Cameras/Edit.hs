@@ -30,7 +30,7 @@ instance View EditView where
       </form>
     |]
     where
-      probeUrl = "/cameras/" <> tshow (camera |> get #id) <> "/probe"
+      probeUrl = "/ProbeCamera?cameraId=" <> tshow (camera |> get #id)
 
       renderForm camera =
         [hsx|
@@ -55,7 +55,7 @@ instance View EditView where
           </form>
         |]
 
-      updateUrl cam = "/cameras/" <> tshow (cam |> get #id)
+      updateUrl cam = "/UpdateCamera?cameraId=" <> tshow (cam |> get #id)
 
       textFieldFor name' label' value' =
         [hsx|

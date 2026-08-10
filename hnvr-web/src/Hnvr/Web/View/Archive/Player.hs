@@ -26,7 +26,7 @@ instance View PlayerView where
       <script>{preEscapedTextValue js}</script>
     |]
     where
-      playlistUrl = "/cameras/" <> tshow (camera |> get #id) <> "/playlist"
+      playlistUrl = "/PlaylistArchive?cameraId=" <> tshow (camera |> get #id)
       js =
         "const video = document.getElementById('hnvr-player');"
           <> "const status = document.getElementById('hnvr-status');"

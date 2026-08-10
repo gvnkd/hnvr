@@ -14,7 +14,7 @@
 --   * @DeleteSessionAction@ → @/DeleteSession@
 --
 -- (top-level URLs, no controller prefix — IHP default).
-module Hnvr.Web.Controller.Sessions
+module Web.Controller.Sessions
   ( SessionsController (..),
   )
 where

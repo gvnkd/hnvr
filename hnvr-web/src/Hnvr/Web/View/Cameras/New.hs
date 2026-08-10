@@ -25,7 +25,7 @@ instance View NewView where
     where
       renderForm camera =
         [hsx|
-          <form class="stacked" method="POST" action="/cameras">
+          <form class="stacked" method="POST" action="/CreateCamera">
             {textFieldFor "slug" "Slug" camera.slug}
             {textFieldFor "name" "Name" camera.name}
             {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl}

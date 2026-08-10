@@ -19,7 +19,7 @@ instance View IndexView where
       [hsx|
       <div class="header">
         <h1>Cameras</h1>
-        <a class="btn" href="/cameras/new">New Camera</a>
+        <a class="btn" href="/NewCamera">New Camera</a>
       </div>
       {renderCameras cameras}
     |]
@@ -59,5 +59,5 @@ instance View IndexView where
         |]
         where
           cid = tshow (camera |> get #id)
-          showUrl = "/cameras/" <> cid
-          editUrl = "/cameras/" <> cid <> "/edit"
+          showUrl = "/ShowCamera?cameraId=" <> cid
+          editUrl = "/EditCamera?cameraId=" <> cid

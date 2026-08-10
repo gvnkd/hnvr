@@ -52,6 +52,6 @@ instance View ShowView where
     |]
     where
       cid = tshow (camera |> get #id)
-      editUrl = "/cameras/" <> cid <> "/edit"
-      archiveUrl = "/cameras/" <> cid <> "/archive"
-      assignUrl = "/cameras/" <> cid <> "/assign"
+      editUrl = "/EditCamera?cameraId=" <> cid
+      archiveUrl = "/PlayerArchive?cameraId=" <> cid
+      assignUrl = "/AssignCamera?cameraId=" <> cid

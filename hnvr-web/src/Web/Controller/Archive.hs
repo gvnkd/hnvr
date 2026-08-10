@@ -7,15 +7,15 @@
 -- | Archive playback controller.
 --
 -- Two actions:
---   * 'PlayerAction' — HTML page with @\<video\>@ + hls.js; loads the
+--   * 'PlayerArchiveAction' — HTML page with @\<video\>@ + hls.js; loads the
 --     playlist for the given camera.
---   * 'PlaylistAction' — Generates a VOD @m3u8@ with presigned S3 GET
+--   * 'PlaylistArchiveAction' — Generates a VOD @m3u8@ with presigned S3 GET
 --     URLs for each segment in the camera's most recent 1-hour window.
 --
 -- fMP4 HLS requires @EXT-X-VERSION:6@ and a single @EXT-X-MAP@ pointing
 -- to the init segment (ftyp+moov). The init.mp4 is uploaded once per
 -- camera at the start of recording (see CaptureWorker).
-module Hnvr.Web.Controller.Archive
+module Web.Controller.Archive
   ( ArchiveController (..),
   )
 where
@@ -28,17 +28,17 @@ import IHP.ControllerPrelude
 import qualified System.Environment as Env
 
 data ArchiveController
-  = PlayerAction {cameraId :: !(Id Camera)}
-  | PlaylistAction {cameraId :: !(Id Camera)}
+  = PlayerArchiveAction {cameraId :: !(Id Camera)}
+  | PlaylistArchiveAction {cameraId :: !(Id Camera)}
   deriving stock (Eq, Show, Data)
 
 instance AutoRoute ArchiveController
 
 instance Controller ArchiveController where
-  action PlayerAction {cameraId} = do
+  action PlayerArchiveAction {cameraId} = do
     camera <- fetch cameraId
     render PlayerView {..}
-  action PlaylistAction {cameraId} = do
+  action PlaylistArchiveAction {cameraId} = do
     camera <- fetch cameraId
     let cameraUuid = case cameraId of Id u -> u :: UUID
     segments <-

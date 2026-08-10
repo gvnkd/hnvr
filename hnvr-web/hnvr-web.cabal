@@ -53,14 +53,6 @@ library
     Hnvr.Web.Auth
     Hnvr.Web.Config
     Hnvr.Web.ConfigBroadcaster
-    Hnvr.Web.Controller.Archive
-    Hnvr.Web.Controller.Cameras
-    Hnvr.Web.Controller.Cameras.Probe
-    Hnvr.Web.Controller.Dashboard
-    Hnvr.Web.Controller.Hosts
-    Hnvr.Web.Controller.Live
-    Hnvr.Web.Controller.Sessions
-    Hnvr.Web.Controller.Support.Crypto
     Hnvr.Web.EventWriter
     Hnvr.Web.FrontController
     Hnvr.Web.HealthCache
@@ -76,6 +68,14 @@ library
     Hnvr.Web.View.Live.Show
     Hnvr.Web.View.Sessions.New
     Hnvr.Web.WhepProxy
+    Web.Controller.Archive
+    Web.Controller.Cameras
+    Web.Controller.Cameras.Probe
+    Web.Controller.Dashboard
+    Web.Controller.Hosts
+    Web.Controller.Live
+    Web.Controller.Sessions
+    Web.Controller.Support.Crypto
 
   -- IHP-generated from Application/Schema.sql.
   -- Regenerate via:

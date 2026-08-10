@@ -9,7 +9,7 @@
 --
 -- Throws 'userError' at the action level if @HNVR_DATA_KEY@ is missing
 -- or malformed — the leader is unsafe to run without it.
-module Hnvr.Web.Controller.Support.Crypto
+module Web.Controller.Support.Crypto
   ( encryptPassword,
     decryptPassword,
     requireKey,

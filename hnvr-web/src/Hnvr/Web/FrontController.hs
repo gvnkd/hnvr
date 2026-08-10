@@ -6,20 +6,22 @@ module Hnvr.Web.FrontController
   )
 where
 
-import Hnvr.Web.Controller.Archive (ArchiveController (..))
-import Hnvr.Web.Controller.Cameras (CamerasController (..))
-import Hnvr.Web.Controller.Dashboard (DashboardController (..))
-import Hnvr.Web.Controller.Hosts (HostsController (..))
-import Hnvr.Web.Controller.Live (LiveController (..))
-import Hnvr.Web.Controller.Sessions (SessionsController (..))
 import IHP.ControllerSupport (InitControllerContext (..))
 import IHP.FrameworkConfig (RootApplication (..))
 import IHP.Job.Types (Worker (..))
-import IHP.RouterSupport (FrontController (..), parseRoute)
+import IHP.RouterSupport (FrontController (..), parseRoute, startPage)
+import Web.Controller.Archive (ArchiveController (..))
+import Web.Controller.Cameras (CamerasController (..))
+import Web.Controller.Dashboard (DashboardController (..))
+import Web.Controller.Hosts (HostsController (..))
+import Web.Controller.Live (LiveController (..))
+import Web.Controller.Sessions (SessionsController (..))
 
 instance FrontController RootApplication where
   controllers =
-    [ parseRoute @SessionsController,
+    [ -- / → DashboardAction (also reachable at /Dashboard via AutoRoute)
+      startPage DashboardAction,
+      parseRoute @SessionsController,
       parseRoute @DashboardController,
       parseRoute @CamerasController,
       parseRoute @HostsController,
