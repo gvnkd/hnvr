@@ -127,11 +127,11 @@ nix build .#nixosConfigurations.hnvr-2-vm.config.system.build.vm
 NIX_DISK_IMAGE=/tmp/leader.qcow2 \
   QEMU_NET_OPTS="hostfwd=tcp:127.0.0.1:18000-:8000,hostfwd=tcp:127.0.0.1:18222-:8222,hostfwd=tcp:127.0.0.1:18889-:8889,hostfwd=tcp:127.0.0.1:19997-:9997" \
   ./result/bin/run-nixos-vm
-curl http://localhost:18000/healthz        # → BROKEN: 404 (IHP v1.6.0 CustomMiddleware chain bug — see commit ce739c1)
+curl http://localhost:18000/healthz        # → 200 OK (WAI CustomMiddleware; works again post-Aug-10-2026 fix)
 curl http://localhost:18000/               # → Dashboard (via startPage DashboardAction)
 curl http://localhost:18000/Hosts          # → per-host panel (capital H — IHP-canonical URL)
 curl http://localhost:18000/Dashboard      # → same as /
-curl http://localhost:19997/v2/config/paths # → mediamtx live config
+curl http://localhost:19997/v3/config/paths/list # → mediamtx v1.20+ live config (v2 removed)
 
 # Worker VM (now also runs NATS broker so node has a local peer)
 nix build .#nixosConfigurations.hnvr-1-vm.config.system.build.vm
@@ -730,7 +730,50 @@ ffprobe notes:
 
        Open follow-up: `/healthz` 404s — `Config.hs`'s `CustomMiddleware`
        is not being applied by IHP v1.6.0's middleware chain. Tracked
-       separately.
+       separately. **Closed Aug 10 2026**: see pitfall #60.
+
+   60. **IHP `option` is FIRST-write-wins, not last-write-wins** (Aug 10
+       2026) — `IHP.FrameworkConfig.option` is implemented as
+       `State.modify (\map -> if TMap.member @option map then map else TMap.insert value map)`
+       (i.e. insert-if-absent). And `buildFrameworkConfig` runs
+       `appConfig >> ihpDefaultConfig` — user config FIRST, defaults
+       SECOND. So calling `option $ CustomMiddleware X` followed by
+       `option $ CustomMiddleware Y` silently DROPS Y. Symptom: Sergey
+       had two `option $ CustomMiddleware` calls (whep + healthz); only
+       whep was active, so `/healthz` 404'd for all of Phase 2. Fix:
+       compose into one CustomMiddleware call:
+       `option $ CustomMiddleware (whepMiddleware . healthzMiddleware)`.
+       Same trap applies to any other option type — check the IHP
+       source if a `option` call seems to have no effect. Affects:
+       `CustomMiddleware`, `AuthMiddleware`, `SessionCookie`,
+       `RLSAuthenticatedRole`, etc.
+
+   61. **MediaMTX v1.16+ split the upsert PUT into add/patch/delete**
+       (Aug 10 2026, Taiga #467 closed) — the old `PUT /v2/config/paths/<id>`
+       is GONE in v1.20.0. v3 API surface (confirmed against
+       `internal/api/api.go` of mediamtx v1.20.0):
+         * `GET    /v3/config/paths/list`              → `{itemCount, pageCount, items:[...]}`
+         * `GET    /v3/config/paths/get/<name>`        → single path object
+         * `POST   /v3/config/paths/add/<name>`        → create, 400 if exists
+         * `PATCH  /v3/config/paths/patch/<name>`      → patch, 404 if not exists
+         * `POST   /v3/config/paths/replace/<name>`    → replace, 404 if not exists
+         * `DELETE /v3/config/paths/delete/<name>`     → delete, 404 if not exists
+       Methods MATTER: `add` is POST, `patch` is PATCH, `delete` is
+       DELETE. `Hnvr.Web.MediaMTXConfigSyncer.pushPaths` does
+       list → diff → for each desired: `add` if new, `patch` if exists;
+       for orphans: `delete`. List response is `{items:[{name,...}]}`,
+       NOT the old map form — decode with `Aeson.Types.parseMaybe` +
+       `withObject "PathList" (.: "items")`. Read-only endpoints are
+       auth-free in default config; mutating endpoints need either
+       no auth configured or a credentials header (we run with
+       `api: yes` and no auth in dev/leader).
+
+   62. **WAI Middleware composition order** (Aug 10 2026) — when composing
+       `Middleware`s with `.`, the LEFTMOST runs FIRST on incoming
+       requests: `(f . g) app = f (g app)`. So
+       `whepMiddleware . healthzMiddleware` means whep gets the request
+       first (matches `/whep/*`), then healthz (`/healthz`), then IHP.
+       Put the most-specific path-prefix middleware leftmost.
 
 ## Sergey's working style
 
@@ -850,6 +893,28 @@ ffprobe notes:
             `/ShowLive?cameraId=…`, `/Hosts`, `/Dashboard`,
             `/NewSession`, `/CreateSession`, `/DeleteSession`. Views
             stayed under `Hnvr.Web.View.*` (only controllers moved).
+      - **Aug 10 2026 Phase 2 blocker sweep** (closed 3 of 4 open items):
+            * ✅ Taiga #467 closed — `MediaMTXConfigSyncer` migrated from
+                  `/v2/config/paths/*` (gone in mediamtx v1.20) to
+                  `/v3/config/paths/{list,add,patch,delete}`. See pitfall #61.
+            * ✅ `/healthz` 404 fixed — root cause: two
+                  `option $ CustomMiddleware` calls in `Config.hs` had only
+                  the FIRST one active (IHP `option` is first-write-wins,
+                  see pitfall #60). Fix: compose whep + healthz into one
+                  `CustomMiddleware (whepMiddleware . healthzMiddleware)`.
+            * ✅ WHEP `/whep/<slug>/session/<id>` path translation bug —
+                  `WhepProxy.translatePath` was appending `/whep` at the
+                  END instead of after the slug. Browser ICE-restart /
+                  teardown (PATCH/DELETE on session URLs) now reaches
+                  mediamtx correctly. See pitfall #62 for the middleware
+                  composition order rule.
+            * ✅ WHEP browser-tested end-to-end via curl probes (POST
+                  `/whep/x` and PATCH `/whep/x/session/y` both reach
+                  mediamtx; full SDP flow needs Sergey to verify in
+                  Chrome against a live RTSP camera).
+            Remaining: full Phase 2 demo (kill hnvr-1 → 15 s reassign)
+            not yet exercised. AssignmentCoordinator load balancing
+            still naive (lex-smallest host) — fine for 2 hosts.
 - [ ] Phase 3 — CV detection + tracking
 - [ ] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate
 - [ ] Phase 5 — PTZ manual + presets          ← v1.0 release

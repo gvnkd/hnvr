@@ -31,6 +31,7 @@ import Control.Exception (SomeException, bracket, catch)
 import Control.Monad (forever, void, when)
 import Data.Aeson (Value (..), object, (.=))
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Types as Aeson.Types
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BL
@@ -193,37 +194,50 @@ renderMediaMtxYaml cameras =
               ]
             else mempty
 
--- | Compute the per-path PUT/DELETE plan and execute it.
--- mediamtx's @PUT /v2/config/paths/<id>@ is upsert semantics: creates
--- the path if absent, replaces it if present. We PUT every currently
--- enabled camera (cheap), and DELETE any path that exists in mediamtx
--- but not in our camera list. The set of "currently in mediamtx" is
--- queried live each sync via @GET /v2/config/paths@.
+-- | Compute the per-path add/patch/delete plan and execute it.
+-- mediamtx v1.16+ split the upsert-style @PUT /v2/config/paths/<id>@
+-- into three operations:
+--   * @POST   /v3/config/paths/add/<name>@    — create; 400 if exists
+--   * @PATCH  /v3/config/paths/patch/<name>@  — patch;   404 if not
+--   * @DELETE /v3/config/paths/delete/<name>@ — delete; 404 if not
+-- We list remote first to decide add-vs-patch per desired path, and
+-- to compute the orphan set for deletion. REST methods matter (POST
+-- add vs PATCH patch vs DELETE delete) — earlier impl used PUT for
+-- everything which 404'd on v1.20.0 (Taiga #467).
 pushPaths :: Manager -> Text -> [Camera] -> IO ()
 pushPaths mgr apiBase cameras = do
   existing <- listRemotePaths mgr apiBase
   let desired = Map.fromList [(cam.slug, pathConfig cam) | cam <- cameras, cam.enabled]
-      toPut = Map.toList desired
+      toAdd = [(slug, cfg) | (slug, cfg) <- Map.toList desired, slug `notElem` existing]
+      toPatch = [(slug, cfg) | (slug, cfg) <- Map.toList desired, slug `elem` existing]
       toDelete = filter (`notElem` Map.keys desired) existing
-  mapM_ (uncurry (putPath mgr apiBase)) toPut
+  mapM_ (uncurry (addPath mgr apiBase)) toAdd
+  mapM_ (uncurry (patchPath mgr apiBase)) toPatch
   mapM_ (deletePath mgr apiBase) toDelete
-  when (not (null toPut) || not (null toDelete)) $
+  when (not (null toAdd) || not (null toPatch) || not (null toDelete)) $
     logInfo
-      ( "MediaMTXConfigSyncer: pushed "
-          <> T.pack (show (length toPut))
-          <> " paths, deleted "
+      ( "MediaMTXConfigSyncer: added "
+          <> T.pack (show (length toAdd))
+          <> ", patched "
+          <> T.pack (show (length toPatch))
+          <> ", deleted "
           <> T.pack (show (length toDelete))
       )
 
--- | @GET /v2/config/paths@ → list of path IDs. mediamtx returns a JSON
--- object whose top-level keys are path names.
+-- | @GET /v3/config/paths/list@ → list of path names. mediamtx v1.20
+-- returns @{itemCount, pageCount, items: [{name, ...}]}; we only
+-- need the names for set-difference logic. Decoded via Aeson's
+-- parser monad to keep the field shape explicit.
 listRemotePaths :: Manager -> Text -> IO [Text]
 listRemotePaths mgr apiBase = do
-  req <- HC.parseRequest (T.unpack apiBase <> "/v2/config/paths")
+  req <- HC.parseRequest (T.unpack apiBase <> "/v3/config/paths/list")
   resp <- HC.httpLbs req mgr
-  case Aeson.decode (HC.responseBody resp) :: Maybe (Map.Map Text Value) of
-    Just m -> pure (Map.keys m)
-    Nothing -> pure []
+  let mb = Aeson.decode (HC.responseBody resp) >>= Aeson.Types.parseMaybe parseList
+  pure (fromMaybe [] mb)
+  where
+    parseList = Aeson.withObject "PathList" $ \o -> do
+      items <- o Aeson..: "items"
+      mapM (Aeson.withObject "PathItem" (Aeson..: "name")) items
 
 -- | Per-path source config payload. Matches @renderMediaMtxYaml@.
 pathConfig :: Camera -> Value
@@ -234,12 +248,24 @@ pathConfig cam =
       "sourceOnDemand" .= True
     ]
 
-putPath :: Manager -> Text -> Text -> Value -> IO ()
-putPath mgr apiBase slug cfg = do
-  initReq <- HC.parseRequest (T.unpack apiBase <> "/v2/config/paths/" <> T.unpack slug)
+addPath :: Manager -> Text -> Text -> Value -> IO ()
+addPath mgr apiBase slug cfg = do
+  initReq <- HC.parseRequest (T.unpack apiBase <> "/v3/config/paths/add/" <> T.unpack slug)
   let req =
         initReq
-          { HC.method = "PUT",
+          { HC.method = "POST",
+            HC.requestBody = RequestBodyLBS (Aeson.encode cfg),
+            HC.requestHeaders = [("Content-Type", "application/json")]
+          }
+  _ <- HC.httpLbs req mgr
+  pure ()
+
+patchPath :: Manager -> Text -> Text -> Value -> IO ()
+patchPath mgr apiBase slug cfg = do
+  initReq <- HC.parseRequest (T.unpack apiBase <> "/v3/config/paths/patch/" <> T.unpack slug)
+  let req =
+        initReq
+          { HC.method = "PATCH",
             HC.requestBody = RequestBodyLBS (Aeson.encode cfg),
             HC.requestHeaders = [("Content-Type", "application/json")]
           }
@@ -248,7 +274,7 @@ putPath mgr apiBase slug cfg = do
 
 deletePath :: Manager -> Text -> Text -> IO ()
 deletePath mgr apiBase slug = do
-  initReq <- HC.parseRequest (T.unpack apiBase <> "/v2/config/paths/" <> T.unpack slug)
+  initReq <- HC.parseRequest (T.unpack apiBase <> "/v3/config/paths/delete/" <> T.unpack slug)
   let req = initReq {HC.method = "DELETE"}
   _ <- HC.httpLbs req mgr
   pure ()

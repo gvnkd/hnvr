@@ -61,8 +61,14 @@ config = do
       Just _ -> pure ()
       Nothing -> Env.setEnv "APP_STATIC" "hnvr-web/static"
 
-  option $ CustomMiddleware whepMiddleware
-  option $ CustomMiddleware healthzMiddleware
+  -- IHP's `option` is FIRST-write-wins (IHP.FrameworkConfig:61 —
+  -- `if TMap.member @option map then map else TMap.insert`), and
+  -- `buildFrameworkConfig` runs `appConfig >> ihpDefaultConfig` so our
+  -- `option`s land before the defaults. Calling `option $ CustomMiddleware`
+  -- twice silently drops the second one. Compose all custom WAI
+  -- middlewares here. Order: whep runs first (most-specific path prefix),
+  -- falls through to healthz, falls through to IHP.
+  option $ CustomMiddleware (whepMiddleware . healthzMiddleware)
   option $ AuthMiddleware (authMiddleware @User)
   addInitializer connectNatsAndStartEventWriter
   addInitializer seedAdminUser

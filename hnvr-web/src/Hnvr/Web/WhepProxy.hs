@@ -84,10 +84,16 @@ proxyOne mgr base request = do
       pure (Wai.responseLBS status500 [] ("WHEP proxy error: " <> BSLC.pack (show e)))
 
 -- | Translate @/whep/<slug>[@/session/<id>]@ → @/<slug>/whep[@/session/<id>]@.
+-- The naive @"/" <> rest <> "/whep"@ appended @/whep@ at the END, which
+-- mangled session callbacks: @/whep/foo/session/123@ became
+-- @/foo/session/123/whep@ (mediamtx 404). Split rest at the first @/@
+-- so @/whep@ lands directly after the slug. Uses 'BSC.break' (Char-keyed)
+-- since the file already standardises on the Char8 view of ByteStrings.
 translatePath :: BS.ByteString -> BS.ByteString
 translatePath p =
-  let rest = BS.drop (BS.length "/whep/") p -- "<slug>[/session/<id>]"
-   in "/" <> rest <> "/whep"
+  let rest = BSC.drop (BSC.length "/whep/") p -- "<slug>[/session/<id>]"
+      (slug, suffix) = BSC.break (== '/') rest
+   in "/" <> slug <> "/whep" <> suffix
 
 -- | Rewrite MediaMTX's @/<slug>/whep/session/<id>@ Location header back
 -- to our public @/whep/<slug>/session/<id>@ form so the browser's next
