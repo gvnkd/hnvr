@@ -30,7 +30,7 @@ where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException, catch)
-import Control.Monad (forever, unless, void)
+import Control.Monad (forM_, forever, unless, void, when)
 import Data.Aeson (ToJSON (..), Value, object, (.=))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -40,9 +40,9 @@ import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import Generated.Types
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
-import Hnvr.Nats.Subjects (commandAssign)
+import Hnvr.Nats.Subjects (commandAssign, commandControl)
 import IHP.Fetch (fetch)
-import IHP.HaskellSupport ((|>))
+import IHP.HaskellSupport (get, (|>))
 import IHP.ModelSupport (ModelContext, sqlExec, sqlQuery)
 import IHP.QueryBuilder (filterWhere, orderByAsc, query)
 
@@ -113,12 +113,23 @@ leastLoaded healthy =
     [] -> "hnvr-2"
 
 -- | Write the new assignment to DB and publish the NATS command.
+--
+-- Per @03-capture-and-storage.md@ §"Reassignment sequence" step 6: when
+-- a camera is moving between hosts, the old host receives a
+-- @hnvr.commands.control.<old_host>.<cam>.stop@ directive so it can
+-- drain gracefully. Cameras without a prior host (first assignment)
+-- emit no stop. The new host learns of the assignment via the regular
+-- @hnvr.commands.assign.<slug>@ message.
 applyAssignment :: (?modelContext :: ModelContext) => Bus -> (Camera, Text, Text) -> IO ()
 applyAssignment bus (cam, newHost, slug) = do
   void $
     sqlExec
       "UPDATE cameras SET assigned_host = ?, updated_at = NOW() WHERE id = ?"
       (newHost, cam |> get #id)
+  -- Graceful drain directive to the old host, if any.
+  forM_ cam.assignedHost $ \oldHost ->
+    when (oldHost /= newHost) $
+      Bus.publishJson bus (commandControl oldHost slug "stop") (ControlMsg slug "stop")
   Bus.publishJson bus (commandAssign slug) (AssignMsg slug newHost)
 
 -- | Wire payload for @hnvr.commands.assign.<slug>@.
@@ -132,6 +143,21 @@ instance ToJSON AssignMsg where
     object
       [ "slug" .= m.amSlug,
         "host" .= m.amHost
+      ]
+
+-- | Wire payload for @hnvr.commands.control.<host>.<cam>.<action>@.
+-- Echoes the slug + action so the subscriber can correlate against the
+-- subject tokens (which the nats-queue lib doesn't expose cleanly).
+data ControlMsg = ControlMsg
+  { cmSlug :: !Text,
+    cmAction :: !Text
+  }
+
+instance ToJSON ControlMsg where
+  toJSON m =
+    object
+      [ "slug" .= m.cmSlug,
+        "action" .= m.cmAction
       ]
 
 -- | Query the @hosts@ table for rows with @last_health_at@ within the

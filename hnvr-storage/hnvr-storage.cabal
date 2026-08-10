@@ -1,36 +1,37 @@
 cabal-version: 2.4
-name:         hnvr-storage
-version:      0.1.0.0
-synopsis:     HNVR SeaweedFS (S3) client wrapper
-license:      BSD-3-Clause
-build-type:   Simple
+name:          hnvr-storage
+version:       0.1.0.0
+synopsis:      HNVR SeaweedFS (S3) client wrapper
+license:       BSD-3-Clause
+build-type:    Simple
 
 library
-    exposed-modules:
-        Hnvr.Storage.S3
-    build-depends:
-        base              >= 4.18 && < 5
-      , bytestring
-      , conduit
-      , conduit-extra
-      , memory
-      , minio-hs
-      , resourcet
-      , text
-      , hnvr-core
-      , hnvr-nats
-    hs-source-dirs:   src
-    default-language: Haskell2010
+  exposed-modules:  Hnvr.Storage.S3
+  build-depends:
+    , base           >=4.18 && <5
+    , bytestring
+    , conduit
+    , conduit-extra
+    , hnvr-core
+    , hnvr-nats
+    , memory
+    , minio-hs
+    , resourcet
+    , text
+
+  hs-source-dirs:   src
+  default-language: Haskell2010
 
 executable hnvr-s3-upload
-    main-is:          S3Upload.hs
-    build-depends:
-        base              >= 4.18 && < 5
-      , bytestring
-      , directory
-      , filepath
-      , text
-      , hnvr-core
-      , hnvr-storage
-    hs-source-dirs:   app
-    default-language: Haskell2010
+  main-is:          S3Upload.hs
+  build-depends:
+    , base          >=4.18 && <5
+    , bytestring
+    , directory
+    , filepath
+    , hnvr-core
+    , hnvr-storage
+    , text
+
+  hs-source-dirs:   app
+  default-language: Haskell2010

@@ -88,8 +88,7 @@
 
       # -------------------------------------------------------------
       # Per-host NixOS module stacks. Both VMs apply IHP + hnvr overlays
-      # top-level (so pkgs.hnvr-web resolves). The worker VM is just a
-      # stub for Phase 0 — hnvr-node has no NATS client yet (Phase 2).
+      # top-level (so pkgs.hnvr-web resolves).
       # -------------------------------------------------------------
       baseVmConfig = { config, pkgs, lib, ... }: {
         nixpkgs.overlays = [ ihp.overlays.default hnvrTopOverlay ];
@@ -195,6 +194,10 @@
               enable = true;
               excludes = [ "^hnvr-web/gen/" "^vendored/" ];
             };
+            cabal-fmt = {
+              enable = true;
+              excludes = [ "^vendored/" ];
+            };
             nixpkgs-fmt.enable = true;
             end-of-file-fixer = {
               enable = true;
@@ -225,6 +228,7 @@
             pkgs.ffmpeg_7-full
             pkgs.onnxruntime
             pkgs.nats-server
+            pkgs.mediamtx
             # NOTE: cabal build all needs pg_config for postgresql-libpq-configure.
             # We currently can't pull postgresql/libpq here without enabling
             # nix's experimental pipe-operators feature (nixpkgs at our pinned

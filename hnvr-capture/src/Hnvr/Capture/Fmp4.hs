@@ -41,8 +41,12 @@ data Fragment
     -- @<slug>/init.mp4@ for HLS clients, or drop it if HLS init is rendered
     -- server-side.
     InitFragment !ByteString
-  | -- | One @moof@ + @mdat@ pair = one 1-second recording fragment.
-    MediaFragment !ByteString
+  | -- | One @moof@ + @mdat@ pair = one 1-second recording fragment. The
+    -- 'Word64' is the @baseMediaDecodeTime@ from the first @tfdt@ box
+    -- inside the moof (0 if not found). Track-timescale units; useful
+    -- for media-time alignment in Phase 3 CV; the worker currently uses
+    -- wall-clock hold-back for @sEnd@, so this field is informational.
+    MediaFragment !Word64 !ByteString
   deriving stock (Eq, Show)
 
 -- | Internal state of the streaming parser.
@@ -50,8 +54,11 @@ data Fmp4State = Fmp4State
   { -- Bytes accumulated for the init segment (before first moof seen).
     fsInitAcc :: !ByteString,
     -- Bytes accumulated for the in-flight media fragment (Nothing = no
-    -- moof currently open).
-    fsFragAcc :: !(Maybe ByteString),
+    -- moof currently open). The 'Word64' is the @baseMediaDecodeTime@
+    -- scraped from the first @tfdt@ in the moof at the time the moof
+    -- opened — captured here so we don't have to re-parse the moof
+    -- payload when the matching mdat arrives.
+    fsFragAcc :: !(Maybe (Word64, ByteString)),
     -- Bytes received but not yet parseable as a complete box.
     fsUnparsed :: !ByteString
   }
@@ -84,7 +91,9 @@ feed st0 chunk = go (st0 {fsUnparsed = fsUnparsed st0 <> chunk}) []
 -- segment is already emitted in steady state by the time EOF arrives, so
 -- we don't double-flush it.
 finish :: Fmp4State -> Maybe Fragment
-finish = fmap MediaFragment . fsFragAcc
+finish st = case fsFragAcc st of
+  Nothing -> Nothing
+  Just (tfdt, bs) -> Just (MediaFragment tfdt bs)
 
 -- | Dispatch a single complete box: append to whichever accumulator is
 -- active, and emit fragments at moof→mdat completion boundaries.
@@ -94,21 +103,22 @@ handleBox typ bytes st
       -- New fragment starts. Flush the init accumulator if non-empty.
       let initFrags =
             [InitFragment (fsInitAcc st) | not (B.null (fsInitAcc st))]
-       in (initFrags, st {fsInitAcc = B.empty, fsFragAcc = Just bytes})
+          tfdt = findTfdt bytes
+       in (initFrags, st {fsInitAcc = B.empty, fsFragAcc = Just (tfdt, bytes)})
   | typ == "mdat" =
       case fsFragAcc st of
         Nothing ->
           -- Stray mdat without a moof (shouldn't happen with our movflags).
           -- Be defensive: treat as init.
           ([], st {fsInitAcc = fsInitAcc st <> bytes})
-        Just fragBytes ->
+        Just (tfdt, fragBytes) ->
           -- Complete fragment: moof + mdat.
-          ([MediaFragment (fragBytes <> bytes)], st {fsFragAcc = Nothing})
+          ([MediaFragment tfdt (fragBytes <> bytes)], st {fsFragAcc = Nothing})
   | otherwise =
       -- styp / sidx / free / skip / uuid / etc. Append to whichever
       -- accumulator is active (init before first moof, fragment after).
       case fsFragAcc st of
-        Just fb -> ([], st {fsFragAcc = Just (fb <> bytes)})
+        Just (tfdt, fb) -> ([], st {fsFragAcc = Just (tfdt, fb <> bytes)})
         Nothing -> ([], st {fsInitAcc = fsInitAcc st <> bytes})
 
 -- | Try to parse one complete ISO-BMFF box off the front of the buffer.
@@ -150,3 +160,79 @@ readBE64 :: ByteString -> Word64
 readBE64 = B.foldl step 0 . B.take 8
   where
     step !acc w = (acc `shiftL` 8) .|. fromIntegral w
+
+-- | Walk a moof box's children looking for the first @tfdt@. Returns 0
+-- if not found (defensive — every well-formed fragmented track has one,
+-- but we never want the segmenter to crash on a malformed stream).
+--
+-- Structure (ISO/IEC 14496-12):
+--
+-- @
+-- moof
+-- └── traf
+--     ├── tfhd  (ignored here)
+--     └── tfdt  (FullBox: 1B version + 3B flags, then 4-or-8 byte baseMediaDecodeTime)
+-- @
+findTfdt :: ByteString -> Word64
+findTfdt moof = case findChild "traf" (boxPayload moof) of
+  Just traf -> case findChild "tfdt" (boxPayload traf) of
+    Just tfdt -> parseTfdt (boxPayload tfdt)
+    Nothing -> 0
+  Nothing -> 0
+
+-- | Strip the 8-byte box header, returning the payload. Assumes the
+-- input is a single complete box.
+boxPayload :: ByteString -> ByteString
+boxPayload buf =
+  let size = readBE32 (B.take 4 buf)
+   in case size of
+        1 ->
+          -- Extended size: payload starts after the 16-byte header.
+          B.drop 16 buf
+        _ ->
+          -- Standard 8-byte header.
+          B.drop 8 buf
+
+-- | Iterate the children of a parent box payload, returning the first
+-- child whose 4-byte type matches.
+findChild :: ByteString -> ByteString -> Maybe ByteString
+findChild want = go
+  where
+    go buf
+      | B.length buf < 8 = Nothing
+      | otherwise =
+          let size = readBE32 (B.take 4 buf)
+              typ = B.take 4 (B.drop 4 buf)
+           in case size of
+                0 -> if typ == want then Just buf else Nothing
+                1 ->
+                  if B.length buf < 16
+                    then Nothing
+                    else
+                      let extSize = fromIntegral (readBE64 (B.take 8 (B.drop 8 buf))) :: Int
+                       in if B.length buf < extSize
+                            then Nothing
+                            else if typ == want then Just buf else go (B.drop extSize buf)
+                _ ->
+                  let n = fromIntegral size :: Int
+                   in if B.length buf < n
+                        then Nothing
+                        else if typ == want then Just buf else go (B.drop n buf)
+
+-- | Parse the body of a tfdt box (after the 8-byte box header). The body
+-- is a FullBox: 1-byte version, 3-byte flags, then the timestamp.
+-- Version 1 → 8-byte Word64; version 0 → 4-byte Word32 zero-extended.
+parseTfdt :: ByteString -> Word64
+parseTfdt body
+  | B.length body < 4 = 0
+  | otherwise =
+      let version = B.index body 0
+       in if version == 1
+            then
+              if B.length body >= 12
+                then readBE64 (B.take 8 (B.drop 4 body))
+                else 0
+            else
+              if B.length body >= 8
+                then fromIntegral (readBE32 (B.take 4 (B.drop 4 body)))
+                else 0

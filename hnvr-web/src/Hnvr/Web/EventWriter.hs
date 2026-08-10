@@ -24,21 +24,19 @@ where
 
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException, catch)
-import Control.Monad (forever)
+import Control.Monad (forever, void)
 import Data.Aeson (FromJSON, decode)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.UUID (UUID)
-import Generated.Types (Segment)
 import Hnvr.Core.Id (CameraId (..), HostId (..), sha256ToHex)
 import Hnvr.Core.Segment (SegmentWritten (..))
 import Hnvr.Nats.Bus (Bus, Message (..), Subscription)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (events)
-import IHP.HaskellSupport (set, (|>))
-import IHP.ModelSupport (ModelContext, createRecord, newRecord)
+import IHP.ModelSupport (ModelContext, sqlExec)
 
 -- | Spawn the EventWriter drain loop in a background 'async'. Returns
 -- immediately after subscribing. The async lives for the lifetime of the
@@ -71,27 +69,30 @@ drainLoop sub = forever $ do
       -- drop anything we can't decode.
       pure ()
 
--- | Insert a 'SegmentWritten' row via IHP's createRecord.
+-- | Insert a 'SegmentWritten' row idempotently.
 --
--- Idempotency relies on the @UNIQUE (camera_id, start_ts)@ constraint:
--- a duplicate insert throws a unique-violation PG error which the
--- 'drainLoop' catch handler absorbs. We don't use ON CONFLICT DO NOTHING
--- here because IHP's createRecord doesn't expose it; we'd need raw SQL
--- for that (deferred — the catch path handles dupes correctly, just
--- slightly noisier in logs).
+-- Uses raw SQL with @ON CONFLICT (camera_id, start_ts) DO NOTHING@ so
+-- duplicate publishes (reconnect retries, JetStream redeliveries once
+-- we wire it) are absorbed silently — no exception, no log noise, no
+-- extra round-trip. The unique constraint is declared in
+-- @Application/Schema.sql@.
 insertSegment :: (?modelContext :: ModelContext) => SegmentWritten -> IO ()
-insertSegment sw = do
-  let seg =
-        newRecord @Segment
-          |> set #cameraId (unCameraId (swCamera sw) :: UUID)
-          |> set #startTs (swStart sw)
-          |> set #endTs (swEnd sw)
-          |> set #hostId (Just (unHostId (swHostId sw)) :: Maybe Text)
-          |> set #objectKey (swObjectKey sw)
-          |> set #bytes (fromIntegral (swBytes sw) :: Integer)
-          |> set #sha256 (sha256ToHex (swSha sw))
-  _ <- createRecord seg
-  pure ()
+insertSegment sw =
+  void $
+    sqlExec
+      "INSERT INTO segments \
+      \  (camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, \
+      \   has_audio, created_at) \
+      \ VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, NOW()) \
+      \ ON CONFLICT (camera_id, start_ts) DO NOTHING"
+      ( unCameraId (swCamera sw) :: UUID,
+        swStart sw,
+        swEnd sw,
+        unHostId (swHostId sw) :: Text,
+        swObjectKey sw,
+        fromIntegral (swBytes sw) :: Integer,
+        sha256ToHex (swSha sw)
+      )
 
 decodeStrict :: (FromJSON a) => BS.ByteString -> Maybe a
 decodeStrict = decode . BL.fromStrict

@@ -1,58 +1,62 @@
 cabal-version: 2.4
-name:         hnvr-capture
-version:      0.1.0.0
-synopsis:     HNVR RTSP capture: ffmpeg supervision + fMP4 segmenter
-license:      BSD-3-Clause
-build-type:   Simple
+name:          hnvr-capture
+version:       0.1.0.0
+synopsis:      HNVR RTSP capture: ffmpeg supervision + fMP4 segmenter
+license:       BSD-3-Clause
+build-type:    Simple
 
 library
-    exposed-modules:
-        Hnvr.Capture.Ffmpeg
-        Hnvr.Capture.Fmp4
-        Hnvr.Capture.Worker
-    build-depends:
-        base              >= 4.18 && < 5
-      , bytestring
-      , cryptonite
-      , directory
-      , memory
-      , minio-hs
-      , process
-      , text
-      , time
-      , typed-process
-      , hnvr-core
-      , hnvr-nats
-      , hnvr-storage
-    hs-source-dirs:   src
-    default-language: Haskell2010
+  exposed-modules:
+    Hnvr.Capture.Ffmpeg
+    Hnvr.Capture.Fmp4
+    Hnvr.Capture.Worker
+
+  build-depends:
+    , base           >=4.18 && <5
+    , bytestring
+    , cryptonite
+    , directory
+    , hnvr-core
+    , hnvr-nats
+    , hnvr-storage
+    , memory
+    , minio-hs
+    , process
+    , text
+    , time
+    , typed-process
+
+  hs-source-dirs:   src
+  default-language: Haskell2010
 
 executable hnvr-record-frames
-    main-is:          RecordFrames.hs
-    build-depends:
-        base              >= 4.18 && < 5
-      , bytestring
-      , cryptonite
-      , directory
-      , filepath
-      , memory
-      , process
-      , text
-      , time
-      , hnvr-core
-      , hnvr-capture
-    hs-source-dirs:   app
-    default-language: Haskell2010
+  main-is:          RecordFrames.hs
+  build-depends:
+    , base          >=4.18 && <5
+    , bytestring
+    , cryptonite
+    , directory
+    , filepath
+    , hnvr-capture
+    , hnvr-core
+    , memory
+    , process
+    , text
+    , time
+
+  hs-source-dirs:   app
+  default-language: Haskell2010
 
 executable hnvr-capture-loop
-    main-is:          CaptureLoop.hs
-    build-depends:
-        base              >= 4.18 && < 5
-      , text
-      , uuid
-      , hnvr-core
-      , hnvr-capture
-      , hnvr-nats
-      , hnvr-storage
-    hs-source-dirs:   app
-    default-language: Haskell2010
+  main-is:          CaptureLoop.hs
+  build-depends:
+    , base          >=4.18 && <5
+    , hnvr-capture
+    , hnvr-core
+    , hnvr-nats
+    , hnvr-storage
+    , text
+    , uuid
+
+  hs-source-dirs:   app
+  default-language: Haskell2010

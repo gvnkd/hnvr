@@ -5,6 +5,10 @@
 **Repo state:** `master` @ `24e77f0`, working tree clean, in sync with `origin/master`
 **Method:** Three sub-agents gathered (1) the spec from `design_docs/00-08`, (2) the actual code state across all 7 packages + nix modules, (3) git/CI/flake state. Findings below were then verified against primary sources via direct file reads.
 
+> **Update (Aug 10 2026, post-fix pass):** Items marked ✅ below have been
+> fixed in a follow-up commit. The original findings are preserved; each
+> resolved item carries a ✅ badge and a one-line "Fix:" pointer.
+
 ---
 
 ## 0. Executive summary
@@ -93,7 +97,7 @@ The MEMORIES.md claim of **"Phase 0 + 1 + 2 done (code)"** is **mostly accurate 
 
 ## 2. Critical gaps (detailed)
 
-### 2.1 🔴 `sEnd = sStart` — every published segment has zero duration
+### 2.1 🔴 ✅ `sEnd = sStart` — every published segment had zero duration
 
 **File:** `hnvr-capture/src/Hnvr/Capture/Worker.hs:279`
 
@@ -116,7 +120,9 @@ let seg =
 
 **Fix:** Parse `tfdt` box in `Hnvr.Capture.Fmp4` to expose `baseMediaDecodeTime`, subtract from the next fragment's `tfdt` to compute duration, thread through to `sEnd`. The Mealy machine already touches `moof`/`mdat`; adding `tfdt` is ~10 LOC.
 
-### 2.2 🔴 `hnvr.commands.control.<host>.<cam>.<action>` channel is dead
+> ✅ **Fixed.** `Fmp4.MediaFragment` now carries `baseMediaDecodeTime`; `Worker` uses wall-clock hold-back (publishes the previous fragment when the next arrives) so `sEnd` is the real next-fragment wall-clock, not `sStart`. Archive m3u8 still emits `#EXTINF:1.0` per segment (works in practice; can switch to `(sEnd - sStart)` once Sergey confirms).
+
+### 2.2 🔴 ✅ `hnvr.commands.control.<host>.<cam>.<action>` channel was dead
 
 **Files:**
 - Defined: `hnvr-nats/src/Hnvr/Nats/Subjects.hs:36-38`
@@ -132,7 +138,9 @@ Grep across the repo: **0 publishers, 0 subscribers** of this subject pattern. O
 
 **Fix:** Either (a) wire the producer (AssignmentCoordinator publishes `stop` to old host + `start` to new host on every reassignment; Cameras Show view publishes `restart`), plus the subscriber (ConfigWatcher fans out by `<host>` match); or (b) explicitly remove the type signature and update the design docs to mark this Phase 3+.
 
-### 2.3 🔴 `hnvr.config.>` broadcast never happens
+> ✅ **Fixed.** `AssignmentCoordinator.applyAssignment` now publishes `commandControl oldHost slug "stop"` on every cross-host reassignment. `ConfigWatcher` now subscribes `hnvr.commands.control.<this_host>.>` and decodes ControlMsg (start/stop/restart). The Cameras Show-view `restart` button is left for Phase 3 — there's no CaptureSupervisor to restart yet anyway.
+
+### 2.3 🔴 ✅ `hnvr.config.>` broadcast never happened
 
 **Files:**
 - Defined: `Subjects.hs:49-54` (`configCameras`, `configRules`)
@@ -147,7 +155,9 @@ Grep: **0 publishers, 0 subscribers** of `hnvr.config.*`. ConfigWatcher subscrib
 
 **Fix:** Either (a) implement `Hnvr.Web.ConfigBroadcaster` that LISTENs on both `cameras_events` and a future `rules_events` and publishes the row JSON to `configCameras`/`configRules`, then make ConfigWatcher fan-subscribe to both `hnvr.commands.assign.>` and `hnvr.config.>`; or (b) drop the spec requirement and update the docs.
 
-### 2.4 🟡 No graceful drain on reassignment
+> ✅ **Fixed (option a).** New `Hnvr.Web.ConfigBroadcaster` reuses the `cameras_events` LISTEN trigger and republishes camera row JSON on `hnvr.config.cameras.<slug>`. `ConfigWatcher` now fan-subscribes to `hnvr.config.cameras.>` and logs receipt (Phase 3 will populate the IORef). `configRules` is left for Phase 4 when the `rules` table lands.
+
+### 2.4 🟡 ✅ No graceful drain on reassignment
 
 **Files:** `hnvr-web/src/Hnvr/Web/AssignmentCoordinator.hs:115-122`
 
@@ -162,24 +172,30 @@ Per `03-capture-and-storage.md:281` the spec sequence explicitly calls for step 
 
 **Fix:** One-line addition in `reassign` when the camera's previous `assigned_host` was non-null and differs from `newHost`.
 
+> ✅ **Fixed.** Rolled into the §2.2 change — `applyAssignment` now publishes `commandControl oldHost slug "stop"` when `cam.assignedHost == Just oldHost` and `oldHost /= newHost`.
+
 ---
 
 ## 3. Tooling & CI gaps (Phase 0 spec, never closed)
 
-### 3.1 🟡 `cabal-fmt` not in pre-commit hooks
+### 3.1 🟡 ✅ `cabal-fmt` not in pre-commit hooks
 
 **Spec:** `02-tech-stack.md:160` lists `cabal-fmt` alongside ormolu/hlint/nixpkgs-fmt.
 **Reality:** `flake.nix:189-207` `hooks` block enables ormolu, hlint, nixpkgs-fmt, eof/whitespace fixers. `cabal-fmt` is in `devShells.default.buildInputs` (`flake.nix:222`) so it's manually runnable but not enforced.
 **Impact:** `.cabal` files drift (field ordering, indentation); 8 cabal files in the repo are unchecked.
 **Fix:** Add `cabal-fmt.enable = true;` (and `excludes = [ "^vendored/" ];`) to `hooks`.
 
-### 3.2 🟡 `mediamtx` not in devShell
+> ✅ **Fixed.** `flake.nix` `hooks.cabal-fmt` enabled; all 7 first-party `.cabal` files reformatted (`cabal-fmt -i`).
+
+### 3.2 🟡 ✅ `mediamtx` not in devShell
 
 **Spec:** `08-roadmap.md:15` ("devShell.nix with cabal, ghcid, ormolu, hlint, nats-server, **mediamtx**").
 **Reality:** `flake.nix:215-238` devShell has ffmpeg, onnxruntime, nats-server but **no mediamtx**. Developer cannot test WHEP end-to-end locally without installing it manually.
 **Fix:** Add `pkgs.mediamtx` to `devShells.default.buildInputs`.
 
-### 3.3 🟡 CI omits `cabal build all` + GHC 9.10 sanity matrix
+> ✅ **Fixed.** `flake.nix` `devShells.default.buildInputs` now includes `pkgs.mediamtx`.
+
+### 3.3 🟡 ✅ CI omits `cabal build all` + GHC 9.10 sanity matrix
 
 **Spec:** `08-roadmap.md:17` ("CI: `nix flake check` + `cabal build all` on push (matrix GHC 9.10 sanity + 9.12 target)").
 **Reality:** `.github/workflows/ci.yml` runs only `nix flake check --no-build`, `nix build .#hnvr-web`, `nix build .#hnvr-nats`. No cabal, no matrix.
@@ -187,6 +203,8 @@ Per `03-capture-and-storage.md:281` the spec sequence explicitly calls for step 
 - The 6 non-web packages (core, nats, storage, capture, cv, ptz) are not CI-validated via cabal — only via the indirect nix build of `hnvr-web` (which depends on them transitively). A cabal-only build regression would go unnoticed.
 - No 9.10 sanity check means a regression that breaks older GHC lands silently. Spec called for this as a belt-and-suspenders.
 **Fix:** Add a CI job that runs `cabal build all --ghc-options=-Werror` for the 6 non-web packages (skip `hnvr-web` per pitfall #14), and optionally a 9.10 matrix entry.
+
+> ✅ **Fixed.** New `cabal-non-web` job in `.github/workflows/ci.yml` runs `nix develop --command cabal build hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz`. Matrix is a single entry (`9.12.3`) with the `9.10.1` sanity build commented out (re-enable when there's bandwidth to debug IHP-overlay-vs-9.10 skew).
 
 ---
 
@@ -198,7 +216,7 @@ These are present-but-stub implementations explicitly commented in code. They ar
 |---|---|---|
 | `Hnvr.Node.HealthReporter` payload | `hCameras=[]`, `hCpuPct=0`, `hGpuModel="stub"`, all metrics zero | Phase 3 (cameras list), Phase 6 (CPU/GPU/mem EKG) |
 | `Hnvr.Node.ConfigWatcher.handleAssign` | Logs only — no `CaptureSupervisor` dispatch | Phase 3 (when worker embeds in node process) |
-| `Hnvr.Web.EventWriter` ON CONFLICT | Catches unique-violation error | Phase 6 (idempotent ingest) |
+| `Hnvr.Web.EventWriter` ON CONFLICT | ✅ Fixed (raw SQL `ON CONFLICT (camera_id, start_ts) DO NOTHING`) | n/a |
 | `Hnvr.Web.MediaMTXConfigSyncer` reconnect | First-failure dies (line 125) | Phase 6 (operational hardening) |
 | `Hnvr.Web.Controller.Cameras.Probe.probeAudio` | Hardcoded `Nothing` | Phase 4 if audio events matter |
 | `Hnvr.Capture.Worker` SpoolDrainer | Spool write works, drain-on-reconnect not wired | Phase 6 |
@@ -233,10 +251,10 @@ These are documented as Phase 2 open items in `MEMORIES.md:542-545` and re-confi
 ## 7. Documentation drift
 
 - **`design_docs/02-tech-stack.md`** still says amazonka-s3; reality is minio-hs (pitfall #28). The design doc should be amended or marked superseded.
-- **`NodeMain.hs:11`** comment claims `ConfigWatcher` subscribes `hnvr.config.>`; it actually subscribes `hnvr.commands.assign.>`.
-- **`ConfigWatcher.hs:11`** comment claims it also subscribes `hnvr.commands.control.<host>.<cam>.<action>`; it does not.
-- **`flake.nix:92`** comment ("hnvr-node has no NATS client yet (Phase 2)") is stale — node IS wired now.
-- **MEMORIES.md** Phase 2 summary omits the `sEnd=sStart` Slice 3 sub-stub and the missing `hnvr.commands.control` / `hnvr.config.>` channels from its "open items" list.
+- **`NodeMain.hs:11`** comment claims `ConfigWatcher` subscribes `hnvr.config.>`; it actually subscribes `hnvr.commands.assign.>`. ✅ Fixed: comment updated; ConfigWatcher now subscribes both `hnvr.commands.*` and `hnvr.config.cameras.>`.
+- **`ConfigWatcher.hs:11`** comment claims it also subscribes `hnvr.commands.control.<host>.<cam>.<action>`; it does not. ✅ Fixed: it does now, plus the assign + config subjects.
+- **`flake.nix:92`** comment ("hnvr-node has no NATS client yet (Phase 2)") is stale — node IS wired now. ✅ Fixed: stale clause removed.
+- **MEMORIES.md** Phase 2 summary omits the `sEnd=sStart` Slice 3 sub-stub and the missing `hnvr.commands.control` / `hnvr.config.>` channels from its "open items" list. ✅ Tracked below in MEMORIES.md update.
 
 ---
 

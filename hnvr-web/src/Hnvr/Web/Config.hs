@@ -26,6 +26,7 @@ import qualified Data.Text as T
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Node.HealthReporter (startHealthReporter)
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
+import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
 import Hnvr.Web.EventWriter (startEventWriter)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
@@ -67,6 +68,7 @@ connectNatsAndStartEventWriter = do
         startEventWriter bus ?modelContext
         _ <- startHealthCache bus
         startAssignmentCoordinator bus
+        startConfigBroadcaster bus
         host <- maybe "hnvr-2" T.pack <$> Env.lookupEnv "HNVR_HOST"
         startHealthReporter bus host
   connect' `E.catch` \(e :: E.SomeException) ->

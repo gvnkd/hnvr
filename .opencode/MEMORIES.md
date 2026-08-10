@@ -10,7 +10,9 @@
 - **Local path**: `/home/pion/work/dev/hnvr`
 - **Remote**: `gitea@192.168.0.254:omg/hnvr.git` (branch `master`)
 - **Current branch state**: Phase 0 + 1 + 2 done (code; live VM tests
-  pending). Phase 2 commit history:
+  pending). Phase 2 audit-and-fix pass landed Aug 10 2026 (see
+  `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
+  that have been resolved). Phase 2 commit history:
   - `e08a1f7` docs: add initial HNVR design documentation
   - `ef3c743` scaffold: cabal multi-package project + flake.nix
   - `ece9519` phase 0: bootstrap IHP web + NATS bus + NixOS VMs
@@ -471,9 +473,24 @@ ffprobe notes:
        truth at mediamtx boot.
 
    46. **NoFieldSelectors + record fields** — with `NoFieldSelectors`
-       enabled, `recField rec` (function application style) doesn't
-       compile. Use `rec.recField` (OverloadedRecordDot). The cabal
-       default-extensions include both.
+        enabled, `recField rec` (function application style) doesn't
+        compile. Use `rec.recField` (OverloadedRecordDot). The cabal
+        default-extensions include both.
+
+   47. **`nix build .#hnvr-web` requires new modules to be `git add`-ed
+       BEFORE invoking nix** — `callCabal2nix` only sees files in the
+       git tree (pitfall #10 generalised). Adding a new module to
+       `exposed-modules` without `git add`-ing the .hs file fails with
+       `can't find source for Hnvr/Web/<Mod>` at the cabal configure
+       step. Pre-stage with `git add` before any `nix build` after a
+       new-module commit.
+
+   48. **cabal-fmt and ormolu are pre-commit hooks now** (Aug 10 2026
+       audit-fix) — `.cabal` files use 2-space indent + leading-comma
+       field lists; `.hs` files use ormolu's compact record/list style
+       (e.g. `Record{ field = value }` not `Record { field = value }`).
+       `cabal-fmt -i` and `ormolu -i` over the tree before commit if
+       you've edited anything sizeable.
 
 ## Sergey's working style
 
@@ -530,13 +547,32 @@ ffprobe notes:
       - ✅ Slice 5: `Hnvr.Web.AssignmentCoordinator` — 5s poll,
             15s host-down timeout, `manual_assign=true` cameras never
             overridden, publishes `hnvr.commands.assign.<slug>` on
-            change. `Hnvr.Node.ConfigWatcher` subscribes
-            `hnvr.commands.assign.>` and logs (CaptureSupervisor
-            dispatch lands in Phase 3 when CaptureWorker is embedded
-            in the node process).
+            change. **Slice 5 audit-fix (Aug 10 2026): also publishes
+            `hnvr.commands.control.<old_host>.<slug>.stop` on cross-host
+            reassignment for graceful drain.** `Hnvr.Node.ConfigWatcher`
+            now subscribes three subjects: `hnvr.commands.assign.>`,
+            `hnvr.commands.control.<this_host>.>`, and
+            `hnvr.config.cameras.>` — all handlers decode + log;
+            CaptureSupervisor dispatch lands in Phase 3.
       - ✅ Slice 6: `/` dashboard (camera grid + hosts table),
             `/hosts` per-host view, `POST /cameras/:id/assign` admin
             override (clears `manual_assign` when host field is blank).
+      - **Aug 10 2026 audit-fix slice** (separate from Phase 2's
+        original 1–6): closed the 8 spec/CI/tooling gaps from
+        `.opencode/PHASE_AUDIT_REPORT.md`:
+          * ✅ `Hnvr.Capture.Fmp4` parses `tfdt`, `MediaFragment`
+                carries `baseMediaDecodeTime`; `Worker` uses wall-clock
+                hold-back so `sEnd = next-fragment arrival`, not
+                `sStart`.
+          * ✅ `Hnvr.Web.ConfigBroadcaster` (new module) reuses
+                `cameras_events` LISTEN and republishes camera row JSON
+                on `hnvr.config.cameras.<slug>`; node-side
+                `ConfigWatcher` subscribes.
+          * ✅ `EventWriter` switched to raw SQL with
+                `ON CONFLICT (camera_id, start_ts) DO NOTHING`
+                (no more caught unique-violation noise).
+          * ✅ Pre-commit `cabal-fmt` hook + `pkgs.mediamtx` in devShell
+                + new `cabal-non-web` CI job (GHC 9.10 sanity commented).
       - nginx for WHEP **skipped** — WAI middleware handles it. nginx
             can land in Phase 6 as a public-facing layer if needed.
       - Open: WHEP not yet browser-tested; mediamtx REST push hasn't

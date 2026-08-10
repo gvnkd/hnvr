@@ -41,6 +41,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (SomeException, catch)
+import Control.Monad (foldM)
 import Crypto.Hash (Digest, SHA256 (..), hash)
 import qualified Data.ByteArray as BA (convert)
 import Data.ByteString (ByteString)
@@ -207,38 +208,90 @@ runOnce cfg cam = do
     Just h -> pure h
     Nothing -> fail "ffmpeg did not give us a stdout pipe"
   hSetBuffering hOut (BlockBuffering (Just 65_536))
-  processStream cfg cam hOut initial
+  processStream cfg cam hOut initial Nothing
   waitForProcess ph
 
 -- | Stream ffmpeg's stdout through the Fmp4 parser, handling each emitted
 -- fragment. Returns when stdout hits EOF.
-processStream :: CaptureConfig -> CameraConfig -> Handle -> Hnvr.Capture.Fmp4.Fmp4State -> IO ()
-processStream cfg cam h st = do
+--
+-- The 'Maybe PendingFrag' is the previously-received fragment held back
+-- so its 'sEnd' can be set to the wall-clock arrival time of the next
+-- fragment (the standard HLS segmenter pattern). At EOF we flush it
+-- with 'sEnd = now' as a best-effort bound.
+processStream :: CaptureConfig -> CameraConfig -> Handle -> Fmp4State -> Maybe PendingFrag -> IO ()
+processStream cfg cam h st pending = do
   chunk <- B.hGetSome h 65_536
   if B.null chunk
-    then for_ (finish st) (handleFragment cfg cam)
+    then do
+      for_ (finish st) (handleFragment cfg cam pending)
+      flushPending cfg cam pending
     else do
       let (frags, st') = feed st chunk
-      mapM_ (handleFragment cfg cam) frags
-      processStream cfg cam h st'
+      newPending <- foldM (handleFragment cfg cam) pending frags
+      processStream cfg cam h st' newPending
+
+-- | A previously-received media fragment held back so we can stamp its
+-- @sEnd@ when the next one arrives.
+data PendingFrag = PendingFrag
+  { pfStart :: !UTCTime,
+    pfBytes :: !ByteString,
+    pfSha :: !Sha256
+  }
 
 -- | Compute sha256, push to S3 (or spool), publish 'SegmentWritten' on
 -- NATS (if Bus configured). Catches per-fragment errors so one bad put
 -- doesn't kill the whole stream.
-handleFragment :: CaptureConfig -> CameraConfig -> Fragment -> IO ()
-handleFragment cfg cam frag =
+--
+-- For 'MediaFragment', this enqueues the fragment as the new pending and
+-- (if there was already a pending) publishes that one with
+-- @sEnd = current wall-clock@. Returns the updated pending state.
+handleFragment :: CaptureConfig -> CameraConfig -> Maybe PendingFrag -> Fragment -> IO (Maybe PendingFrag)
+handleFragment cfg cam pending frag =
   case frag of
     InitFragment bs -> do
       let key = ccSlug cam <> "/init.mp4"
       storeOrUpload cfg cam key bs "init"
-    MediaFragment bs -> do
+      pure pending
+    MediaFragment _tfdt bs -> do
       ts <- getCurrentTime
       let sha = sha256Bytes bs
           key = formatSegmentObjectKeyMs (ccSlug cam) ts
+      -- Upload the current fragment immediately (S3 latency unchanged).
       storeOrUpload cfg cam key bs "media"
-      publishSegmentWritten cfg cam ts bs sha
-    `catch` \(e :: SomeException) ->
+      -- Publish the previous pending (if any) now that we know its end.
+      flushPendingAt cfg cam ts pending
+      pure (Just (PendingFrag ts bs sha))
+    `catch` \(e :: SomeException) -> do
       logErr cam $ "fragment handler failed: " <> show e
+      pure pending
+
+-- | Flush the pending fragment at EOF using the current wall-clock as
+-- the best-effort @sEnd@.
+flushPending :: CaptureConfig -> CameraConfig -> Maybe PendingFrag -> IO ()
+flushPending cfg cam pending = do
+  now <- getCurrentTime
+  flushPendingAt cfg cam now pending
+
+-- | Publish the pending 'SegmentWritten' on @hnvr.events@ with the
+-- supplied end timestamp. No-op if there is no pending fragment or no
+-- Bus configured.
+flushPendingAt :: CaptureConfig -> CameraConfig -> UTCTime -> Maybe PendingFrag -> IO ()
+flushPendingAt cfg cam endTs pending =
+  case (capBus cfg, pending) of
+    (Just bus, Just p) ->
+      let seg =
+            Segment
+              { sCamera = ccId cam,
+                sSlug = ccSlug cam,
+                sStart = pfStart p,
+                sEnd = endTs,
+                sBytes = pfBytes p,
+                sSha = pfSha p,
+                sKind = Video,
+                sHostId = capHostId cfg
+              }
+       in Bus.publishJson bus events (toSegmentWritten seg)
+    _ -> pure ()
 
 -- | Upload to S3 if configured; otherwise write to the local spool dir.
 -- Failure to upload logs an error and falls back to spool (so we don't
@@ -266,23 +319,11 @@ spoolLocally cfg keyBytes bytes = do
 -- | Publish a 'SegmentWritten' on @hnvr.events@ if a Bus is configured.
 -- Object key is recomputed by `toSegmentWritten` from slug + start time,
 -- so callers don't need to thread it through.
-publishSegmentWritten :: CaptureConfig -> CameraConfig -> UTCTime -> ByteString -> Sha256 -> IO ()
-publishSegmentWritten cfg cam ts bytes sha =
-  case capBus cfg of
-    Nothing -> pure ()
-    Just bus -> do
-      let seg =
-            Segment
-              { sCamera = ccId cam,
-                sSlug = ccSlug cam,
-                sStart = ts,
-                sEnd = ts, -- Slice 3 doesn't parse tfdt yet; refined in Slice 4
-                sBytes = bytes,
-                sSha = sha,
-                sKind = Video,
-                sHostId = capHostId cfg
-              }
-      Bus.publishJson bus events (toSegmentWritten seg)
+--
+-- Note: actual publishing now happens in 'flushPendingAt' so we can stamp
+-- @sEnd = next fragment arrival@. Kept here as a documentation hook;
+-- callers wanting a one-shot publish with explicit timestamps should use
+-- 'Bus.publishJson' directly with a fully-populated 'Segment'.
 
 -- | Exponential backoff (seconds): 2, 4, 8, 16, 30, 30, 30, ...
 backoffDuration :: Int -> Int

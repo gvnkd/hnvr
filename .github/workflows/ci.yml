@@ -27,9 +27,32 @@ jobs:
       - name: nix build .#hnvr-nats
         run: nix --accept-flake-config build --no-link .#hnvr-nats
 
-  # NOTE: We do NOT run `cabal build all` in CI. IHP's transitive deps
-  # need version pins that IHP's nix overlay applies but cabal doesn't
-  # see; `cabal build` of hnvr-web fails on mime-mail-ses (memory/crypton
-  # version skew). `nix build` is canonical. cabal is supported for the
-  # non-IHP packages (hnvr-core, hnvr-nats, hnvr-storage, hnvr-capture,
-  # hnvr-cv, hnvr-ptz) inside `nix develop` for fast iteration.
+  # Build the 6 non-IHP packages via cabal inside `nix develop` for fast
+  # feedback on cabal-side regressions (nix build covers the IHP path).
+  # hnvr-web is excluded — IHP's transitive version pins (mime-mail-ses →
+  # memory/crypton skew) only exist in the nix overlay, not in Hackage.
+  cabal-non-web:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ghc: ["9.12.3"]
+        # To re-enable the GHC 9.10 sanity build (per design_docs/08-roadmap.md
+        # "matrix GHC 9.10 sanity + 9.12 target"), uncomment:
+        #   - "9.10.1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            accept-flake-config = true
+            experimental-features = nix-command flakes pipe-operators
+      - uses: cachix/cachix-action@v15
+        with:
+          name: digitallyinduced
+          skipPush: true
+      - name: cabal build (non-web packages)
+        run: |
+          nix develop --command \
+            bash -c 'cabal update && cabal build hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz'

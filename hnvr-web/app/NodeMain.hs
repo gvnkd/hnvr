@@ -6,16 +6,13 @@
 -- Carries:
 --
 --   * CaptureSupervisor + AnalyzerSupervisor + PtzSupervisor (one per assigned
---     camera)
+--     camera) — Phase 3.
 --   * HealthReporter (publishes @hnvr.health.<host>@ every 5s)
---   * ConfigWatcher (subscribes @hnvr.config.>@, updates in-memory IORef)
+--   * ConfigWatcher (subscribes @hnvr.commands.assign.>@ and
+--     @hnvr.commands.control.<host>.>@; Phase 3 will dispatch to the
+--     CaptureSupervisor; today both handlers just log).
 --
 -- No HTTP server. No Postgres credentials. Only NATS + SeaweedFS creds.
---
--- Phase 0 wires a NATS connection + a placeholder subscription so the
--- node is visibly present in @nats-server@ monitoring. HealthReporter
--- landed in Phase 2 Slice 4; CaptureSupervisor + ConfigWatcher land in
--- Phase 2 Slice 5.
 module Main (main) where
 
 import Control.Concurrent (threadDelay)
@@ -36,10 +33,6 @@ main = do
     host <- maybe "hnvr-1" T.pack <$> Env.lookupEnv "HNVR_HOST"
     startHealthReporter bus host
     startConfigWatcher bus host
-    _sub <- Bus.subscribe bus "hnvr.commands.>"
     putStrLn $ "hnvr-node connected to NATS: " <> T.unpack uri
-    putStrLn $
-      "hnvr-node subscribed to hnvr.commands.> "
-        <> "(CaptureSupervisor dispatch lands in Phase 3)"
     void $ forever $ do
       threadDelay 1000000000

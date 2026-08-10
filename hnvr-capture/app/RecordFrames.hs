@@ -123,7 +123,7 @@ writeFragment slug outDir frag = do
       let p = outDir </> T.unpack slug </> "init.mp4"
       B.writeFile p bs
       logInfo $ "init -> " ++ p ++ " (" ++ show (B.length bs) ++ " bytes)"
-    MediaFragment bs -> do
+    MediaFragment _tfdt bs -> do
       let sha = sha256Bytes bs
           key = T.unpack (formatSegmentObjectKeyMs slug ts)
           p = outDir </> key
