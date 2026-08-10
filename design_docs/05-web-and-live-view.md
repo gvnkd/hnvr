@@ -48,6 +48,23 @@ First-run bootstrap: an `admin` user is created from `INITIAL_ADMIN_EMAIL` / `IN
 
 ## URL map
 
+> **Implementation note (Aug 10 2026, commit `ce739c1`)** — the table
+> below is the design target: RESTful, slug-in-path. The current impl
+> uses IHP-canonical action-derived URLs instead (`/Cameras`,
+> `/ShowCamera?cameraId=…`, `/EditCamera?cameraId=…`, `/CreateCamera`,
+> `/UpdateCamera?…`, `/DeleteCamera?…`, `/ProbeCamera?…`,
+> `/AssignCamera?…`, `/PlayerArchive?cameraId=…`,
+> `/PlaylistArchive?cameraId=…`, `/ShowLive?cameraId=…`, `/Hosts`,
+> `/Dashboard`). IHP's `AutoRoute` derives URLs from constructor names,
+> and the initial Phase 1/2 slices used the canonical form to avoid
+> `/Index` collisions across controllers and to get `startPage` working
+> at `/`. Migration to the RESTful form below is deferred to Phase 8
+> (Polish) — either via custom `AutoRoute` instances or a `Yesod`-style
+> `pathComponents` override. See `.opencode/MEMORIES.md` pitfall #59
+> for the IHP `actionPrefixText` gotcha that drove the canonical
+> naming. The WHEP proxy (`/whep/:slug`) is unaffected — it's raw WAI
+> middleware, not an IHP controller.
+
 | Method | Path | Controller / Action | Auth |
 |--------|------|---------------------|------|
 | GET    | `/`                       | Dashboard#index        | viewer+ |

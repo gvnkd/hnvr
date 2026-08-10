@@ -127,9 +127,10 @@ nix build .#nixosConfigurations.hnvr-2-vm.config.system.build.vm
 NIX_DISK_IMAGE=/tmp/leader.qcow2 \
   QEMU_NET_OPTS="hostfwd=tcp:127.0.0.1:18000-:8000,hostfwd=tcp:127.0.0.1:18222-:8222,hostfwd=tcp:127.0.0.1:18889-:8889,hostfwd=tcp:127.0.0.1:19997-:9997" \
   ./result/bin/run-nixos-vm
-curl http://localhost:18000/healthz        # → ok, HTTP 200
-curl http://localhost:18000/               # → dashboard (cameras grid + hosts)
-curl http://localhost:18000/hosts          # → per-host panel
+curl http://localhost:18000/healthz        # → BROKEN: 404 (IHP v1.6.0 CustomMiddleware chain bug — see commit ce739c1)
+curl http://localhost:18000/               # → Dashboard (via startPage DashboardAction)
+curl http://localhost:18000/Hosts          # → per-host panel (capital H — IHP-canonical URL)
+curl http://localhost:18000/Dashboard      # → same as /
 curl http://localhost:19997/v2/config/paths # → mediamtx live config
 
 # Worker VM (now also runs NATS broker so node has a local peer)
@@ -177,13 +178,14 @@ hnvr/
 │                        │                                  + MediaMTXConfigSyncer + WHEP proxy
 │                        ├── src/Hnvr/Web/FrontController.hs RootApplication + parseRoute for
 │                        │                                  Cameras/Archive/Live/Dashboard/Hosts
-│                        ├── src/Hnvr/Web/Controller/Cameras.hs      CRUD + Probe + Assign
-│                        ├── src/Hnvr/Web/Controller/Cameras/Probe.hs ffprobe JSON parser
-│                        ├── src/Hnvr/Web/Controller/Support/Crypto.hs encryptPassword / decryptPassword / requireKey
-│                        ├── src/Hnvr/Web/Controller/Archive.hs       PlayerAction + m3u8 PlaylistAction
-│                        ├── src/Hnvr/Web/Controller/Live.hs          /live/<slug> ShowAction
-│                        ├── src/Hnvr/Web/Controller/Dashboard.hs     / camera grid + hosts panel
-│                        ├── src/Hnvr/Web/Controller/Hosts.hs         /hosts per-host status
+│                        ├── src/Web/Controller/Cameras.hs      CRUD + Probe + Assign (Web.* not Hnvr.Web.* — see pitfall #59)
+│                        ├── src/Web/Controller/Cameras/Probe.hs ffprobe JSON parser
+│                        ├── src/Web/Controller/Support/Crypto.hs encryptPassword / decryptPassword / requireKey
+│                        ├── src/Web/Controller/Archive.hs       PlayerArchiveAction + m3u8 PlaylistArchiveAction
+│                        ├── src/Web/Controller/Live.hs          ShowLiveAction
+│                        ├── src/Web/Controller/Dashboard.hs     DashboardAction (startPage → /)
+│                        ├── src/Web/Controller/Hosts.hs         HostsAction
+│                        ├── src/Web/Controller/Sessions.hs      NewSessionAction/CreateSessionAction/DeleteSessionAction
 │                        ├── src/Hnvr/Web/EventWriter.hs              NATS hnvr.events → PG segments
 │                        ├── src/Hnvr/Web/HealthCache.hs              NATS hnvr.health.> → IORef + PG
 │                        ├── src/Hnvr/Web/AssignmentCoordinator.hs    5s poll, host-down → reassign
@@ -528,8 +530,10 @@ ffprobe notes:
        the import, `authMiddleware @User` and `ensureIsUser` fail with
        "Couldn't match type CurrentUserRecord with User". Affects every
        module that touches `authMiddleware @User` / `ensureIsUser` /
-       `currentUserOrNothing` — currently `Config.hs`, `Controller/Cameras.hs`,
-       `View/Layout.hs`. Add the empty import wherever IHP auth is used.
+       `currentUserOrNothing` — currently `Config.hs`,
+       `Web/Controller/Cameras.hs` (renamed from `Hnvr.Web.Controller.*`
+       in commit `ce739c1`, see pitfall #59), `View/Layout.hs`. Add the
+       empty import wherever IHP auth is used.
 
    51. **`regen.sh` does NOT touch `hnvr-web.cabal`** (Aug 10 2026 slice 8) —
        when adding a new table to `Schema.sql`, after `./hnvr-web/regen.sh`
@@ -612,8 +616,9 @@ ffprobe notes:
        - **Stopping a hung devenv** — `~/bin/devenv-kill` (committed
          locally to ~/bin, not the repo). Scoped to `/nix/store/...`
          paths so it never touches Sergey's system services.
-       Env vars consumed by HNVR binaries (`HNVR_NATS_URI`, `HNVR_S3_*`,
-       `DATABASE_URL`, `HNVR_MEDIAMTX_*`, `PORT=18001`) are pre-wired —
+        Env vars consumed by HNVR binaries (`HNVR_NATS_URI`, `HNVR_S3_*`,
+        `DATABASE_URL`, `HNVR_MEDIAMTX_*`, `PORT=18001`, `HNVR_DATA_KEY`)
+        are pre-wired —
        cabal-built binaries drop straight into the running services.
        `nix flake check --no-build --keep-going` passes for `devShells.*`,
        `packages.*`, `checks.*`, `formatter`, `nixosModules.*`; the
@@ -663,7 +668,16 @@ ffprobe notes:
           `(?context :: RequestContext, ?request :: Request) =>` or no
           signature.
 
-   57. **hasql serialises `String` as a PG array, not TEXT** (Aug 10 2026) —
+    57. **`HNVR_DATA_KEY` must be set before any Cameras CRUD write** (Aug 10
+       2026) — `Web.Controller.Support.Crypto.requireKey` throws
+       `userError "HNVR_DATA_KEY not set; cannot encrypt/decrypt camera
+       passwords"` at the action level if missing. Symptom: `/NewCamera`
+       form POST → IHP exception page. Fix landed in devenv: a stable
+       dev-only base64 32-byte key is baked into the `env` block in
+       `flake.nix` (matches the `INITIAL_ADMIN_PASSWORD` dev-convenience
+       pattern). Production sources via sops-nix (Phase 6).
+
+    58. **hasql serialises `String` as a PG array, not TEXT** (Aug 10 2026) —
        `Env.lookupEnv` returns `IO (Maybe String)` and `String = [Char]`.
        Passing that `String` straight to `sqlExec`'s tuple makes hasql
        pick the `[Char]` `ToField` instance, which encodes a PG **array**
@@ -684,6 +698,39 @@ ffprobe notes:
        And devenv's env block now ships dev defaults
        (`admin@hnvr.local` / `hnvr-dev`) so `devenv up` + leader just
        works.
+
+   59. **IHP `actionPrefixText` derives URL prefix from the controller
+       module's FIRST dot-segment** (Aug 10 2026, commit `ce739c1`) —
+       modules under `Hnvr.Web.Controller.*` got the URL prefix `/hnvr/`
+       (not `/`), so every route 404'd with "Action not found". IHP's
+       `IHP.RouterSupport` isPrefixOf check matches `"Web."` literally,
+       so controllers MUST live under `Web.Controller.*` for the prefix
+       to collapse to `/`. Symptom: `curl http://localhost:18000/` →
+       404 "Action not found" while `curl http://localhost:18000/hnvr/`
+       worked. Fix: `git mv hnvr-web/src/Hnvr/Web/Controller
+       hnvr-web/src/Web/Controller` + update all imports. Views stay
+       under `Hnvr.Web.View.*` (only the `isPrefixOf "Web."` check on
+       controllers matters). **Always put IHP controllers under
+       `Web.Controller.*`, never namespaced under the project name.**
+
+       Companion gotcha: IHP AutoRoute generates URLs from constructor
+       names, so `IndexAction` in every controller collides on `/Index`.
+       Use IHP-canonical per-resource form: `CamerasAction`,
+       `ShowCameraAction`, `EditCameraAction`, `CreateCameraAction`,
+       `UpdateCameraAction`, `DeleteCameraAction`, `ProbeCameraAction`,
+       `AssignCameraAction`, `HostsAction`, `DashboardAction`,
+       `PlayerArchiveAction`, `PlaylistArchiveAction`, `ShowLiveAction`.
+       Sessions is already canonical (`NewSessionAction` /
+       `CreateSessionAction` / `DeleteSessionAction`) — left as-is.
+
+       Companion: `startPage DashboardAction` in the `FrontController`
+       instance maps `/` → the named action without consuming an
+       AutoRoute slot. Use it for the root URL (don't try to make an
+       `IndexAction` live at `/`).
+
+       Open follow-up: `/healthz` 404s — `Config.hs`'s `CustomMiddleware`
+       is not being applied by IHP v1.6.0's middleware chain. Tracked
+       separately.
 
 ## Sergey's working style
 
@@ -708,13 +755,14 @@ ffprobe notes:
       - ✅ Slice 7a: `Hnvr.Core.Crypto` AES-256-GCM + sops-nix template
       - ✅ Slice 7b: Schema migrated `password TEXT` → `password_enc BYTEA`
             + `password_nonce BYTEA`. Cameras Create/Update encrypt on
-            write via `Hnvr.Web.Controller.Support.Crypto`; UpdateAction
-            skips re-encryption when the form's password field is blank
-            (keep existing). Form labels updated to make this clear.
-            Decrypt path (`decryptPassword`) is wired for ProbeAction
-            (deferred until rtsp_template rendering lands — currently
-            rtsp_url already has creds embedded so Probe uses it
-            directly).
+            write via `Web.Controller.Support.Crypto` (renamed from
+            `Hnvr.Web.Controller.*` in commit `ce739c1`, see pitfall #59);
+            `UpdateCameraAction` skips re-encryption when the form's
+            password field is blank (keep existing). Form labels updated
+            to make this clear. Decrypt path (`decryptPassword`) is wired
+            for `ProbeCameraAction` (deferred until rtsp_template
+            rendering lands — currently rtsp_url already has creds
+            embedded so Probe uses it directly).
       - ✅ Slice 8 (Aug 10 2026, phase-audit-fix): Cameras admin gate —
             IHP v1.6.0 `AuthSupport` wiring (`Hnvr.Web.Auth`,
             `Controller/Sessions.hs`, `View/Sessions.New.hs`),
@@ -787,9 +835,21 @@ ffprobe notes:
       - nginx for WHEP **skipped** — WAI middleware handles it. nginx
             can land in Phase 6 as a public-facing layer if needed.
       - Open: WHEP not yet browser-tested; mediamtx REST push hasn't
-            been exercised against a live mediamtx; AssignmentCoordinator
-            load balancing is naive (lex-smallest host) — fine for 2
-            hosts, real load-aware assignment deferred.
+             been exercised against a live mediamtx; AssignmentCoordinator
+             load balancing is naive (lex-smallest host) — fine for 2
+             hosts, real load-aware assignment deferred.
+      - **Aug 10 2026 routing rename** (commits `ce739c1` + `87cd6c3`):
+            controllers moved `Hnvr.Web.Controller.*` → `Web.Controller.*`
+            and action constructors renamed to IHP-canonical per-resource
+            form. See pitfall #59 for the IHP `actionPrefixText` gotcha.
+            URL map now: `/` → dashboard (via `startPage DashboardAction`),
+            `/Cameras` (list), `/ShowCamera?cameraId=…`, `/NewCamera`,
+            `/EditCamera?cameraId=…`, `/CreateCamera`, `/UpdateCamera`,
+            `/DeleteCamera`, `/ProbeCamera?cameraId=…`, `/AssignCamera`,
+            `/PlayerArchive?cameraId=…`, `/PlaylistArchive?cameraId=…`,
+            `/ShowLive?cameraId=…`, `/Hosts`, `/Dashboard`,
+            `/NewSession`, `/CreateSession`, `/DeleteSession`. Views
+            stayed under `Hnvr.Web.View.*` (only controllers moved).
 - [ ] Phase 3 — CV detection + tracking
 - [ ] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate
 - [ ] Phase 5 — PTZ manual + presets          ← v1.0 release

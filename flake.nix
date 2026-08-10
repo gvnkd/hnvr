@@ -560,6 +560,11 @@
                 # sources these from sops-nix (Phase 6); dev-only.
                 INITIAL_ADMIN_EMAIL = "admin@hnvr.local";
                 INITIAL_ADMIN_PASSWORD = "hnvr-dev";
+                # AES-256 data key for camera password encryption
+                # (Hnvr.Core.Crypto via Web.Controller.Support.Crypto).
+                # Stable so dev DB rows stay decryptable across sessions;
+                # dev-only — production sources from sops-nix.
+                HNVR_DATA_KEY = "j1kGE9Y274/RNq1+TJWKeS4RDocw5+Uu05q3KPKm7XM=";
               };
 
               enterShell = preCommit.shellHook + ''
