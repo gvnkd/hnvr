@@ -9,7 +9,7 @@ import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-data EditView = EditView
+newtype EditView = EditView
   { camera :: Camera
   }
 
@@ -29,7 +29,7 @@ instance View EditView where
       </form>
     |]
     where
-      probeUrl = "/cameras/" <> tshow camera.id <> "/probe"
+      probeUrl = "/cameras/" <> tshow (camera |> get #id) <> "/probe"
 
       renderForm camera =
         [hsx|
@@ -54,7 +54,7 @@ instance View EditView where
           </form>
         |]
 
-      updateUrl cam = "/cameras/" <> tshow cam.id
+      updateUrl cam = "/cameras/" <> tshow (cam |> get #id)
 
       textFieldFor name' label' value' =
         [hsx|

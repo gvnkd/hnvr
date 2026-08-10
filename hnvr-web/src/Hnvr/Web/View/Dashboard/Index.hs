@@ -58,7 +58,7 @@ instance View IndexView where
         |]
       renderCamera cam = [hsx|{card}|]
         where
-          cid = tshow cam.id
+          cid = tshow (cam |> get #id)
           liveUrl = "/live/" <> cam.slug
           showUrl = "/cameras/" <> cid
           archiveUrl = "/cameras/" <> cid <> "/archive"

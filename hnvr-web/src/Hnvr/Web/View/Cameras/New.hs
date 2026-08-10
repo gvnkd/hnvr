@@ -9,7 +9,7 @@ import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-data NewView = NewView
+newtype NewView = NewView
   { camera :: Camera
   }
 

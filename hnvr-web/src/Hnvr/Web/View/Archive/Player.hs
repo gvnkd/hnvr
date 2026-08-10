@@ -9,7 +9,7 @@ import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-data PlayerView = PlayerView
+newtype PlayerView = PlayerView
   { camera :: Camera
   }
 
@@ -26,7 +26,7 @@ instance View PlayerView where
       <script>{preEscapedTextValue js}</script>
     |]
     where
-      playlistUrl = "/cameras/" <> tshow camera.id <> "/playlist"
+      playlistUrl = "/cameras/" <> tshow (camera |> get #id) <> "/playlist"
       js =
         "const video = document.getElementById('hnvr-player');"
           <> "const status = document.getElementById('hnvr-status');"

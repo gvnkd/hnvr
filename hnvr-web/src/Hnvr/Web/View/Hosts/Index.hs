@@ -51,4 +51,4 @@ instance View IndexView where
                   </ul>
                 |]
       renderCamLi c = [hsx|<li>{c.slug} · <a href={showCam c}>config</a></li>|]
-      showCam c = "/cameras/" <> tshow c.id
+      showCam c = "/cameras/" <> tshow (c |> get #id)

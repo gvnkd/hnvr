@@ -9,7 +9,7 @@ import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-data ShowView = ShowView
+newtype ShowView = ShowView
   { camera :: Camera
   }
 
@@ -51,7 +51,7 @@ instance View ShowView where
       </form>
     |]
     where
-      cid = tshow camera.id
+      cid = tshow (camera |> get #id)
       editUrl = "/cameras/" <> cid <> "/edit"
       archiveUrl = "/cameras/" <> cid <> "/archive"
       assignUrl = "/cameras/" <> cid <> "/assign"

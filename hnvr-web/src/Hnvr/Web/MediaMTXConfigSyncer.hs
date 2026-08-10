@@ -35,7 +35,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe, maybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -109,7 +109,7 @@ listenLoop :: (?modelContext :: ModelContext) => IO ()
 listenLoop = do
   dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
   mgr <- HC.newManager HC.defaultManagerSettings
-  apiBase <- fromMaybe defaultMediaMtxApi . fmap T.pack <$> Env.lookupEnv "HNVR_MEDIAMTX_API"
+  apiBase <- maybe defaultMediaMtxApi T.pack <$> Env.lookupEnv "HNVR_MEDIAMTX_API"
   cfgPath <- fromMaybe defaultConfigPath <$> Env.lookupEnv "HNVR_MEDIAMTX_CONFIG_PATH"
   -- Initial sync — covers the leader-restart case where cameras
   -- changed while the leader was down.

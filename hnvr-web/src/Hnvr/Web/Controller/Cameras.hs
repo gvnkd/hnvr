@@ -1,6 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -67,7 +65,7 @@ instance Controller CamerasController where
       then do
         camera <- camera |> createRecord
         setSuccessMessage "Camera created"
-        redirectTo ShowAction {cameraId = camera.id}
+        redirectTo ShowAction {cameraId = camera |> get #id}
       else render NewView {..}
   action UpdateAction {cameraId} = do
     camera <- fetch cameraId
@@ -89,7 +87,7 @@ instance Controller CamerasController where
       then do
         camera''' <- camera'' |> updateRecord
         setSuccessMessage "Camera updated"
-        redirectTo ShowAction {cameraId = camera'''.id}
+        redirectTo ShowAction {cameraId = camera''' |> get #id}
       else render EditView {camera = camera''}
   action DeleteAction {cameraId} = do
     camera <- fetch cameraId
@@ -115,7 +113,7 @@ instance Controller CamerasController where
             |> set #substreamHeight (camera |> get #substreamHeight)
             |> updateRecord
         setSuccessMessage "Probe OK"
-        redirectTo EditAction {cameraId = camera.id}
+        redirectTo EditAction {cameraId = camera |> get #id}
 
   -- \| POST /cameras/:id/assign — admin override of assigned_host.
   -- Sets @manual_assign = true@ so the AssignmentCoordinator doesn't
@@ -135,4 +133,4 @@ instance Controller CamerasController where
       $ if cleared
         then "Assignment cleared (auto mode)"
         else "Assigned to " <> hostParam
-    redirectTo ShowAction {cameraId = camera''.id}
+    redirectTo ShowAction {cameraId = camera'' |> get #id}

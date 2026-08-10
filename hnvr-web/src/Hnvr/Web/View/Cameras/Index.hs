@@ -9,7 +9,7 @@ import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-data IndexView = IndexView
+newtype IndexView = IndexView
   { cameras :: [Camera]
   }
 
@@ -58,6 +58,6 @@ instance View IndexView where
           </tr>
         |]
         where
-          cid = tshow camera.id
+          cid = tshow (camera |> get #id)
           showUrl = "/cameras/" <> cid
           editUrl = "/cameras/" <> cid <> "/edit"

@@ -30,7 +30,7 @@ where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException, catch)
-import Control.Monad (forever, void, when)
+import Control.Monad (forever, unless, void)
 import Data.Aeson (ToJSON (..), Value, object, (.=))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -84,7 +84,7 @@ reconcile bus = do
           |> fetch
       let reassigned = mapMaybe (pickTarget hosts) cameras
       mapM_ (applyAssignment bus) reassigned
-      when (not (null reassigned)) $
+      unless (null reassigned) $
         putStrLn $
           "HNVR AssignmentCoordinator: reassigned "
             <> show (length reassigned)
@@ -118,7 +118,7 @@ applyAssignment bus (cam, newHost, slug) = do
   void $
     sqlExec
       "UPDATE cameras SET assigned_host = ?, updated_at = NOW() WHERE id = ?"
-      (newHost, cam.id)
+      (newHost, cam |> get #id)
   Bus.publishJson bus (commandAssign slug) (AssignMsg slug newHost)
 
 -- | Wire payload for @hnvr.commands.assign.<slug>@.

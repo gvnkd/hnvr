@@ -20,7 +20,7 @@ module Main (main) where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forever, void)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (maybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Hnvr.Nats.Bus as Bus
@@ -33,7 +33,7 @@ main = do
   let defaultUri = "nats://nats:nats@localhost:4222" :: Text
   uri <- maybe defaultUri T.pack <$> Env.lookupEnv "HNVR_NATS_URI"
   Bus.withBus Bus.defaultConfig {Bus.busUri = T.unpack uri} $ \bus -> do
-    host <- fromMaybe "hnvr-1" . fmap T.pack <$> Env.lookupEnv "HNVR_HOST"
+    host <- maybe "hnvr-1" T.pack <$> Env.lookupEnv "HNVR_HOST"
     startHealthReporter bus host
     startConfigWatcher bus host
     _sub <- Bus.subscribe bus "hnvr.commands.>"
