@@ -8,16 +8,17 @@
 -- See @design_docs/01-architecture.md@ "NATS subjects" table for semantics
 -- (durability, direction, payload schema).
 module Hnvr.Nats.Subjects
-  ( events
-  , commandAssign
-  , commandControl
-  , commandPtz
-  , health
-  , configCameras
-  , configRules
-  , ptzStatus
-  , leader
-  ) where
+  ( events,
+    commandAssign,
+    commandControl,
+    commandPtz,
+    health,
+    configCameras,
+    configRules,
+    ptzStatus,
+    leader,
+  )
+where
 
 import Data.Text (Text)
 

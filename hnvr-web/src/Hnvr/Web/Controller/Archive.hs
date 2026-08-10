@@ -2,9 +2,9 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 -- | Archive playback controller.
 --
@@ -18,14 +18,15 @@
 -- to the init segment (ftyp+moov). The init.mp4 is uploaded once per
 -- camera at the start of recording (see CaptureWorker).
 module Hnvr.Web.Controller.Archive
-  ( ArchiveController (..)
-  ) where
+  ( ArchiveController (..),
+  )
+where
 
+import qualified Data.Text as T
 import Generated.Types
+import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.View.Archive.Player
 import IHP.ControllerPrelude
-import qualified Data.Text as T
-import qualified Hnvr.Storage.S3 as S3
 import qualified System.Environment as Env
 
 data ArchiveController
@@ -39,7 +40,6 @@ instance Controller ArchiveController where
   action PlayerAction {cameraId} = do
     camera <- fetch cameraId
     render PlayerView {..}
-
   action PlaylistAction {cameraId} = do
     camera <- fetch cameraId
     let cameraUuid = case cameraId of Id u -> u :: UUID
@@ -61,11 +61,11 @@ instance Controller ArchiveController where
 emptyPlaylist :: Text
 emptyPlaylist =
   T.unlines
-    [ "#EXTM3U"
-    , "#EXT-X-VERSION:6"
-    , "#EXT-X-TARGETDURATION:1"
-    , "#EXT-X-PLAYLIST-TYPE:VOD"
-    , "#EXT-X-ENDLIST"
+    [ "#EXTM3U",
+      "#EXT-X-VERSION:6",
+      "#EXT-X-TARGETDURATION:1",
+      "#EXT-X-PLAYLIST-TYPE:VOD",
+      "#EXT-X-ENDLIST"
     ]
 
 -- | Build a VOD m3u8 with presigned S3 GET URLs (1-hour expiry) for each
@@ -79,16 +79,16 @@ buildPlaylist camera segments cfg = do
   initUrl <- cs <$> S3.presignGetUrl ci bucket (slug <> "/init.mp4") 3600
   segUrls <- mapM (presignSegment ci bucket) segments
   let entries = concatMap entryFor (zip segUrls segments)
-  pure $
-    T.unlines $
-      [ "#EXTM3U"
-      , "#EXT-X-VERSION:6"
-      , "#EXT-X-TARGETDURATION:1"
-      , "#EXT-X-PLAYLIST-TYPE:VOD"
-      , "#EXT-X-MAP:URI=\"" <> initUrl <> "\""
+  pure
+    $ T.unlines
+    $ [ "#EXTM3U",
+        "#EXT-X-VERSION:6",
+        "#EXT-X-TARGETDURATION:1",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+        "#EXT-X-MAP:URI=\"" <> initUrl <> "\""
       ]
-        <> entries
-        <> ["#EXT-X-ENDLIST"]
+    <> entries
+    <> ["#EXT-X-ENDLIST"]
   where
     presignSegment ci bucket seg =
       cs <$> S3.presignGetUrl ci bucket seg.objectKey 3600
@@ -108,9 +108,10 @@ readS3Config = do
     accessKey <- T.pack <$> mAccessKey
     secretKey <- T.pack <$> mSecretKey
     bucket <- T.pack <$> mBucket
-    Just S3.S3Config
-      { S3.s3cEndpoint = endpoint
-      , S3.s3cAccessKey = accessKey
-      , S3.s3cSecretKey = secretKey
-      , S3.s3cBucket = bucket
-      }
+    Just
+      S3.S3Config
+        { S3.s3cEndpoint = endpoint,
+          S3.s3cAccessKey = accessKey,
+          S3.s3cSecretKey = secretKey,
+          S3.s3cBucket = bucket
+        }

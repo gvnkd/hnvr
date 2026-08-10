@@ -10,21 +10,22 @@
 -- Throws 'userError' at the action level if @HNVR_DATA_KEY@ is missing
 -- or malformed — the leader is unsafe to run without it.
 module Hnvr.Web.Controller.Support.Crypto
-  ( encryptPassword
-  , decryptPassword
-  , requireKey
-  ) where
+  ( encryptPassword,
+    decryptPassword,
+    requireKey,
+  )
+where
 
+import Control.Exception (throwIO)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as BC (pack)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Database.PostgreSQL.Simple.Types (Binary (..))
 import Hnvr.Core.Crypto (Key, decryptText, encryptText, initKey)
 import qualified Hnvr.Core.Crypto as Crypto
-import Data.Text (Text)
-import qualified Data.Text as T
 import System.Environment (lookupEnv)
-import qualified Data.ByteString.Char8 as BC (pack)
-import Control.Exception (throwIO)
 
 -- | Read and validate the data key from the environment. Throws if
 -- missing or malformed. Called per-action — cheap relative to the

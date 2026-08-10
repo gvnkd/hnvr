@@ -21,8 +21,15 @@ module Hnvr.Web.Config
 where
 
 import qualified Control.Exception as E
+import Data.Maybe (fromMaybe)
+import qualified Data.Text as T
 import qualified Hnvr.Nats.Bus as Bus
+import Hnvr.Node.HealthReporter (startHealthReporter)
+import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
 import Hnvr.Web.EventWriter (startEventWriter)
+import Hnvr.Web.HealthCache (startHealthCache)
+import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
+import Hnvr.Web.WhepProxy (whepMiddleware)
 import IHP.FrameworkConfig
 import IHP.FrameworkConfig.Types (FrameworkConfig)
 import IHP.ModelSupport (ModelContext)
@@ -35,6 +42,7 @@ import qualified System.Environment as Env
 -- | 'IHP.FrameworkConfig.ConfigBuilder' consumed by @IHP.Server.run@.
 config :: ConfigBuilder
 config = do
+  option $ CustomMiddleware whepMiddleware
   option $ CustomMiddleware healthzMiddleware
   addInitializer connectNatsAndStartEventWriter
 
@@ -44,14 +52,23 @@ config = do
 -- broker down), we log and continue. Phase 0 needs /healthz to succeed
 -- even when NATS is flapping. systemd's @Restart=on-failure@ will still
 -- catch real crashes.
+--
+-- MediaMTXConfigSyncer is independent of NATS and runs regardless.
 connectNatsAndStartEventWriter :: (?context :: FrameworkConfig, ?modelContext :: ModelContext) => IO ()
 connectNatsAndStartEventWriter = do
+  startMediaMTXConfigSyncer
+    `E.catch` \(e :: E.SomeException) ->
+      putStrLn ("HNVR leader: MediaMTXConfigSyncer start failed: " <> cs (show e))
   let defaultUri = "nats://nats:nats@localhost:4222"
   uri <- maybe defaultUri id <$> Env.lookupEnv "HNVR_NATS_URI"
   let connect' = do
         bus <- Bus.connect Bus.defaultConfig {Bus.busUri = uri}
         putStrLn ("HNVR leader connected to NATS: " <> cs (uri :: String))
         startEventWriter bus ?modelContext
+        _ <- startHealthCache bus
+        startAssignmentCoordinator bus
+        host <- fromMaybe "hnvr-2" . fmap T.pack <$> Env.lookupEnv "HNVR_HOST"
+        startHealthReporter bus host
   connect' `E.catch` \(e :: E.SomeException) ->
     putStrLn ("HNVR leader: NATS connect failed (continuing without bus): " <> cs (show e))
 

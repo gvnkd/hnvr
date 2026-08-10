@@ -38,6 +38,16 @@ in
       description = "NATS connection URI.";
     };
 
+    hostName = lib.mkOption {
+      type = lib.types.str;
+      default = "hnvr-2";
+      description = ''
+        Host identifier published as hnvr.health.<hostName> by the
+        HealthReporter and matched by the AssignmentCoordinator. Real
+        deployments set this per-host via the NixOS config.
+      '';
+    };
+
     environment = lib.mkOption {
       type = lib.types.attrsOf lib.types.str;
       default = { };
@@ -64,6 +74,9 @@ in
         PORT = toString cfg.port;
         DATABASE_URL = cfg.databaseUrl;
         HNVR_NATS_URI = cfg.natsUri;
+        # Published as hnvr.health.<HNVR_HOST> by HealthReporter; consumed
+        # by the leader's HealthCache + AssignmentCoordinator.
+        HNVR_HOST = cfg.hostName;
         APP_STATIC = "${cfg.dataDir}/static";
         IHP_SESSION_SECRET_FILE = "${cfg.dataDir}/client_session_key.aes";
       } // cfg.environment;

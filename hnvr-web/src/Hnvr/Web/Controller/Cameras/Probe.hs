@@ -9,31 +9,32 @@
 --
 -- Used by 'Hnvr.Web.Controller.Cameras.ProbeAction'.
 module Hnvr.Web.Controller.Cameras.Probe
-  ( ProbeInfo (..)
-  , probe
-  ) where
+  ( ProbeInfo (..),
+    probe,
+  )
+where
 
 import Control.Exception (SomeException, try)
 import Data.Aeson (FromJSON (..), Value (..), decode, (.:))
+import qualified Data.Aeson.Key as K (fromText)
 import Data.Aeson.Types (parseMaybe)
 import qualified Data.ByteString.Lazy as BL
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
-import Generated.Enums (CodecKind (..))
 import GHC.Generics (Generic)
+import Generated.Enums (CodecKind (..))
 import System.Exit (ExitCode (..))
 import System.Process.Typed (byteStringOutput, proc, readProcessStdout, setStdout)
-import qualified Data.Aeson.Key as K (fromText)
 
 -- | Result of a successful ffprobe of an RTSP URL.
 data ProbeInfo = ProbeInfo
-  { probeCodec   :: !CodecKind
-  , probeWidth   :: !Int
-  , probeHeight  :: !Int
-  , probeFps     :: !Double
-  , probeAudio   :: !(Maybe Text)
+  { probeCodec :: !CodecKind,
+    probeWidth :: !Int,
+    probeHeight :: !Int,
+    probeFps :: !Double,
+    probeAudio :: !(Maybe Text)
   }
   deriving stock (Eq, Show, Generic)
 
@@ -51,19 +52,19 @@ probe url = do
         setStdout byteStringOutput $
           proc
             "ffprobe"
-            [ "-v"
-            , "error"
-            , "-rtsp_transport"
-            , "tcp"
-            , "-timeout"
-            , "5000000"
-            , "-i"
-            , T.unpack url
-            , "-show_streams"
-            , "-select_streams"
-            , "v:0"
-            , "-of"
-            , "json"
+            [ "-v",
+              "error",
+              "-rtsp_transport",
+              "tcp",
+              "-timeout",
+              "5000000",
+              "-i",
+              T.unpack url,
+              "-show_streams",
+              "-select_streams",
+              "v:0",
+              "-of",
+              "json"
             ]
   result <- try (readProcessStdout cfg) :: IO (Either SomeException (ExitCode, BL.ByteString))
   case result of
@@ -91,16 +92,16 @@ parseProbeInfo bytes = do
         _ -> Unknown
   pure
     ProbeInfo
-      { probeCodec = codec
-      , probeWidth = width
-      , probeHeight = height
-      , probeFps = parseFps fpsStr
-      , probeAudio = Nothing
+      { probeCodec = codec,
+        probeWidth = width,
+        probeHeight = height,
+        probeFps = parseFps fpsStr,
+        probeAudio = Nothing
       }
   where
     firstStreamOf [] = Nothing
     firstStreamOf (v : _) = Just v
-    codecField :: forall a. FromJSON a => Value -> Text -> Maybe a
+    codecField :: forall a. (FromJSON a) => Value -> Text -> Maybe a
     codecField (Object o) field = parseMaybe (.: K.fromText field) o
     codecField _ _ = Nothing
     parseFps :: Text -> Double

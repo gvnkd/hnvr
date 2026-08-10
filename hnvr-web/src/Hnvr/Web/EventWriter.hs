@@ -18,8 +18,9 @@
 --   * Insert fails (e.g. unique violation from a duplicate publish):
 --     logged and skipped; we don't block the drain loop.
 module Hnvr.Web.EventWriter
-  ( startEventWriter
-  ) where
+  ( startEventWriter,
+  )
+where
 
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException, catch)
@@ -30,15 +31,14 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.UUID (UUID)
-import IHP.HaskellSupport ((|>), set)
-import IHP.ModelSupport (ModelContext, createRecord, newRecord)
 import Generated.Types (Segment)
-
 import Hnvr.Core.Id (CameraId (..), HostId (..), sha256ToHex)
 import Hnvr.Core.Segment (SegmentWritten (..))
 import Hnvr.Nats.Bus (Bus, Message (..), Subscription)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (events)
+import IHP.HaskellSupport (set, (|>))
+import IHP.ModelSupport (ModelContext, createRecord, newRecord)
 
 -- | Spawn the EventWriter drain loop in a background 'async'. Returns
 -- immediately after subscribing. The async lives for the lifetime of the
@@ -59,8 +59,12 @@ drainLoop sub = forever $ do
     Just sw ->
       insertSegment sw
         `catch` \(e :: SomeException) ->
-          putStrLn ("HNVR EventWriter: insert failed for "
-                    <> T.unpack (swSlug sw) <> ": " <> show e)
+          putStrLn
+            ( "HNVR EventWriter: insert failed for "
+                <> T.unpack (swSlug sw)
+                <> ": "
+                <> show e
+            )
     Nothing ->
       -- Not a SegmentWritten envelope (or parse error). Future event
       -- kinds (line_crossed etc.) land in Phase 4; for now we silently
@@ -89,5 +93,5 @@ insertSegment sw = do
   _ <- createRecord seg
   pure ()
 
-decodeStrict :: FromJSON a => BS.ByteString -> Maybe a
+decodeStrict :: (FromJSON a) => BS.ByteString -> Maybe a
 decodeStrict = decode . BL.fromStrict

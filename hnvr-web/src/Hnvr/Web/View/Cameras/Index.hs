@@ -1,7 +1,7 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Hnvr.Web.View.Cameras.Index (IndexView (..)) where
 
@@ -14,8 +14,9 @@ data IndexView = IndexView
   }
 
 instance View IndexView where
-  html IndexView {..} = renderLayout
-    [hsx|
+  html IndexView {..} =
+    renderLayout
+      [hsx|
       <div class="header">
         <h1>Cameras</h1>
         <a class="btn" href="/cameras/new">New Camera</a>

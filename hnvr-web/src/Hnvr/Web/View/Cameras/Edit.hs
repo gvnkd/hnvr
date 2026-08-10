@@ -1,7 +1,7 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Hnvr.Web.View.Cameras.Edit (EditView (..)) where
 
@@ -14,8 +14,9 @@ data EditView = EditView
   }
 
 instance View EditView where
-  html EditView {..} = renderLayout
-    [hsx|
+  html EditView {..} =
+    renderLayout
+      [hsx|
       <div class="header">
         <h1>Edit {camera.slug}</h1>
       </div>

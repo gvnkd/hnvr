@@ -1,7 +1,7 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Hnvr.Web.View.Archive.Player (PlayerView (..)) where
 
@@ -14,8 +14,9 @@ data PlayerView = PlayerView
   }
 
 instance View PlayerView where
-  html PlayerView {..} = renderLayout
-    [hsx|
+  html PlayerView {..} =
+    renderLayout
+      [hsx|
       <div class="header">
         <h1>Archive · {camera.slug}</h1>
       </div>
@@ -29,7 +30,9 @@ instance View PlayerView where
       js =
         "const video = document.getElementById('hnvr-player');"
           <> "const status = document.getElementById('hnvr-status');"
-          <> "const src = '" <> playlistUrl <> "';"
+          <> "const src = '"
+          <> playlistUrl
+          <> "';"
           <> "if (video.canPlayType('application/vnd.apple.mpegurl')) {"
           <> "  video.src = src;"
           <> "  status.textContent = 'Native HLS (Safari)';"

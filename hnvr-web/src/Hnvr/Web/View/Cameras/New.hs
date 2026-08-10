@@ -1,7 +1,7 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Hnvr.Web.View.Cameras.New (NewView (..)) where
 
@@ -14,8 +14,9 @@ data NewView = NewView
   }
 
 instance View NewView where
-  html NewView {..} = renderLayout
-    [hsx|
+  html NewView {..} =
+    renderLayout
+      [hsx|
       <div class="header">
         <h1>New Camera</h1>
       </div>

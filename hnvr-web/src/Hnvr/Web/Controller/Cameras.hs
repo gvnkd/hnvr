@@ -2,13 +2,14 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Hnvr.Web.Controller.Cameras
-  ( CamerasController (..)
-  ) where
+  ( CamerasController (..),
+  )
+where
 
 import Generated.Types
 import Hnvr.Web.Controller.Cameras.Probe (ProbeInfo (..), probe)
@@ -31,6 +32,7 @@ data CamerasController
   | UpdateAction {cameraId :: !(Id Camera)}
   | DeleteAction {cameraId :: !(Id Camera)}
   | ProbeAction {cameraId :: !(Id Camera)}
+  | AssignAction {cameraId :: !(Id Camera)}
   deriving stock (Eq, Show, Data)
 
 -- | Routing: relies on IHP's 'autoRoute' which uses 'Data.Data' to map
@@ -42,35 +44,31 @@ instance Controller CamerasController where
   action IndexAction = do
     cameras <- query @Camera |> orderByDesc #createdAt |> fetch
     render IndexView {..}
-
   action ShowAction {cameraId} = do
     camera <- fetch cameraId
     render ShowView {..}
-
   action NewAction = do
     let camera = newRecord @Camera
     render NewView {..}
-
   action EditAction {cameraId} = do
     camera <- fetch cameraId
     render EditView {..}
-
   action CreateAction = do
     let camera0 =
           newRecord @Camera
             |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "enabled", "retentionDays", "assignedHost", "manualAssign"]
         plaintext = paramOrDefault ("" :: Text) "password"
     (enc, nonce) <- liftIO (encryptPassword plaintext)
-    let camera = camera0
-          |> set #passwordEnc (Just enc)
-          |> set #passwordNonce (Just nonce)
+    let camera =
+          camera0
+            |> set #passwordEnc (Just enc)
+            |> set #passwordNonce (Just nonce)
     if camera |> isValid
       then do
         camera <- camera |> createRecord
         setSuccessMessage "Camera created"
         redirectTo ShowAction {cameraId = camera.id}
       else render NewView {..}
-
   action UpdateAction {cameraId} = do
     camera <- fetch cameraId
     let camera' =
@@ -82,23 +80,24 @@ instance Controller CamerasController where
       Just "" -> pure camera'
       Just pw -> do
         (enc, nonce) <- liftIO (encryptPassword pw)
-        pure (camera'
-                |> set #passwordEnc (Just enc)
-                |> set #passwordNonce (Just nonce))
+        pure
+          ( camera'
+              |> set #passwordEnc (Just enc)
+              |> set #passwordNonce (Just nonce)
+          )
     if camera'' |> isValid
       then do
         camera''' <- camera'' |> updateRecord
         setSuccessMessage "Camera updated"
         redirectTo ShowAction {cameraId = camera'''.id}
       else render EditView {camera = camera''}
-
   action DeleteAction {cameraId} = do
     camera <- fetch cameraId
     deleteRecord camera
     setSuccessMessage "Camera deleted"
     redirectTo IndexAction
 
-  -- | Probe the main RTSP URL with ffprobe and fill codec/width/height.
+  -- \| Probe the main RTSP URL with ffprobe and fill codec/width/height.
   -- Triggered by the "Probe" button on EditView. Best-effort: failures
   -- set a flash error and redirect back to Edit.
   action ProbeAction {cameraId} = do
@@ -117,3 +116,23 @@ instance Controller CamerasController where
             |> updateRecord
         setSuccessMessage "Probe OK"
         redirectTo EditAction {cameraId = camera.id}
+
+  -- \| POST /cameras/:id/assign — admin override of assigned_host.
+  -- Sets @manual_assign = true@ so the AssignmentCoordinator doesn't
+  -- override the admin's choice. Empty host param clears the
+  -- assignment and the manual pin (back to auto mode).
+  action AssignAction {cameraId} = do
+    camera <- fetch cameraId
+    let hostParam = paramOrDefault ("" :: Text) "assigned_host"
+        cleared = hostParam == ""
+        camera' =
+          camera
+            |> if cleared
+              then set #assignedHost Nothing . set #manualAssign False
+              else set #assignedHost (Just hostParam) . set #manualAssign True
+    camera'' <- camera' |> updateRecord
+    setSuccessMessage
+      $ if cleared
+        then "Assignment cleared (auto mode)"
+        else "Assigned to " <> hostParam
+    redirectTo ShowAction {cameraId = camera''.id}

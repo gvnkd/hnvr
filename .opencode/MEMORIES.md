@@ -9,11 +9,14 @@
 - **Owner**: Sergey (`omgbebebe@gmail.com`)
 - **Local path**: `/home/pion/work/dev/hnvr`
 - **Remote**: `gitea@192.168.0.254:omg/hnvr.git` (branch `master`)
-- **Current branch state**: 4 commits. Phase 0 done + follow-ups.
+- **Current branch state**: Phase 0 + 1 + 2 done (code; live VM tests
+  pending). Phase 2 commit history:
   - `e08a1f7` docs: add initial HNVR design documentation
   - `ef3c743` scaffold: cabal multi-package project + flake.nix
   - `ece9519` phase 0: bootstrap IHP web + NATS bus + NixOS VMs
   - `3c45c46` phase 0 follow-ups: NATS wiring, cabal patches, worker VM broker
+  - `a7a4885` … `41cd4b1` phase 1 (recording MVP, slices 1–7b)
+  - phase 2 (live view + multi-host) — Slice 1–6 (uncommitted)
 
 ## What this is
 
@@ -98,16 +101,20 @@ $LOOPBIN floor_2_5 tcp 'rtsp://192.168.0.197:554/user=admin&password=123456&chan
 # Run the binaries
 HNVR_NATS_URI="nats://nats:nats@localhost:4222" PORT=18001 \
   ./result/bin/hnvr-leader  # IHP app + NATS connect; /healthz on PORT
-HNVR_NATS_URI="nats://nats:nats@localhost:4222" \
-  ./result/bin/hnvr-node    # Connects to NATS, subscribes hnvr.commands.>
+HNVR_NATS_URI="nats://nats:nats@localhost:4222" HNVR_HOST=hnvr-2 \
+  ./result/bin/hnvr-node    # Connects to NATS, HealthReporter + ConfigWatcher
 
 # Build & boot a NixOS VM (leader). QEMU hostfwd uses COMMA separator
 # for multiple ports — space-separated is silently dropped.
+# Phase 2 needs to forward WebRTC (8889), API (9997), mediamtx debug.
 nix build .#nixosConfigurations.hnvr-2-vm.config.system.build.vm
 NIX_DISK_IMAGE=/tmp/leader.qcow2 \
-  QEMU_NET_OPTS="hostfwd=tcp:127.0.0.1:18000-:8000,hostfwd=tcp:127.0.0.1:18222-:8222" \
+  QEMU_NET_OPTS="hostfwd=tcp:127.0.0.1:18000-:8000,hostfwd=tcp:127.0.0.1:18222-:8222,hostfwd=tcp:127.0.0.1:18889-:8889,hostfwd=tcp:127.0.0.1:19997-:9997" \
   ./result/bin/run-nixos-vm
-curl http://localhost:18000/healthz  # → ok, HTTP 200
+curl http://localhost:18000/healthz        # → ok, HTTP 200
+curl http://localhost:18000/               # → dashboard (cameras grid + hosts)
+curl http://localhost:18000/hosts          # → per-host panel
+curl http://localhost:19997/v2/config/paths # → mediamtx live config
 
 # Worker VM (now also runs NATS broker so node has a local peer)
 nix build .#nixosConfigurations.hnvr-1-vm.config.system.build.vm
@@ -116,7 +123,7 @@ nix build .#nixosConfigurations.hnvr-1-vm.config.system.build.vm
 nix fmt            # nixpkgs-fmt on .nix files
 
 # Pre-commit checks (ormolu, hlint, nixpkgs-fmt)
-nix flake check
+nix build .#checks.x86_64-linux.pre-commit
 ```
 
 ## Repo layout
@@ -129,10 +136,7 @@ hnvr/
 ├── cabal.project        packages + allow-newer + vendored/nats-queue
 ├── flake.nix            ihp overlay + hnvrHaskellOverlay + nixosConfigurations
 ├── flake.lock           pinned nixpkgs + flake-utils + pre-commit-hooks + ihp
-├── nix/
-│   ├── module.nix       NixOS module: hnvr-leader service
-│   ├── nats-server.nix  NixOS module: NATS + JetStream
-│   └── secrets-template.yaml  sops-nix template (HNVR_DATA_KEY + S3 + DB)
+├── nix/                (see "Repo layout — expanded nix/" block below)
 ├── vendored/
 │   └── nats-queue/      2017 lib + sClose → close patch baked in
 ├── hnvr-core/           REAL types: Id, Geometry, Logging, Prelude, Time, Segment, Crypto
@@ -152,16 +156,39 @@ hnvr/
 │                        ├── gen/Generated/...        IHP-generated types (committed)
 │                        ├── src/Hnvr/Web.hs                 version stub
 │                        ├── src/Hnvr/Web/Config.hs          IHP config + healthz + NATS init
-│                        ├── src/Hnvr/Web/FrontController.hs RootApplication + parseRoute @CamerasController
-│                        ├── src/Hnvr/Web/Controller/Cameras.hs      CRUD + Probe action (encrypts password on Create/Update)
+│                        │                                  + EventWriter + HealthCache
+│                        │                                  + AssignmentCoordinator
+│                        │                                  + MediaMTXConfigSyncer + WHEP proxy
+│                        ├── src/Hnvr/Web/FrontController.hs RootApplication + parseRoute for
+│                        │                                  Cameras/Archive/Live/Dashboard/Hosts
+│                        ├── src/Hnvr/Web/Controller/Cameras.hs      CRUD + Probe + Assign
 │                        ├── src/Hnvr/Web/Controller/Cameras/Probe.hs ffprobe JSON parser
 │                        ├── src/Hnvr/Web/Controller/Support/Crypto.hs encryptPassword / decryptPassword / requireKey
 │                        ├── src/Hnvr/Web/Controller/Archive.hs       PlayerAction + m3u8 PlaylistAction
-│                        ├── src/Hnvr/Web/View/Layout.hs             default HTML layout
+│                        ├── src/Hnvr/Web/Controller/Live.hs          /live/<slug> ShowAction
+│                        ├── src/Hnvr/Web/Controller/Dashboard.hs     / camera grid + hosts panel
+│                        ├── src/Hnvr/Web/Controller/Hosts.hs         /hosts per-host status
+│                        ├── src/Hnvr/Web/EventWriter.hs              NATS hnvr.events → PG segments
+│                        ├── src/Hnvr/Web/HealthCache.hs              NATS hnvr.health.> → IORef + PG
+│                        ├── src/Hnvr/Web/AssignmentCoordinator.hs    5s poll, host-down → reassign
+│                        ├── src/Hnvr/Web/MediaMTXConfigSyncer.hs     PG LISTEN → /run/hnvr/mediamtx.yml
+│                        │                                          + PUT /v2/config/paths/<slug>
+│                        ├── src/Hnvr/Web/WhepProxy.hs                WAI middleware: /whep/<slug> → mediamtx
+│                        ├── src/Hnvr/Node/HealthReporter.hs          publishes hnvr.health.<host> every 5s
+│                        ├── src/Hnvr/Node/ConfigWatcher.hs           subscribes hnvr.commands.assign.>
+│                        ├── src/Hnvr/Web/View/Layout.hs             default HTML layout + nav
 │                        ├── src/Hnvr/Web/View/Cameras/{Index,New,Edit,Show}.hs
 │                        ├── src/Hnvr/Web/View/Archive/Player.hs      @\<video\>@ + hls.js
-│                        ├── app/LeaderMain.hs        IHP.Server.run + NATS via addInitializer
-│                        └── app/NodeMain.hs          withBus + subscribe hnvr.commands.>
+│                        ├── src/Hnvr/Web/View/Live/Show.hs           @\<video\>@ + inline whep.js
+│                        ├── src/Hnvr/Web/View/Dashboard/Index.hs     camera grid + hosts table
+│                        ├── src/Hnvr/Web/View/Hosts/Index.hs         per-host status + cameras
+│                        ├── app/LeaderMain.hs        IHP.Server.run + all initializers
+│                        └── app/NodeMain.hs          withBus + HealthReporter + ConfigWatcher
+├── nix/
+│   ├── module.nix       NixOS module: hnvr-leader service (HNVR_HOST env wired)
+│   ├── nats-server.nix  NixOS module: NATS + JetStream
+│   ├── mediamtx.nix     NixOS module: MediaMTX sidecar (leader only)
+│   └── secrets-template.yaml  sops-nix template (HNVR_DATA_KEY + S3 + DB)
 ```
 
 ## External services (SaaS — Sergey operates, not us)
@@ -395,10 +422,58 @@ ffprobe notes:
     Route helpers like `redirectTo EditAction {..}` use the data
     constructor names directly (not `EditCameraAction`-style auto-aliases).
 
-38. **cabal `exposed-modules` MUST NOT have duplicate entries** — even
-    comment lines between two listings of the same module produce a
-    Cabal-5559 "duplicate-modules" error at configure time. Watch for
-    stale list copies when refactoring.
+   38. **cabal `exposed-modules` MUST NOT have duplicate entries** — even
+       comment lines between two listings of the same module produce a
+       Cabal-5559 "duplicate-modules" error at configure time. Watch for
+       stale list copies when refactoring.
+
+   39. **IHP `Id' "table"` has no `ConvertibleStrings Text` instance** —
+       `cs (h.id :: Id' "hosts") :: Text` fails with "Could not deduce
+       ConvertibleStrings". Use `Data.Coerce.coerce h.id :: Text` (works
+       because `Id'` is a `newtype` around `PrimaryKey table`). The
+       pattern `case h.id of Id t -> t` also works but needs the
+       constructor imported from `IHP.ModelSupport`.
+
+   40. **IHP HSX can't parse lambda-piped `forEach`** — `forEach xs (\x ->
+       [hsx|...|])` inside an HSX `[hsx|...|]` block triggers
+       `parse error on input ')'`. Extract the inner HSX to a
+       top-level helper (`renderLi x = [hsx|...|]`) and use
+       `forEach xs renderLi`.
+
+   41. **Hasql 1.9.x has no Notification module** — for LISTEN/NOTIFY,
+       use `postgresql-simple` (already in IHP's transitive deps). Open
+       a dedicated `PG.Connection` via `PG.connectPostgreSQL` outside
+       IHP's Hasql pool (LISTEN must hold the connection idle to
+       receive notifies). `PG.getNotification` blocks; wrap in
+       `forever`.
+
+   42. **`sqlExec` is deprecated in IHP v1.6.0** — emits
+       `-Wdeprecations` warnings, still works. The recommended
+       replacement is `[typedSql|...|]` + `sqlExecTyped` from
+       `IHP.TypedSql`. We accept the warnings for now (DDL stays
+       untyped; the typed quoter doesn't cover `CREATE FUNCTION` etc.).
+
+   43. **IHP HSX `<video playsinline>` is rejected** — parser allows
+       only a fixed attribute whitelist. Drop `playsinline` (Chrome
+       plays inline anyway when the element is `autoplay muted`).
+
+   44. **mediamtx REST config API** — `PUT /v2/config/paths/<id>` is
+       upsert, `DELETE /v2/config/paths/<id>` removes. `GET /v2/config/paths`
+       returns `{pathName: {...}, ...}` — top-level keys are path IDs.
+       We use per-path ops, not the global PUT (which version-semantics
+       vary across mediamtx releases).
+
+   45. **mediamtx config SIGHUP needs polkit/systemctl; REST is simpler** —
+       the leader runs as `hnvr` user, so does mediamtx. Same-user
+       `kill(2)` would work if we exposed the PID, but
+       `systemctl kill -s HUP` needs polkit. We use the REST API for
+       live reload and write `/run/hnvr/mediamtx.yml` as the source of
+       truth at mediamtx boot.
+
+   46. **NoFieldSelectors + record fields** — with `NoFieldSelectors`
+       enabled, `recField rec` (function application style) doesn't
+       compile. Use `rec.recField` (OverloadedRecordDot). The cabal
+       default-extensions include both.
 
 ## Sergey's working style
 
@@ -431,7 +506,43 @@ ffprobe notes:
             rtsp_url already has creds embedded so Probe uses it
             directly).
 - [x] **Phase 1 — Recording MVP complete** (code; live VM test pending).
-- [ ] Phase 2 — Live view + multi-host
+- [~] **Phase 2 — Live View + Multi-Host. Code complete (Aug 10 2026),
+      live VM test pending**. Slices shipped:
+      - ✅ Slice 1: `nix/mediamtx.nix` NixOS module + flake input.
+            nixpkgs mediamtx 1.18.2 (design locks 1.20.0 — bump only if
+            Slice 3 WHEP verification fails on Chrome 130+).
+      - ✅ Slice 2: `Hnvr.Web.MediaMTXConfigSyncer` — opens dedicated
+            postgresql-simple connection for LISTEN `cameras_events`,
+            regenerates `/run/hnvr/mediamtx.yml`, pushes per-path config
+            to mediamtx REST API (`PUT /v2/config/paths/<slug>`).
+            Trigger function installed idempotently at leader startup
+            (no separate migration step).
+      - ✅ Slice 3: `Hnvr.Web.WhepProxy` (WAI middleware, not an IHP
+            controller — needs raw body + arbitrary methods). Path
+            translation `/whep/<slug>` → `/<slug>/whep`, Location header
+            rewritten back so the browser's PATCH/DELETE return to us.
+            Live view (`/live/<slug>`) renders `<video>` + inline ~40-LOC
+            vanilla-JS WHEP client (no npm).
+      - ✅ Slice 4: `Hnvr.Node.HealthReporter` (5s heartbeat, payload
+            mostly stubs — cameras list + EKG CPU/GPU/mem land in
+            Phase 3+/Phase 6). `Hnvr.Web.HealthCache` subscribes
+            `hnvr.health.>` → IORef + UPSERT into `hosts` table.
+      - ✅ Slice 5: `Hnvr.Web.AssignmentCoordinator` — 5s poll,
+            15s host-down timeout, `manual_assign=true` cameras never
+            overridden, publishes `hnvr.commands.assign.<slug>` on
+            change. `Hnvr.Node.ConfigWatcher` subscribes
+            `hnvr.commands.assign.>` and logs (CaptureSupervisor
+            dispatch lands in Phase 3 when CaptureWorker is embedded
+            in the node process).
+      - ✅ Slice 6: `/` dashboard (camera grid + hosts table),
+            `/hosts` per-host view, `POST /cameras/:id/assign` admin
+            override (clears `manual_assign` when host field is blank).
+      - nginx for WHEP **skipped** — WAI middleware handles it. nginx
+            can land in Phase 6 as a public-facing layer if needed.
+      - Open: WHEP not yet browser-tested; mediamtx REST push hasn't
+            been exercised against a live mediamtx; AssignmentCoordinator
+            load balancing is naive (lex-smallest host) — fine for 2
+            hosts, real load-aware assignment deferred.
 - [ ] Phase 3 — CV detection + tracking
 - [ ] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate
 - [ ] Phase 5 — PTZ manual + presets          ← v1.0 release

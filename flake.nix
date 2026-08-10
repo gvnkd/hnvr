@@ -18,8 +18,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Phase 2+ (live view):
-    #   mediamtx.url   = "github:bluenviron/mediamtx/v1.20.0";
+    # Phase 2 (live view): nixpkgs.mediamtx 1.18.2 used for packaging
+    # the sidecar; if Slice 3 WHEP verification fails on Chrome 130+
+    # (roadmap decision point at Phase 2 kickoff), uncomment to pin
+    # v1.20.0 source and build via buildGoModule overlay.
+    #   mediamtx.url = "github:bluenviron/mediamtx/v1.20.0";
     # Phase 6+ (secrets, disks):
     #   sops-nix.url   = "github:Mic92/sops-nix";
     #   disko.url      = "github:nix-community/disko";
@@ -113,10 +116,13 @@
       mkLeaderVmModules = [
         baseVmConfig
         self.nixosModules.hnvr-nats
+        self.nixosModules.hnvr-mediamtx
         self.nixosModules.hnvr
         {
           services.hnvr.nats.enable = true;
+          services.hnvr.mediamtx.enable = true;
           services.hnvr.leader.enable = true;
+          services.hnvr.leader.hostName = "hnvr-2";
 
           # IHP needs a Postgres. Local dev Postgres for now; the design
           # has Postgres as a SaaS dependency that real deployments pull
@@ -144,11 +150,14 @@
           services.hnvr.nats.enable = true;
 
           systemd.services.hnvr-node = {
-            description = "HNVR worker (Phase 0 stub — real dispatch lands in Phase 2)";
+            description = "HNVR worker (CaptureSupervisor stub lands in Phase 3)";
             after = [ "network.target" "hnvr-nats.service" ];
             wants = [ "hnvr-nats.service" ];
             wantedBy = [ "multi-user.target" ];
-            environment.HNVR_NATS_URI = "nats://nats:nats@localhost:4222";
+            environment = {
+              HNVR_NATS_URI = "nats://nats:nats@localhost:4222";
+              HNVR_HOST = "hnvr-1";
+            };
             serviceConfig = {
               ExecStart = "${pkgs.hnvr-web}/bin/hnvr-node";
               Restart = "on-failure";
@@ -250,6 +259,7 @@
       # re-exportable so downstream users can `imports: [ hnvr.nixosModules.hnvr ]`.
       nixosModules = {
         hnvr-nats = import ./nix/nats-server.nix;
+        hnvr-mediamtx = import ./nix/mediamtx.nix;
         hnvr = import ./nix/module.nix;
         default = self.nixosModules.hnvr;
       };

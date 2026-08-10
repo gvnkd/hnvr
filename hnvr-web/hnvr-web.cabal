@@ -10,10 +10,17 @@ library
         Hnvr.Web
         Hnvr.Web.Config
         Hnvr.Web.EventWriter
+        Hnvr.Web.HealthCache
+        Hnvr.Web.AssignmentCoordinator
+        Hnvr.Web.MediaMTXConfigSyncer
+        Hnvr.Web.WhepProxy
         Hnvr.Web.FrontController
         Hnvr.Web.Controller.Cameras
         Hnvr.Web.Controller.Cameras.Probe
         Hnvr.Web.Controller.Archive
+        Hnvr.Web.Controller.Live
+        Hnvr.Web.Controller.Dashboard
+        Hnvr.Web.Controller.Hosts
         Hnvr.Web.Controller.Support.Crypto
         Hnvr.Web.View.Layout
         Hnvr.Web.View.Cameras.Index
@@ -21,6 +28,11 @@ library
         Hnvr.Web.View.Cameras.Edit
         Hnvr.Web.View.Cameras.Show
         Hnvr.Web.View.Archive.Player
+        Hnvr.Web.View.Live.Show
+        Hnvr.Web.View.Dashboard.Index
+        Hnvr.Web.View.Hosts.Index
+        Hnvr.Node.HealthReporter
+        Hnvr.Node.ConfigWatcher
         -- IHP-generated from Application/Schema.sql.
         -- Regenerate via:
         --   cd hnvr-web && nix run --accept-flake-config \
@@ -60,12 +72,16 @@ library
       , async
       , basic-prelude
       , bytestring
+      , containers
       , data-default
       , deepseq
+      , directory
+      , filepath
       , hasql
       , hasql-implicits
       , hasql-mapping
       , hasql-postgresql-types
+      , http-client
       , http-types
       , ihp
       , postgresql-simple

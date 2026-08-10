@@ -1,7 +1,7 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Hnvr.Web.View.Cameras.Show (ShowView (..)) where
 
@@ -14,8 +14,9 @@ data ShowView = ShowView
   }
 
 instance View ShowView where
-  html ShowView {..} = renderLayout
-    [hsx|
+  html ShowView {..} =
+    renderLayout
+      [hsx|
       <div class="header">
         <h1>{camera.slug}</h1>
         <span>
@@ -39,7 +40,18 @@ instance View ShowView where
         <tr><th>Assigned host</th><td>{fromMaybe "—" camera.assignedHost}</td></tr>
         <tr><th>Manual assign</th><td>{tshow camera.manualAssign}</td></tr>
       </table>
+
+      <h2>Manual assignment</h2>
+      <form class="stacked" method="POST" action={assignUrl}>
+        <div class="field-row">
+          <label for="assigned_host">Override assigned host (blank = auto)</label>
+          <input id="assigned_host" name="assigned_host" value={fromMaybe "" camera.assignedHost} placeholder="hnvr-1" />
+        </div>
+        <button class="btn" type="submit">Save assignment</button>
+      </form>
     |]
     where
-      editUrl = "/cameras/" <> tshow camera.id <> "/edit"
-      archiveUrl = "/cameras/" <> tshow camera.id <> "/archive"
+      cid = tshow camera.id
+      editUrl = "/cameras/" <> cid <> "/edit"
+      archiveUrl = "/cameras/" <> cid <> "/archive"
+      assignUrl = "/cameras/" <> cid <> "/assign"
