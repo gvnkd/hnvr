@@ -5,6 +5,8 @@
 
 module Hnvr.Web.View.Layout (renderLayout) where
 
+import Generated.Types
+import Hnvr.Web.Auth ()
 import IHP.ViewPrelude
 
 -- | Default application layout. Wraps each page with nav + main container.
@@ -22,11 +24,17 @@ renderLayout inner =
       <a href="/" class="brand">HNVR</a>
       <a href="/cameras">Cameras</a>
       <a href="/hosts">Hosts</a>
+      <span class="nav-spacer"></span>
+      {userLink}
     </nav>
     <main>{inner}</main>
   </body>
 </html>
 |]
+  where
+    userLink = case (currentUserOrNothing :: Maybe User) of
+      Just _ -> [hsx|<a class="nav-user" href="/DeleteSession">Logout</a>|]
+      Nothing -> [hsx|<a class="nav-user" href="/NewSession">Login</a>|]
 
 css :: Text
 css =
@@ -34,6 +42,8 @@ css =
   \.topnav { display:flex; gap:1rem; align-items:center; padding:.75rem 1rem; background:#1f2937; color:#fff; }\
   \.topnav a { color:#fff; text-decoration:none; }\
   \.topnav a.brand { font-weight:bold; font-size:1.2rem; margin-right:1rem; }\
+  \.topnav .nav-spacer { flex:1; }\
+  \.topnav .nav-user { font-size:.85rem; opacity:.85; }\
   \main { max-width:1100px; margin:2rem auto; padding:0 1rem; }\
   \.header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }\
   \table { width:100%; border-collapse:collapse; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.08); }\

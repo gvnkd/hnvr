@@ -73,5 +73,19 @@ CREATE TABLE segments (
 
 CREATE INDEX segments_cam_start_idx ON segments (camera_id, start_ts DESC);
 
+-- Phase 1 audit-fix: admin gate. IHP AuthSupport requires these exact column
+-- names: id, email, password_hash, locked_at, failed_login_attempts.
+-- is_admin is HNVR-specific (single admin user for v1; viewer role Phase 6).
+CREATE TABLE users (
+    id                      UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    email                   TEXT NOT NULL UNIQUE,
+    password_hash           TEXT NOT NULL,
+    is_admin                BOOLEAN NOT NULL DEFAULT FALSE,
+    locked_at               TIMESTAMP WITH TIME ZONE,
+    failed_login_attempts   INT NOT NULL DEFAULT 0,
+    last_login_at           TIMESTAMP WITH TIME ZONE,
+    created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";

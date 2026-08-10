@@ -11,6 +11,7 @@ import Hnvr.Web.Controller.Cameras (CamerasController (..))
 import Hnvr.Web.Controller.Dashboard (DashboardController (..))
 import Hnvr.Web.Controller.Hosts (HostsController (..))
 import Hnvr.Web.Controller.Live (LiveController (..))
+import Hnvr.Web.Controller.Sessions (SessionsController (..))
 import IHP.ControllerSupport (InitControllerContext (..))
 import IHP.FrameworkConfig (RootApplication (..))
 import IHP.Job.Types (Worker (..))
@@ -18,7 +19,8 @@ import IHP.RouterSupport (FrontController (..), parseRoute)
 
 instance FrontController RootApplication where
   controllers =
-    [ parseRoute @DashboardController,
+    [ parseRoute @SessionsController,
+      parseRoute @DashboardController,
       parseRoute @CamerasController,
       parseRoute @HostsController,
       parseRoute @ArchiveController,

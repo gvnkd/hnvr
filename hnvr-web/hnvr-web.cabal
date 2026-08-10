@@ -14,6 +14,7 @@ library
     Generated.ActualTypes.Host
     Generated.ActualTypes.PrimaryKeys
     Generated.ActualTypes.Segment
+    Generated.ActualTypes.User
     Generated.Camera
     Generated.CameraInclude
     Generated.Enums
@@ -27,21 +28,29 @@ library
     Generated.Statements.CreateManyCamera
     Generated.Statements.CreateManyHost
     Generated.Statements.CreateManySegment
+    Generated.Statements.CreateManyUser
     Generated.Statements.CreateSegment
+    Generated.Statements.CreateUser
     Generated.Statements.FetchCamera
     Generated.Statements.FetchHost
     Generated.Statements.FetchSegment
+    Generated.Statements.FetchUser
     Generated.Statements.RowDecoderCamera
     Generated.Statements.RowDecoderHost
     Generated.Statements.RowDecoderSegment
+    Generated.Statements.RowDecoderUser
     Generated.Statements.UpdateCamera
     Generated.Statements.UpdateHost
     Generated.Statements.UpdateSegment
+    Generated.Statements.UpdateUser
     Generated.Types
+    Generated.User
+    Generated.UserInclude
     Hnvr.Node.ConfigWatcher
     Hnvr.Node.HealthReporter
     Hnvr.Web
     Hnvr.Web.AssignmentCoordinator
+    Hnvr.Web.Auth
     Hnvr.Web.Config
     Hnvr.Web.ConfigBroadcaster
     Hnvr.Web.Controller.Archive
@@ -50,6 +59,7 @@ library
     Hnvr.Web.Controller.Dashboard
     Hnvr.Web.Controller.Hosts
     Hnvr.Web.Controller.Live
+    Hnvr.Web.Controller.Sessions
     Hnvr.Web.Controller.Support.Crypto
     Hnvr.Web.EventWriter
     Hnvr.Web.FrontController
@@ -64,6 +74,7 @@ library
     Hnvr.Web.View.Hosts.Index
     Hnvr.Web.View.Layout
     Hnvr.Web.View.Live.Show
+    Hnvr.Web.View.Sessions.New
     Hnvr.Web.WhepProxy
 
   -- IHP-generated from Application/Schema.sql.

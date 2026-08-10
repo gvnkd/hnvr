@@ -14,7 +14,12 @@ module Generated.Statements (
     module Generated.Statements.CreateSegment,
     module Generated.Statements.UpdateSegment,
     module Generated.Statements.FetchSegment,
-    module Generated.Statements.CreateManySegment
+    module Generated.Statements.CreateManySegment,
+    module Generated.Statements.RowDecoderUser,
+    module Generated.Statements.CreateUser,
+    module Generated.Statements.UpdateUser,
+    module Generated.Statements.FetchUser,
+    module Generated.Statements.CreateManyUser
 ) where
 import qualified Generated.Statements.RowDecoderHost
 import qualified Generated.Statements.CreateHost
@@ -31,4 +36,9 @@ import qualified Generated.Statements.CreateSegment
 import qualified Generated.Statements.UpdateSegment
 import qualified Generated.Statements.FetchSegment
 import qualified Generated.Statements.CreateManySegment
+import qualified Generated.Statements.RowDecoderUser
+import qualified Generated.Statements.CreateUser
+import qualified Generated.Statements.UpdateUser
+import qualified Generated.Statements.FetchUser
+import qualified Generated.Statements.CreateManyUser
 

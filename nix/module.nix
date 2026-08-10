@@ -79,6 +79,11 @@ in
         HNVR_HOST = cfg.hostName;
         APP_STATIC = "${cfg.dataDir}/static";
         IHP_SESSION_SECRET_FILE = "${cfg.dataDir}/client_session_key.aes";
+        # Bootstrap admin: leader boot idempotently INSERTs a row into
+        # users(email='INITIAL_ADMIN_EMAIL', is_admin=TRUE) using
+        # hashPassword(INITIAL_ADMIN_PASSWORD). Real deployments source
+        # these from sops-nix (Phase 6 activation).
+        INITIAL_ADMIN_EMAIL = lib.mkDefault "admin@hnvr.local";
       } // cfg.environment;
 
       serviceConfig = {

@@ -10,6 +10,7 @@ module Hnvr.Web.Controller.Cameras
 where
 
 import Generated.Types
+import Hnvr.Web.Auth ()
 import Hnvr.Web.Controller.Cameras.Probe (ProbeInfo (..), probe)
 import Hnvr.Web.Controller.Support.Crypto (decryptPassword, encryptPassword)
 import Hnvr.Web.View.Cameras.Edit
@@ -17,6 +18,7 @@ import Hnvr.Web.View.Cameras.Index
 import Hnvr.Web.View.Cameras.New
 import Hnvr.Web.View.Cameras.Show
 import IHP.ControllerPrelude
+import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 
 -- | Per-action constructor for routing. IHP's router uses this to
 -- dispatch URLs to the right handler in the 'Controller' instance below.
@@ -39,6 +41,10 @@ data CamerasController
 instance AutoRoute CamerasController
 
 instance Controller CamerasController where
+  -- Gate all camera actions on a logged-in user. v1 has a single admin role
+  -- (the @users.is_admin@ flag is forward-compat for Phase 6 viewer split).
+  -- @ensureIsUser@ redirects unauthenticated requests to /NewSession.
+  beforeAction = ensureIsUser
   action IndexAction = do
     cameras <- query @Camera |> orderByDesc #createdAt |> fetch
     render IndexView {..}

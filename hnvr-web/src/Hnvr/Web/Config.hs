@@ -21,19 +21,24 @@ module Hnvr.Web.Config
 where
 
 import qualified Control.Exception as E
+import Control.Monad (void)
 import Data.Maybe (fromMaybe, maybe)
 import qualified Data.Text as T
+import Generated.Types
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Node.HealthReporter (startHealthReporter)
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
+import Hnvr.Web.Auth ()
 import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
 import Hnvr.Web.EventWriter (startEventWriter)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
 import Hnvr.Web.WhepProxy (whepMiddleware)
+import IHP.AuthSupport.Authentication (hashPassword)
 import IHP.FrameworkConfig
-import IHP.FrameworkConfig.Types (FrameworkConfig)
-import IHP.ModelSupport (ModelContext)
+import IHP.FrameworkConfig.Types (AuthMiddleware (..), FrameworkConfig)
+import IHP.LoginSupport.Middleware (authMiddleware)
+import IHP.ModelSupport (ModelContext, sqlExec)
 import IHP.Prelude
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
@@ -45,7 +50,29 @@ config :: ConfigBuilder
 config = do
   option $ CustomMiddleware whepMiddleware
   option $ CustomMiddleware healthzMiddleware
+  option $ AuthMiddleware (authMiddleware @User)
   addInitializer connectNatsAndStartEventWriter
+  addInitializer seedAdminUser
+
+-- | Idempotent INSERT of the bootstrap admin user from
+-- @INITIAL_ADMIN_EMAIL@ + @INITIAL_ADMIN_PASSWORD@ env. Runs at leader boot.
+-- Silently no-ops if either env var is unset (dev mode). 'ON CONFLICT' makes
+-- it safe to leave the env vars set across restarts.
+seedAdminUser :: (?modelContext :: ModelContext) => IO ()
+seedAdminUser = do
+  mEmail <- Env.lookupEnv "INITIAL_ADMIN_EMAIL"
+  mPassword <- Env.lookupEnv "INITIAL_ADMIN_PASSWORD"
+  case (mEmail, mPassword) of
+    (Just email, Just password) -> do
+      hash <- hashPassword (T.pack password)
+      void
+        $ sqlExec
+          "INSERT INTO users (email, password_hash, is_admin) \
+          \ VALUES (?, ?, TRUE) \
+          \ ON CONFLICT (email) DO NOTHING"
+          (email, hash)
+      putStrLn ("HNVR leader: ensured admin user " <> cs (email :: String))
+    _ -> putStrLn "HNVR leader: INITIAL_ADMIN_EMAIL/PASSWORD unset; skipping admin seed"
 
 -- | Connect to the NATS bus using @HNVR_NATS_URI@ (default localhost),
 -- then spawn the EventWriter drain loop on the same bus. Best-effort: if

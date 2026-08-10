@@ -12,13 +12,18 @@
 - **Current branch state**: Phase 0 + 1 + 2 done (code; live VM tests
   pending). Phase 2 audit-and-fix pass landed Aug 10 2026 (see
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
-  that have been resolved). Phase 2 commit history:
+  that have been resolved; `.opencode/PHASE_AUDIT_REPORT_2.md` for the
+  round-2 re-audit at `57aac3b`). Phase 1 slice 8 (Cameras admin gate)
+  landed Aug 10 2026. Phase 2 commit history:
   - `e08a1f7` docs: add initial HNVR design documentation
   - `ef3c743` scaffold: cabal multi-package project + flake.nix
   - `ece9519` phase 0: bootstrap IHP web + NATS bus + NixOS VMs
   - `3c45c46` phase 0 follow-ups: NATS wiring, cabal patches, worker VM broker
   - `a7a4885` … `41cd4b1` phase 1 (recording MVP, slices 1–7b)
-  - phase 2 (live view + multi-host) — Slice 1–6 (uncommitted)
+  - `59f383b` phase 2: live view + multi-host (slices 1–6)
+  - `57aac3b` phase 2 audit-fix: close 8 spec/CI/tooling gaps
+  - phase 1 slice 8 (Cameras admin gate — IHP AuthSupport, users table,
+    SessionsController, ensureIsUser beforeAction) — Aug 10 2026
 
 ## What this is
 
@@ -492,6 +497,60 @@ ffprobe notes:
        `cabal-fmt -i` and `ormolu -i` over the tree before commit if
        you've edited anything sizeable.
 
+   49. **IHP v1.6.0 `AuthMiddleware` lives in `IHP.FrameworkConfig.Types`**
+       (Aug 10 2026 slice 8) — NOT in `IHP.LoginSupport.Middleware`.
+       The latter only exports the `authMiddleware`/`adminAuthMiddleware`
+       functions. Import pattern:
+       `import IHP.FrameworkConfig.Types (AuthMiddleware (..), FrameworkConfig)`
+       + `import IHP.LoginSupport.Middleware (authMiddleware)`.
+
+   50. **Type family instances must be explicitly imported** (Aug 10 2026
+       slice 8) — `type instance CurrentUserRecord = User` declared in
+       `Hnvr.Web.Auth` is invisible to GHC unless the consuming module
+       imports that module (`import Hnvr.Web.Auth ()` is enough). Without
+       the import, `authMiddleware @User` and `ensureIsUser` fail with
+       "Couldn't match type CurrentUserRecord with User". Affects every
+       module that touches `authMiddleware @User` / `ensureIsUser` /
+       `currentUserOrNothing` — currently `Config.hs`, `Controller/Cameras.hs`,
+       `View/Layout.hs`. Add the empty import wherever IHP auth is used.
+
+   51. **`regen.sh` does NOT touch `hnvr-web.cabal`** (Aug 10 2026 slice 8) —
+       when adding a new table to `Schema.sql`, after `./hnvr-web/regen.sh`
+       you must hand-add the new `Generated.<Table>`,
+       `Generated.<Table>Include`, `Generated.ActualTypes.<Table>`,
+       `Generated.Statements.{Create,CreateMany,Fetch,Update,RowDecoder}<Table>`
+       entries to `exposed-modules` in `hnvr-web.cabal`. Missing entries
+       pass type-checking but fail at link with `undefined reference to
+       Generatedzi<table>zi..._closure` errors.
+
+   52. **IHP v1.6.0 auth — old `LoginSupport.User` class is GONE** (Aug 10
+       2026 slice 8) — replaced by `class HasNewSessionUrl user` + open
+       type family `CurrentUserRecord`, both in `IHP.LoginSupport.Types`.
+       The whole user-side instance surface is:
+       ```
+       instance HasNewSessionUrl User where
+         newSessionUrl _ = "/NewSession"
+       type instance CurrentUserRecord = User
+       ```
+       No methods to implement beyond `newSessionUrl`. Sessions
+       controller is `action NewSessionAction = Sessions.newSessionAction @User`
+       + 2 more from `IHP.AuthSupport.Controller.Sessions`. `beforeAction`
+       gate is `ensureIsUser` from `IHP.LoginSupport.Helper.Controller`.
+       Routes are top-level: `/NewSession`, `/CreateSession`, `/DeleteSession`.
+
+   53. **IHP v1.6.0 `ensureIsUser` is NOT in `IHP.ControllerPrelude`** (Aug 10
+       2026 slice 8) — add explicit `import IHP.LoginSupport.Helper.Controller (ensureIsUser)`.
+       `currentUserOrNothing` IS re-exported via `IHP.ViewPrelude` from
+       `IHP.LoginSupport.Helper.View` — don't double-import in views.
+
+   54. **`hashPassword`/`verifyPassword` come from `IHP.AuthSupport.Authentication`**
+       (Aug 10 2026 slice 8) — uses `pwstore-fast` under the hood (sha256
+       with 17 rounds, format `sha256|17|...`). Re-exported by
+       `IHP.ControllerPrelude` for controller contexts but in
+       initializers (`Config.hs`) you need the explicit import. Returns
+       `IO Text`. No `bcrypt-hs` dependency needed; it's all transitive
+       via `ihp`.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -522,6 +581,17 @@ ffprobe notes:
             (deferred until rtsp_template rendering lands — currently
             rtsp_url already has creds embedded so Probe uses it
             directly).
+      - ✅ Slice 8 (Aug 10 2026, phase-audit-fix): Cameras admin gate —
+            IHP v1.6.0 `AuthSupport` wiring (`Hnvr.Web.Auth`,
+            `Controller/Sessions.hs`, `View/Sessions/New.hs`),
+            `users` table, `beforeAction = ensureIsUser` on
+            `CamerasController`, `AuthMiddleware (authMiddleware @User)`
+            in `Config.hs`, `seedAdminUser` initializer reads
+            `INITIAL_ADMIN_EMAIL`/`INITIAL_ADMIN_PASSWORD` env, idempotent
+            INSERT with `hashPassword` (pwstore-fast). Routes:
+            `/NewSession`, `/CreateSession`, `/DeleteSession` (top-level,
+            IHP AutoRoute default). Nav shows Login/Logout link. Closed
+            audit-report-2 §2 row "Cameras CRUD admin gate".
 - [x] **Phase 1 — Recording MVP complete** (code; live VM test pending).
 - [~] **Phase 2 — Live View + Multi-Host. Code complete (Aug 10 2026),
       live VM test pending**. Slices shipped:

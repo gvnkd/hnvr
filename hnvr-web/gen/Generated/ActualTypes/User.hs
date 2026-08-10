@@ -1,7 +1,7 @@
 -- This file is auto generated and will be overriden regulary. Please edit `Application/Schema.sql` to change the Types\n"
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, InstanceSigs, MultiParamTypeClasses, TypeFamilies, DataKinds, TypeOperators, UndecidableInstances, ConstraintKinds, StandaloneDeriving  #-}
-{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches #-}
-module Generated.ActualTypes.PrimaryKeys where
+{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches -Wno-ambiguous-fields #-}
+module Generated.ActualTypes.User where
 import IHP.HaskellSupport
 import IHP.ModelSupport
 import CorePrelude hiding (id)
@@ -42,11 +42,18 @@ import Hasql.PostgresqlTypes ()
 import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
-type instance PrimaryKey "hosts" = Text
-instance Default (Id' "hosts") where def = Id def
-type instance PrimaryKey "cameras" = UUID
-instance Default (Id' "cameras") where def = Id def
-type instance PrimaryKey "segments" = UUID
-instance Default (Id' "segments") where def = Id def
-type instance PrimaryKey "users" = UUID
-instance Default (Id' "users") where def = Id def
+import Generated.ActualTypes.PrimaryKeys
+data User' = User {id :: (Id' "users"), email :: Text, passwordHash :: Text, isAdmin :: Bool, lockedAt :: (Maybe UTCTime), failedLoginAttempts :: Int, lastLoginAt :: (Maybe UTCTime), createdAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+
+type User = User'
+
+type instance GetTableName (User') = "users"
+type instance GetModelByTableName "users" = User
+
+
+instance IHP.ModelSupport.Table (User') where
+    tableName = "users"
+    columnNames = ["id","email","password_hash","is_admin","locked_at","failed_login_attempts","last_login_at","created_at"]
+    primaryKeyColumnNames = ["id"]
+
+
