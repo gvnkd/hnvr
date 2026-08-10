@@ -18,11 +18,9 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Phase 2 (live view): nixpkgs.mediamtx 1.18.2 used for packaging
-    # the sidecar; if Slice 3 WHEP verification fails on Chrome 130+
-    # (roadmap decision point at Phase 2 kickoff), uncomment to pin
-    # v1.20.0 source and build via buildGoModule overlay.
-    #   mediamtx.url = "github:bluenviron/mediamtx/v1.20.0";
+    # Phase 2 (live view): mediamtx bumped to v1.20.0 (design lock) via
+    # the mediamtxOverlay defined below — nixpkgs pins 1.18.2 but the
+    # overlay rebuilds from source via buildGo126Module.
     # Phase 6+ (secrets, disks):
     #   sops-nix.url   = "github:Mic92/sops-nix";
     #   disko.url      = "github:nix-community/disko";
@@ -96,11 +94,49 @@
         };
 
       # -------------------------------------------------------------
+      # MediaMTX v1.20.0 — design lock (design_docs/02-tech-stack.md).
+      # nixpkgs pins 1.18.2; we override to 1.20.0 to (a) match the
+      # locked version and (b) align the REST API surface with the
+      # `Hnvr.Web.MediaMTXConfigSyncer` consumer (1.18.2 vs 1.20.0 both
+      # use /v3/* so this is forward-compatible, but 1.20.0 also ships
+      # the v1.20 WHEP improvements Chrome 130+ wants — Phase 2 Slice 3
+      # decision point).
+      #
+      # The rpicamera patches nixpkgs-1.18.2 needs are NOT required for
+      # 1.20.0 on x86_64: the build constraints naturally exclude arm-
+      # only files, and the renamed `source_other.go` stub matches our
+      # arch without substitution.
+      # -------------------------------------------------------------
+      mediamtxOverlay = final: prev: {
+        mediamtx = prev.mediamtx.overrideAttrs (old:
+          let
+            hlsJs = final.fetchurl {
+              url = "https://cdn.jsdelivr.net/npm/hls.js@v1.6.16/dist/hls.min.js";
+              hash = "sha256-RC9ZnDTxA8M1WzdaI73/VgWS1xF9CajIRyQuo94tQOA=";
+            };
+          in
+          {
+            version = "1.20.0";
+            src = final.fetchFromGitHub {
+              owner = "bluenviron";
+              repo = "mediamtx";
+              tag = "v1.20.0";
+              hash = "sha256-bnbuIf3GdT+TCUHzAqvsS9wLPjDUGunpJoQBJFY4aTo=";
+            };
+            vendorHash = "sha256-uXwfIeE95g8isjR3ll0pcXnRtr/dbhp9B0HyH47WgWU=";
+            postPatch = ''
+              cp ${hlsJs} internal/servers/hls/hls.min.js
+              echo "v1.20.0" > internal/core/VERSION
+            '';
+          });
+      };
+
+      # -------------------------------------------------------------
       # Per-host NixOS module stacks. Both VMs apply IHP + hnvr overlays
       # top-level (so pkgs.hnvr-web resolves).
       # -------------------------------------------------------------
       baseVmConfig = { config, pkgs, lib, ... }: {
-        nixpkgs.overlays = [ ihp.overlays.default hnvrTopOverlay ];
+        nixpkgs.overlays = [ ihp.overlays.default mediamtxOverlay hnvrTopOverlay ];
 
         # QEMU VM sizing.
         virtualisation.vmVariant = {
@@ -177,7 +213,10 @@
     in
     (flake-utils.lib.eachSystem supportedSystems (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system}.extend ihp.overlays.default;
+        pkgs = nixpkgs.legacyPackages.${system}.extend (nixpkgs.lib.composeManyExtensions [
+          ihp.overlays.default
+          mediamtxOverlay
+        ]);
         hpkgs = pkgs.ghc912.extend (hnvrHaskellOverlay pkgs.haskell.lib);
 
         localPkgs = {
@@ -234,7 +273,7 @@
         minioVersion = (import nixpkgs { inherit system; overlays = [ ihp.overlays.default ]; }).minio.name;
         devenvPkgs = import nixpkgs {
           inherit system;
-          overlays = [ ihp.overlays.default ];
+          overlays = [ ihp.overlays.default mediamtxOverlay ];
           config.permittedInsecurePackages = [ minioVersion ];
         };
         devenvHpkgs = devenvPkgs.ghc912.extend (hnvrHaskellOverlay devenvPkgs.haskell.lib);

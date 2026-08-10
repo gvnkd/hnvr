@@ -68,6 +68,9 @@ tmp/
 *.log
 *.log.*
 *.secret
+# MediaMTX auto-generated MoQ TLS certs (created in CWD on first run)
+auto.crt
+auto.key
 
 ############################################
 # Local overrides

@@ -587,11 +587,15 @@ ffprobe notes:
          `initdb`; on subsequent starts the existing datadir is reused
          with OLD config. Fix: `~/bin/devenv-kill --reset-pg` then
          `devenv up` again.
-       - **MediaMTX 1.18.2 API is `/v3/*`, NOT `/v2/*`** — readiness
-         probe uses `GET /v3/info` (200 OK). HNVR's
-         `MediaMTXConfigSyncer` still calls `PUT /v2/config/paths/<slug>`
-         which 404s against 1.18.2 — latent bug, fix when bumping to
-         v1.20.0 or migrating to `/v3/config/paths/{add,patch}`.
+       - **MediaMTX 1.20.0 (was 1.18.2, bumped Aug 10 2026)** — overlay
+         in flake.nix overrides nixpkgs to v1.20.0 via buildGo126Module
+         (vendorHash + hls.js v1.6.16 fetched separately). API stays
+         `/v3/*` so the readiness probe is unchanged. `Hnvr.Web.
+         MediaMTXConfigSyncer` still calls `PUT /v2/config/paths/<slug>`
+         which 404s — that's a separate bug in our code (mediamtx
+         migrated to `/v3/config/paths/{add,patch}` in 1.16+), not a
+         version issue. Track + fix when Phase 2 Slice 3 WHEP testing
+         resumes.
        - **MediaMTX crashes if HLS port :8888 collides** — Sergey's box
          has another service on :8888. Bootstrap config
          (`mediamtxBootstrap` in flake.nix) sets `rtsp/rtmp/hls/srt/
@@ -660,8 +664,8 @@ ffprobe notes:
 - [~] **Phase 2 — Live View + Multi-Host. Code complete (Aug 10 2026),
       live VM test pending**. Slices shipped:
       - ✅ Slice 1: `nix/mediamtx.nix` NixOS module + flake input.
-            nixpkgs mediamtx 1.18.2 (design locks 1.20.0 — bump only if
-            Slice 3 WHEP verification fails on Chrome 130+).
+            mediamtx bumped to v1.20.0 via `mediamtxOverlay` (Aug 10 2026) —
+            matches design lock; previously nixpkgs 1.18.2.
       - ✅ Slice 2: `Hnvr.Web.MediaMTXConfigSyncer` — opens dedicated
             postgresql-simple connection for LISTEN `cameras_events`,
             regenerates `/run/hnvr/mediamtx.yml`, pushes per-path config
