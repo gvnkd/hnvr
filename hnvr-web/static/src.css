@@ -1,0 +1,307 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * HNVR — Dark Security-Console theme
+ *
+ * Component classes (@apply) keep HSX readable. Tailwind's standalone CLI
+ * (nixpkgs#tailwindcss, no npm) compiles this into static/app.css.
+ * Rebuild: `nix run .#hnvr-static` or `tailwindcss -i src.css -o app.css`.
+ */
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-ink-950 text-zinc-200 font-sans antialiased;
+    background-image:
+      radial-gradient(60rem 60rem at 80% -10%, rgba(56, 189, 248, 0.05), transparent 60%),
+      radial-gradient(50rem 50rem at -10% 10%, rgba(34, 197, 94, 0.04), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  ::selection {
+    @apply bg-signal-info/30 text-white;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-signal-info/70 ring-offset-1 ring-offset-ink-950;
+  }
+  a {
+    @apply text-signal-info transition-colors hover:text-sky-200;
+  }
+  h1, h2, h3, h4 {
+    @apply text-zinc-100 font-semibold tracking-tight;
+  }
+  code, kbd, samp {
+    @apply font-mono;
+  }
+}
+
+@layer components {
+  /* ── Layout shell ────────────────────────────────────────────── */
+  .shell {
+    @apply min-h-screen flex flex-col;
+  }
+  .topnav {
+    @apply sticky top-0 z-40 h-12 px-4 flex items-center gap-1
+           bg-ink-900/90 backdrop-blur border-b border-ink-700
+           text-zinc-300;
+  }
+  .topnav .brand {
+    @apply flex items-center gap-2 mr-4 px-2 py-1 rounded-md
+           text-zinc-100 font-mono text-sm font-bold tracking-wider
+           hover:bg-ink-800 hover:text-white no-underline;
+  }
+  .topnav .brand .dot {
+    @apply inline-block w-2 h-2 rounded-full bg-signal-info shadow-glow;
+  }
+  .topnav .nav-link {
+    @apply px-3 py-1.5 rounded-md text-sm text-zinc-400 no-underline
+           hover:bg-ink-800 hover:text-zinc-100 transition-colors;
+  }
+  .topnav .nav-link.active {
+    @apply bg-ink-800 text-zinc-100;
+  }
+  .topnav .spacer {
+    @apply flex-1;
+  }
+  .topnav .user-pill {
+    @apply flex items-center gap-2 px-2 py-1 rounded-md
+           text-xs text-zinc-400 bg-ink-875 border border-ink-700;
+  }
+  .topnav .user-pill a {
+    @apply text-zinc-300 hover:text-white no-underline;
+  }
+
+  .main {
+    @apply w-full max-w-[1400px] mx-auto px-4 sm:px-6 py-6 flex-1 animate-fade-in;
+  }
+
+  /* ── Page header ─────────────────────────────────────────────── */
+  .page-header {
+    @apply flex items-center justify-between gap-4 mb-6 pb-4 border-b border-ink-800;
+  }
+  .page-header h1 {
+    @apply text-xl text-zinc-50 flex items-center gap-2;
+  }
+  .page-header .subtitle {
+    @apply text-xs text-zinc-500 mt-1 font-mono;
+  }
+  .page-header .actions {
+    @apply flex items-center gap-2;
+  }
+
+  /* ── Cards / panels ──────────────────────────────────────────── */
+  .card {
+    @apply bg-ink-900/70 border border-ink-800 rounded-lg shadow-panel
+           overflow-hidden;
+  }
+  .card-header {
+    @apply px-4 py-2.5 border-b border-ink-800 flex items-center justify-between
+           text-xs uppercase tracking-wider text-zinc-500 font-mono;
+  }
+  .card-body {
+    @apply p-4;
+  }
+
+  /* ── Section heading ─────────────────────────────────────────── */
+  .section-h {
+    @apply text-xs font-mono uppercase tracking-wider text-zinc-500 mb-2 mt-6
+           flex items-center gap-2;
+  }
+  .section-h::before {
+    content: "";
+    @apply inline-block w-1 h-3 bg-signal-info/70 rounded-sm;
+  }
+
+  /* ── Buttons ─────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5
+           px-3 py-1.5 rounded-md text-sm font-medium no-underline cursor-pointer
+           border border-ink-700 bg-ink-800 text-zinc-200
+           transition-all hover:bg-ink-700 hover:text-white hover:border-ink-600
+           active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply bg-signal-info/15 border-signal-info/40 text-sky-200
+           hover:bg-signal-info/25 hover:border-signal-info/60;
+  }
+  .btn-danger {
+    @apply bg-signal-rec/10 border-signal-rec/40 text-red-300
+           hover:bg-signal-rec/20 hover:border-signal-rec/60;
+  }
+  .btn-ghost {
+    @apply bg-transparent border-transparent text-zinc-400
+           hover:bg-ink-800 hover:text-zinc-100;
+  }
+  .btn-sm {
+    @apply px-2 py-1 text-xs;
+  }
+
+  /* ── Forms ───────────────────────────────────────────────────── */
+  .form {
+    @apply max-w-2xl;
+  }
+  .field {
+    @apply mb-4;
+  }
+  .field label {
+    @apply block mb-1.5 text-xs font-mono uppercase tracking-wider
+           text-zinc-400;
+  }
+  .field .hint {
+    @apply mt-1 text-xs text-zinc-500;
+  }
+  .input,
+  .select,
+  .textarea {
+    @apply block w-full px-3 py-2 rounded-md text-sm
+           bg-ink-950/70 border border-ink-700 text-zinc-100
+           placeholder:text-zinc-600
+           focus:border-signal-info/60 focus:bg-ink-950
+           transition-colors font-mono;
+  }
+  .textarea {
+    @apply font-sans;
+  }
+
+  /* ── Tables ──────────────────────────────────────────────────── */
+  .table {
+    @apply w-full border-collapse text-sm;
+  }
+  .table thead th {
+    @apply px-3 py-2 text-left text-[11px] uppercase tracking-wider
+           font-mono font-medium text-zinc-500
+           border-b border-ink-700 bg-ink-900/60;
+  }
+  .table tbody td {
+    @apply px-3 py-2 border-b border-ink-800/70 text-zinc-300;
+  }
+  .table tbody tr {
+    @apply transition-colors hover:bg-ink-875/60;
+  }
+  .table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .table .kv th {
+    @apply text-zinc-500 font-mono text-xs uppercase tracking-wider
+           w-1/3 align-top;
+  }
+  .table .kv td {
+    @apply text-zinc-200 font-mono text-sm break-all;
+  }
+
+  /* ── Status indicators ───────────────────────────────────────── */
+  .led {
+    @apply inline-block w-2 h-2 rounded-full align-middle;
+  }
+  .led-on {
+    @apply bg-signal-ok shadow-[0_0_8px_rgba(34,197,94,0.7)];
+  }
+  .led-off {
+    @apply bg-zinc-600;
+  }
+  .led-rec {
+    @apply bg-signal-rec shadow-glow-rec animate-pulse-rec;
+  }
+  .led-warn {
+    @apply bg-signal-warn shadow-[0_0_8px_rgba(245,158,11,0.7)];
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded
+           text-[11px] font-mono uppercase tracking-wider
+           border;
+  }
+  .badge-ok    { @apply bg-signal-ok/10 border-signal-ok/30 text-emerald-300; }
+  .badge-rec   { @apply bg-signal-rec/10 border-signal-rec/30 text-red-300; }
+  .badge-warn  { @apply bg-signal-warn/10 border-signal-warn/30 text-amber-300; }
+  .badge-info  { @apply bg-signal-info/10 border-signal-info/30 text-sky-300; }
+  .badge-mute  { @apply bg-ink-800 border-ink-700 text-zinc-400; }
+
+  /* ── Camera grid ─────────────────────────────────────────────── */
+  .cam-grid {
+    @apply grid gap-3 grid-cols-[repeat(auto-fill,minmax(280px,1fr))];
+  }
+  .cam-card {
+    @apply card;
+  }
+  .cam-thumb {
+    @apply relative aspect-video bg-black flex items-center justify-center
+           overflow-hidden no-underline text-zinc-500;
+  }
+  .cam-thumb .play-icon {
+    @apply w-10 h-10 rounded-full bg-black/60 border border-zinc-700
+           flex items-center justify-center text-zinc-300
+           group-hover:bg-signal-info/20 group-hover:border-signal-info/60
+           group-hover:text-white transition-colors;
+  }
+  .cam-thumb .rec-flag {
+    @apply absolute top-2 left-2 badge badge-rec;
+  }
+  .cam-thumb .host-flag {
+    @apply absolute top-2 right-2 badge badge-mute;
+  }
+  .cam-body {
+    @apply px-3 py-2.5 flex items-center justify-between gap-2;
+  }
+  .cam-body .slug {
+    @apply font-mono text-sm text-zinc-100 truncate;
+  }
+  .cam-body .links {
+    @apply flex items-center gap-2 text-xs;
+  }
+  .cam-body .links a {
+    @apply text-zinc-500 hover:text-signal-info no-underline;
+  }
+
+  /* ── Video player frame ──────────────────────────────────────── */
+  .video-frame {
+    @apply relative w-full bg-black rounded-lg overflow-hidden border border-ink-800;
+  }
+  .video-frame video {
+    @apply w-full block aspect-video bg-black;
+  }
+  .video-status {
+    @apply mt-3 flex items-center gap-2 text-xs text-zinc-400 font-mono;
+  }
+
+  /* ── Login card ──────────────────────────────────────────────── */
+  .login-shell {
+    @apply min-h-[calc(100vh-3rem)] flex items-center justify-center px-4;
+  }
+  .login-card {
+    @apply w-full max-w-sm card;
+  }
+  .login-card .login-body {
+    @apply p-6;
+  }
+  .login-card h1 {
+    @apply text-center text-lg font-mono tracking-wider mb-1
+           flex items-center justify-center gap-2;
+  }
+  .login-card .subtitle {
+    @apply text-center text-xs text-zinc-500 mb-6;
+  }
+
+  /* ── Empty state ─────────────────────────────────────────────── */
+  .empty {
+    @apply text-center py-12 px-4 text-sm text-zinc-500
+           border border-dashed border-ink-700 rounded-lg bg-ink-900/40;
+  }
+  .empty .empty-icon {
+    @apply text-2xl mb-2 block text-zinc-600;
+  }
+
+  /* ── Misc utility ────────────────────────────────────────────── */
+  .mono { @apply font-mono text-sm; }
+  .muted { @apply text-zinc-500; }
+  .divider { @apply border-t border-ink-800 my-6; }
+  .stack-list { @apply space-y-1.5; }
+  .stack-list li {
+    @apply flex items-center justify-between gap-2 px-3 py-1.5 rounded-md
+           bg-ink-900/40 border border-ink-800 text-sm font-mono;
+  }
+}

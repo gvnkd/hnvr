@@ -49,6 +49,18 @@ import qualified System.Environment as Env
 -- | 'IHP.FrameworkConfig.ConfigBuilder' consumed by @IHP.Server.run@.
 config :: ConfigBuilder
 config = do
+  -- Default APP_STATIC to the in-tree static/ dir when the env var is
+  -- unset. IHP's @initStaticApp@ reads APP_STATIC *after* this builder
+  -- runs, so setEnv here wins for cabal run, @./result/bin/hnvr-leader@
+  -- from the repo root, and devenv. NixOS production sets APP_STATIC
+  -- explicitly via @nix/module.nix@ (@''${dataDir}/static@) so this
+  -- default is only used in dev.
+  liftIO
+    $ Env.lookupEnv "APP_STATIC"
+    >>= \case
+      Just _ -> pure ()
+      Nothing -> Env.setEnv "APP_STATIC" "hnvr-web/static"
+
   option $ CustomMiddleware whepMiddleware
   option $ CustomMiddleware healthzMiddleware
   option $ AuthMiddleware (authMiddleware @User)
@@ -65,14 +77,25 @@ seedAdminUser = do
   mPassword <- Env.lookupEnv "INITIAL_ADMIN_PASSWORD"
   case (mEmail, mPassword) of
     (Just email, Just password) -> do
-      hash <- hashPassword (T.pack password)
+      -- Coerce String → Text before INSERT: hasql serialises String
+      -- (a.k.a. [Char]) as a PG array, which would store the email as
+      -- `{a,d,m,i,n,@,...}` and break filterWhereCaseInsensitive lookups
+      -- in IHP's createSessionAction. See pitfall #57.
+      let emailT = cs email :: Text
+      hash <- hashPassword (cs password)
       void
         $ sqlExec
+          -- DO UPDATE (not DO NOTHING) so changing INITIAL_ADMIN_PASSWORD
+          -- in the env takes effect on the next leader boot. Without
+          -- this, the very first seed wins forever and you can't log
+          -- in after rotating the password.
           "INSERT INTO users (email, password_hash, is_admin) \
           \ VALUES (?, ?, TRUE) \
-          \ ON CONFLICT (email) DO NOTHING"
-          (email, hash)
-      logInfo ("leader: ensured admin user " <> cs (email :: String))
+          \ ON CONFLICT (email) DO UPDATE \
+          \    SET password_hash = EXCLUDED.password_hash, \
+          \        is_admin = TRUE"
+          (emailT, hash)
+      logInfo ("leader: ensured admin user " <> emailT)
     _ -> logInfo "leader: INITIAL_ADMIN_EMAIL/PASSWORD unset; skipping admin seed"
 
 -- | Connect to the NATS bus using @HNVR_NATS_URI@ (default localhost),

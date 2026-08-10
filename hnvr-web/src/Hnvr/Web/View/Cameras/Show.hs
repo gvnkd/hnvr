@@ -17,41 +17,70 @@ instance View ShowView where
   html ShowView {..} =
     renderLayout
       [hsx|
-      <div class="header">
-        <h1>{camera.slug}</h1>
-        <span>
-          <a class="btn" href={editUrl}>Edit</a>
-          <a class="btn" href={archiveUrl}>Watch archive</a>
-        </span>
-      </div>
-      <table>
-        <tr><th>Name</th><td>{camera.name}</td></tr>
-        <tr><th>RTSP (main)</th><td>{camera.rtspUrl}</td></tr>
-        <tr><th>RTSP (sub)</th><td>{fromMaybe "—" camera.rtspSubUrl}</td></tr>
-        <tr><th>Host</th><td>{fromMaybe "—" camera.host}</td></tr>
-        <tr><th>Port</th><td>{tshow camera.port}</td></tr>
-        <tr><th>Codec</th><td>{tshow camera.codec}</td></tr>
-        <tr><th>Substream codec</th><td>{tshow camera.substreamCodec}</td></tr>
-        <tr><th>Substream res</th><td>{tshow camera.substreamWidth}×{tshow camera.substreamHeight}</td></tr>
-        <tr><th>Record audio</th><td>{tshow camera.recordAudio}</td></tr>
-        <tr><th>Analysis FPS</th><td>{tshow camera.analysisFps}</td></tr>
-        <tr><th>Enabled</th><td>{tshow camera.enabled}</td></tr>
-        <tr><th>Retention days</th><td>{tshow camera.retentionDays}</td></tr>
-        <tr><th>Assigned host</th><td>{fromMaybe "—" camera.assignedHost}</td></tr>
-        <tr><th>Manual assign</th><td>{tshow camera.manualAssign}</td></tr>
-      </table>
-
-      <h2>Manual assignment</h2>
-      <form class="stacked" method="POST" action={assignUrl}>
-        <div class="field-row">
-          <label for="assigned_host">Override assigned host (blank = auto)</label>
-          <input id="assigned_host" name="assigned_host" value={fromMaybe "" camera.assignedHost} placeholder="hnvr-1" />
+      <div class="page-header">
+        <div>
+          <h1>
+            <span class="led led-rec"></span>
+            <span class="font-mono">{camera.slug}</span>
+          </h1>
+          <div class="subtitle">{camera.name} · {codecBadge camera.codec}</div>
         </div>
-        <button class="btn" type="submit">Save assignment</button>
-      </form>
+        <div class="actions">
+          <a class="btn" href={editUrl}>Edit</a>
+          <a class="btn btn-primary" href={archiveUrl}>Watch archive</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">Configuration</div>
+        <table class="table">
+          <tbody>
+            {kvRow "Name" camera.name}
+            {kvRow "RTSP (main)" camera.rtspUrl}
+            {kvRow "RTSP (sub)" (fromMaybe "—" camera.rtspSubUrl)}
+            {kvRow "Host" (fromMaybe "—" camera.host)}
+            {kvRow "Port" (tshow camera.port)}
+            {kvRow "Codec" (codecBadge camera.codec)}
+            {kvRow "Substream codec" (tshow camera.substreamCodec)}
+            {kvRow "Substream res" (tshow camera.substreamWidth <> "×" <> tshow camera.substreamHeight)}
+            {kvRow "Record audio" (tshow camera.recordAudio)}
+            {kvRow "Analysis FPS" (tshow camera.analysisFps)}
+            {kvRow "Enabled" (tshow camera.enabled)}
+            {kvRow "Retention days" (tshow camera.retentionDays)}
+            {kvRow "Assigned host" (fromMaybe "—" camera.assignedHost)}
+            {kvRow "Manual assign" (tshow camera.manualAssign)}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card mt-4">
+        <div class="card-header">Manual assignment</div>
+        <div class="card-body">
+          <form class="form" method="POST" action={assignUrl}>
+            <div class="field">
+              <label for="assigned_host">Override assigned host (blank = auto)</label>
+              <input class="input" id="assigned_host" name="assigned_host" value={fromMaybe "" camera.assignedHost} placeholder="hnvr-1" />
+              <div class="hint">Setting a host marks the camera as manually assigned; clearing it returns the camera to auto-assignment.</div>
+            </div>
+            <button class="btn btn-primary" type="submit">Save assignment</button>
+          </form>
+        </div>
+      </div>
     |]
     where
       cid = tshow (camera |> get #id)
       editUrl = "/EditCamera?cameraId=" <> cid
       archiveUrl = "/PlayerArchive?cameraId=" <> cid
       assignUrl = "/AssignCamera?cameraId=" <> cid
+
+      kvRow k v =
+        [hsx|
+          <tr class="kv">
+            <th>{k}</th>
+            <td>{v}</td>
+          </tr>
+        |]
+
+      codecBadge Unknown = [hsx|<span class="badge badge-mute">UNKNOWN</span>|]
+      codecBadge H264 = [hsx|<span class="badge badge-info">H264</span>|]
+      codecBadge Hevc = [hsx|<span class="badge badge-warn">HEVC</span>|]

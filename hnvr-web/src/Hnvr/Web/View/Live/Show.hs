@@ -25,28 +25,50 @@ instance View ShowView where
   html ShowView {..} =
     renderLayout
       [hsx|
-      <div class="header">
-        <h1>Live · {camera.slug}</h1>
+      <div class="page-header">
+        <div>
+          <h1>
+            <span class="led led-rec"></span>
+            Live · <span class="font-mono">{camera.slug}</span>
+          </h1>
+          <div class="subtitle">WebRTC via WHEP · {fromMaybe "—" camera.assignedHost}</div>
+        </div>
+        <div class="actions">
+          <a class="btn btn-ghost" href={archiveUrl}>Archive</a>
+          <a class="btn btn-ghost" href="/Cameras">Cameras</a>
+        </div>
       </div>
-      <video id="hnvr-live" autoplay muted
-             style="width:100%; max-width:1100px; background:#000;"></video>
-      <p id="hnvr-live-status">Connecting…</p>
+
+      <div class="video-frame">
+        <video id="hnvr-live" autoplay muted></video>
+      </div>
+      <div class="video-status">
+        <span id="hnvr-live-led" class="led led-warn"></span>
+        <span id="hnvr-live-status">Connecting…</span>
+      </div>
       <script>{preEscapedTextValue (whepJs camera)}</script>
     |]
+    where
+      archiveUrl = "/PlayerArchive?cameraId=" <> tshow (camera |> get #id)
 
 -- | Inline WHEP client. ~40 LOC vanilla JS. Talks to our /whep/<slug>
--- proxy which forwards to MediaMTX.
+-- proxy which forwards to MediaMTX. Updates the status pill + LED
+-- element based on connection state.
 whepJs :: Camera -> Text
 whepJs cam =
   "const video = document.getElementById('hnvr-live');"
     <> "const status = document.getElementById('hnvr-live-status');"
+    <> "const led = document.getElementById('hnvr-live-led');"
+    <> "function setLed(cls) { led.className = 'led ' + cls; }"
     <> "const pc = new RTCPeerConnection();"
     <> "pc.addTransceiver('video', { direction: 'recvonly' });"
     <> "pc.addTransceiver('audio', { direction: 'recvonly' });"
-    <> "pc.ontrack = e => { video.srcObject = e.streams[0]; status.textContent = 'Live'; };"
+    <> "pc.ontrack = e => { video.srcObject = e.streams[0]; status.textContent = 'Live'; setLed('led-on'); };"
     <> "pc.onconnectionstatechange = () => {"
     <> "  if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {"
-    <> "    status.textContent = 'Reconnecting…';"
+    <> "    status.textContent = 'Reconnecting…'; setLed('led-warn');"
+    <> "  } else if (pc.connectionState === 'connected') {"
+    <> "    status.textContent = 'Live'; setLed('led-on');"
     <> "  }"
     <> "};"
     <> "const whepUrl = '/whep/"
@@ -68,4 +90,4 @@ whepJs cam =
     <> "  return r.text();"
     <> "}).then(answer => {"
     <> "  pc.setRemoteDescription({ type: 'answer', sdp: answer });"
-    <> "}).catch(e => { status.textContent = 'Error: ' + e.message; });"
+    <> "}).catch(e => { status.textContent = 'Error: ' + e.message; setLed('led-off'); });"

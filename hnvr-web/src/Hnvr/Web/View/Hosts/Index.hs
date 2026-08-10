@@ -6,9 +6,6 @@
 module Hnvr.Web.View.Hosts.Index (IndexView (..)) where
 
 import Data.Coerce (coerce)
-import Data.List (groupBy, sortBy)
-import Data.Maybe (fromMaybe)
-import Data.Ord (comparing)
 import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
@@ -22,33 +19,64 @@ instance View IndexView where
   html IndexView {..} =
     renderLayout
       [hsx|
-      <div class="header">
-        <h1>Hosts</h1>
+      <div class="page-header">
+        <div>
+          <h1>Hosts</h1>
+          <div class="subtitle">{nHosts} reporting · leader + workers</div>
+        </div>
       </div>
       {forEach hosts (renderHost cameras)}
     |]
     where
+      nHosts = tshow (length hosts) :: Text
+
       renderHost cams h =
         [hsx|
-          <h2>{h.id}</h2>
-          <table>
-            <tr><th>Leader</th><td>{tshow h.isLeader}</td></tr>
-            <tr><th>GPU</th><td>{fromMaybe "—" h.gpuModel}</td></tr>
-            <tr><th>Exec providers</th><td>{tshow h.execProviders}</td></tr>
-            <tr><th>Last health</th><td>{fromMaybe "—" (fmap tshow h.lastHealthAt)}</td></tr>
-          </table>
-          <h3>Cameras assigned</h3>
-          {renderAssigned cams (coerce h.id :: Text)}
+          <div class="card mb-4">
+            <div class="card-header">
+              <span class="flex items-center gap-2">
+                {ledFor h.lastHealthAt}
+                <span class="font-mono text-zinc-100">{h.id}</span>
+                {roleBadge h.isLeader}
+              </span>
+              <span class="text-zinc-500">{fromMaybe "—" (fmap tshow h.lastHealthAt)}</span>
+            </div>
+            <table class="table">
+              <tbody>
+                {kvRow "GPU" (fromMaybe "—" h.gpuModel)}
+                {kvRow "Exec providers" (tshow h.execProviders)}
+                {kvRow "Last health" (fromMaybe "—" (fmap tshow h.lastHealthAt))}
+              </tbody>
+            </table>
+            <div class="card-body">
+              <div class="section-h mt-0" style="margin-top:0">Cameras assigned</div>
+              {renderAssigned cams (coerce h.id :: Text)}
+            </div>
+          </div>
         |]
+        where
+          ledFor mh
+            | Just _ <- mh = [hsx|<span class="led led-on"></span>|]
+            | otherwise = [hsx|<span class="led led-off"></span>|]
+          roleBadge True = [hsx|<span class="badge badge-info">LEADER</span>|]
+          roleBadge False = [hsx|<span class="badge badge-mute">WORKER</span>|]
+          kvRow k v =
+            [hsx|
+              <tr class="kv">
+                <th>{k}</th>
+                <td>{v}</td>
+              </tr>
+            |]
+
       renderAssigned cams hostId =
         let ours = filter (\c -> c.assignedHost == Just hostId) cams
          in if null ours
-              then [hsx|<p>No cameras assigned.</p>|]
+              then [hsx|<div class="empty" style="padding:1rem">No cameras assigned.</div>|]
               else
                 [hsx|
-                  <ul>
+                  <ul class="stack-list">
                     {forEach ours renderCamLi}
                   </ul>
                 |]
-      renderCamLi c = [hsx|<li>{c.slug} · <a href={showCam c}>config</a></li>|]
+      renderCamLi c = [hsx|<li><span>{c.slug}</span><a href={showCam c}>config →</a></li>|]
       showCam c = "/ShowCamera?cameraId=" <> tshow (c |> get #id)

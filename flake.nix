@@ -88,10 +88,29 @@
       hnvrTopOverlay = final: prev:
         let
           hpkgs = prev.ghc912.extend (hnvrHaskellOverlay prev.haskell.lib);
+
+          # Compiled static assets (app.css) — built via the tailwindcss
+          # standalone CLI. Lives at the top level so the NixOS leader
+          # module can do `pkgs.hnvr-static` for its staticAssets option.
+          hnvr-static = prev.stdenv.mkDerivation {
+            name = "hnvr-static";
+            # Tailwind scans the whole hnvr-web tree to resolve the
+            # `content` globs in tailwind.config.js (relative paths).
+            src = ./hnvr-web;
+            nativeBuildInputs = [ prev.tailwindcss ];
+            buildPhase = ''
+              tailwindcss --input static/src.css --output static/app.css --minify
+            '';
+            installPhase = ''
+              mkdir -p $out
+              cp static/app.css $out/app.css
+            '';
+          };
         in
         {
           inherit (hpkgs)
             hnvr-core hnvr-nats hnvr-capture hnvr-cv hnvr-ptz hnvr-storage hnvr-web;
+          inherit hnvr-static;
         };
 
       # -------------------------------------------------------------
@@ -220,9 +239,38 @@
         ]);
         hpkgs = pkgs.ghc912.extend (hnvrHaskellOverlay pkgs.haskell.lib);
 
+        # -------------------------------------------------------------
+        # hnvr-static: compiles hnvr-web/static/src.css via the
+        # tailwindcss standalone CLI (nixpkgs#tailwindcss — no npm,
+        # no node, single Go binary). Scans HSX in src/Hnvr/Web/View
+        # for class names and emits a minified static/app.css.
+        #
+        # Consumed by nix/module.nix (copies app.css into the leader's
+        # ${dataDir}/static/ in systemd preStart). Iteration in dev via
+        # `devenv up` which runs tailwindcss in watch mode.
+        #
+        # The build copies the whole hnvr-web/ tree so tailwind can
+        # resolve the `content` globs in tailwind.config.js (they are
+        # relative to the config file's directory).
+        # -------------------------------------------------------------
+        hnvr-static = pkgs.stdenv.mkDerivation {
+          name = "hnvr-static";
+          src = ./hnvr-web;
+          nativeBuildInputs = [ pkgs.tailwindcss ];
+          buildPhase = ''
+            cp ${./hnvr-web/tailwind.config.js} tailwind.config.js
+            tailwindcss --input static/src.css --output static/app.css --minify
+          '';
+          installPhase = ''
+            mkdir -p $out
+            cp static/app.css $out/app.css
+          '';
+        };
+
         localPkgs = {
           inherit (hpkgs)
             hnvr-core hnvr-nats hnvr-capture hnvr-cv hnvr-ptz hnvr-storage hnvr-web;
+          hnvr-static = hnvr-static;
         };
 
         # -------------------------------------------------------------
@@ -356,6 +404,8 @@
                 pkgs.ormolu
                 devenvHpkgs.cabal-fmt
                 pkgs.nixpkgs-fmt
+                # CSS toolchain — tailwind standalone CLI (no npm)
+                pkgs.tailwindcss
                 # ---- Runtime deps for local testing --------------------
                 pkgs.ffmpeg_7-full
                 pkgs.onnxruntime
@@ -448,6 +498,24 @@
                 failure_threshold = 5;
               };
 
+              # Tailwind CSS watcher — rebuild static/app.css whenever
+              # HSX markup or src.css changes. Output goes into the
+              # project's hnvr-web/static/app.css (committed artifact
+              # so the dev leader binary, which reads APP_STATIC=hnvr-web/static,
+              # serves the latest CSS without a nix rebuild).
+              #
+              # The output path is stringified (toString then concatenated)
+              # so nix doesn't try to copy app.css into the eval closure —
+              # the file is a *build output*, not an input, and may not
+              # exist on a fresh checkout.
+              processes.tailwind.exec = ''
+                ${pkgs.tailwindcss}/bin/tailwindcss \
+                  --config ${./hnvr-web/tailwind.config.js} \
+                  --input ${./hnvr-web/static/src.css} \
+                  --output "${toString ./hnvr-web/static/app.css}" \
+                  --watch
+              '';
+
               # MinIO's built-in devenv service module defines
               # `processes.minio.exec` but no readiness probe — the TUI
               # shows "no health status" until we add one. /minio/health/
@@ -487,6 +555,11 @@
                 DATABASE_URL = "postgresql:///hnvr?host=127.0.0.1&port=15432";
                 # Port 8000 is Taiga on Sergey's box (pitfall #13).
                 PORT = "18001";
+                # Bootstrap admin user — leader idempotently INSERTs
+                # this on boot (ON CONFLICT DO NOTHING). Production
+                # sources these from sops-nix (Phase 6); dev-only.
+                INITIAL_ADMIN_EMAIL = "admin@hnvr.local";
+                INITIAL_ADMIN_PASSWORD = "hnvr-dev";
               };
 
               enterShell = preCommit.shellHook + ''

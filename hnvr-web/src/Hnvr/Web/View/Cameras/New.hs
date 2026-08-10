@@ -17,24 +17,37 @@ instance View NewView where
   html NewView {..} =
     renderLayout
       [hsx|
-      <div class="header">
-        <h1>New Camera</h1>
+      <div class="page-header">
+        <div>
+          <h1>New Camera</h1>
+          <div class="subtitle">Register an RTSP source for 24/7 recording</div>
+        </div>
+        <div class="actions">
+          <a class="btn btn-ghost" href="/Cameras">← Back</a>
+        </div>
       </div>
-      {renderForm camera}
+
+      <div class="card">
+        <div class="card-header">Camera definition</div>
+        <div class="card-body">
+          {renderForm camera}
+        </div>
+      </div>
     |]
     where
       renderForm camera =
         [hsx|
-          <form class="stacked" method="POST" action="/CreateCamera">
-            {textFieldFor "slug" "Slug" camera.slug}
-            {textFieldFor "name" "Name" camera.name}
-            {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl}
-            {textFieldFor "rtspSubUrl" "RTSP URL (sub, optional)" (fromMaybe "" camera.rtspSubUrl)}
-            {textFieldFor "username" "Username" (fromMaybe "" camera.username)}
-            {textFieldFor "password" "Password (stored encrypted)" ("" :: Text)}
-            {textFieldFor "host" "Host IP" (fromMaybe "" camera.host)}
-            {textFieldFor "port" "Port" (tshow camera.port)}
-            <div class="field-row">
+          <form class="form" method="POST" action="/CreateCamera">
+            {textFieldFor "slug" "Slug" camera.slug "Unique handle, e.g. floor_2_5"}
+            {textFieldFor "name" "Name" camera.name "Human-friendly label"}
+            {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl "Main stream — typically high-res"}
+            {textFieldFor "rtspSubUrl" "RTSP URL (sub, optional)" (fromMaybe "" camera.rtspSubUrl) "Analysis stream — lower-res"}
+            {textFieldFor "username" "Username" (fromMaybe "" camera.username) "RTSP credentials"}
+            {textFieldFor "password" "Password (stored encrypted)" ("" :: Text) "AES-256-GCM at rest"}
+            {textFieldFor "host" "Host IP" (fromMaybe "" camera.host) "Camera hostname or IP"}
+            {textFieldFor "port" "Port" (tshow camera.port) "RTSP port (default 554)"}
+
+            <div class="field">
               <label>Codec</label>
               <select name="codec">
                 <option value="unknown" selected={camera.codec == Unknown}>unknown</option>
@@ -42,14 +55,19 @@ instance View NewView where
                 <option value="hevc" selected={camera.codec == Hevc}>hevc</option>
               </select>
             </div>
-            <button class="btn" type="submit">Create Camera</button>
+
+            <div class="flex items-center gap-2 mt-6">
+              <button class="btn btn-primary" type="submit">Create Camera</button>
+              <a class="btn btn-ghost" href="/Cameras">Cancel</a>
+            </div>
           </form>
         |]
 
-      textFieldFor name' label' value' =
+      textFieldFor name' label' value' hint' =
         [hsx|
-          <div class="field-row">
+          <div class="field">
             <label>{label'}</label>
-            <input type="text" name={name'} value={value'} />
+            <input class="input" type="text" name={name'} value={value'} />
+            <div class="hint">{hint'}</div>
           </div>
         |]

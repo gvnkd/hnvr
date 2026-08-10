@@ -619,7 +619,71 @@ ffprobe notes:
        `packages.*`, `checks.*`, `formatter`, `nixosModules.*`; the
        pre-existing `nixosConfigurations.hnvr-{1,2}-vm` failure (missing
        `fileSystems` + `boot.loader.grub.devices` assertions) is unrelated
-       and predates devenv.
+        and predates devenv.
+
+   56. **Web UI build pipeline — Tailwind standalone CLI** (Aug 10 2026) —       CSS lives in `hnvr-web/static/src.css` (input) and compiles to
+       `hnvr-web/static/app.css` via the **tailwind standalone CLI**
+       (`nixpkgs#tailwindcss`, v3.4.17) — **no npm, no node, no postcss**.
+       Component classes via `@apply` are defined in `src.css`; HSX views
+       use semantic class names (`.btn`, `.card`, `.led`, `.badge`, etc.).
+       Things to know:
+       - **Production**: `flake.nix`'s `hnvr-static` derivation (exposed
+         via `hnvrTopOverlay` so `pkgs.hnvr-static` resolves in NixOS)
+         runs `tailwindcss --minify` to produce `$out/app.css`. The
+         `services.hnvr.leader.staticAssets` option (nix/module.nix)
+         defaults to this derivation; preStart copies it into
+         `${dataDir}/static/app.css` (idempotent on every service start).
+       - **Dev**: `devenv up` runs a tailwind watcher process
+         (`processes.tailwind.exec`) that rebuilds
+         `hnvr-web/static/app.css` on HSX/src.css changes. The dev
+         leader binary serves it via `APP_STATIC=hnvr-web/static`
+         (relative to CWD — Sergey runs from repo root).
+       - **First-time dev setup**: if `hnvr-web/static/app.css` doesn't
+         exist (e.g. fresh checkout, watcher not yet run), the leader
+         serves a 404 for `/static/app.css` and pages render unstyled.
+         Manual rebuild: `cd hnvr-web && tailwindcss --input static/src.css --output static/app.css --minify`.
+       - **Tailwind pitfall: `@apply group` is rejected** — the `group`
+         utility is a marker class, not a real CSS property. Put `group`
+         directly in HSX alongside the component class
+         (`<div class="cam-card group">`) instead of via `@apply`.
+       - **Tailwind pitfall: `tailwind.config.js` `content` globs are
+         resolved relative to the config file** — the `hnvr-static`
+         derivation copies the whole `hnvr-web/` tree as `src` so
+         tailwind can scan `src/Hnvr/Web/View/**/*.hs` for class names.
+       - **IHP static serving**: IHP's static middleware reads
+         `APP_STATIC` env (default `"static/"` relative to CWD). Module
+         already wires `APP_STATIC = "${cfg.dataDir}/static"`. Files in
+         that dir are served at `/static/<filename>` with proper cache
+         headers (no cache in dev, `max-age=forever` in prod with
+         asset-path hash busting via `IHP_ASSET_VERSION`).
+        - **`Html`-typed local helpers** (pitfall #36 still applies) —
+          keep view helpers in the `where` block of the `View` instance
+          method so the implicit-param constraint flows from the
+          enclosing scope; top-level helpers need either
+          `(?context :: RequestContext, ?request :: Request) =>` or no
+          signature.
+
+   57. **hasql serialises `String` as a PG array, not TEXT** (Aug 10 2026) —
+       `Env.lookupEnv` returns `IO (Maybe String)` and `String = [Char]`.
+       Passing that `String` straight to `sqlExec`'s tuple makes hasql
+       pick the `[Char]` `ToField` instance, which encodes a PG **array**
+       of char — the value lands in the column as `{a,d,m,i,n,@,...}`
+       instead of `admin@hnvr.local`. Symptom: IHP's
+       `filterWhereCaseInsensitive (#email, ...)` in
+       `createSessionAction` never matches, so login always 302s back
+       to `/NewSession` with "Invalid Credentials". Fix: `cs` to `Text`
+       before the SQL tuple: `let emailT = cs email :: Text in sqlExec
+       ... (emailT, hash)`. Rule: never pass a `String` to hasql —
+       always coerce to `Text` first.
+
+       While here: `Hnvr.Web.Config.config` now `setEnv "APP_STATIC"
+       "hnvr-web/static"` when the env var is unset, so the dev leader
+       binary serves `/static/app.css` without needing
+       `APP_STATIC=hnvr-web/static` on the command line. Production
+       overrides via `nix/module.nix`'s `APP_STATIC = "${dataDir}/static"`.
+       And devenv's env block now ships dev defaults
+       (`admin@hnvr.local` / `hnvr-dev`) so `devenv up` + leader just
+       works.
 
 ## Sergey's working style
 

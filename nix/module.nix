@@ -14,6 +14,19 @@ in
       description = "Derivation containing bin/hnvr-leader.";
     };
 
+    staticAssets = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.hnvr-static or (pkgs.runCommand "hnvr-static-empty" { } "mkdir $out");
+      defaultText = "pkgs.hnvr-static";
+      description = ''
+        Derivation containing the compiled static assets (notably
+        @app.css@) that get copied into @''${dataDir}/static/@ at
+        service start. Defaults to @pkgs.hnvr-static@ when the HNVR
+        overlay is applied; falls back to an empty derivation
+        otherwise.
+      '';
+    };
+
     port = lib.mkOption {
       type = lib.types.port;
       default = 8000;
@@ -105,8 +118,15 @@ in
       };
 
       # Generate the IHP session secret on first start if missing.
+      # Also stage the compiled static assets (app.css) from
+      # cfg.staticAssets into ${dataDir}/static/ — IHP's static
+      # middleware serves from APP_STATIC (env-configured below).
       preStart = ''
         mkdir -p ${cfg.dataDir}/static
+        # Idempotently stage the latest CSS — copy (not symlink) because
+        # ProtectSystem=strict + ReadWritePaths=${cfg.dataDir} forbid
+        # writes outside dataDir, and the nix store is read-only anyway.
+        cp -fL ${cfg.staticAssets}/app.css ${cfg.dataDir}/static/app.css
         if [ ! -f ${cfg.dataDir}/client_session_key.aes ]; then
           head -c 32 /dev/urandom > ${cfg.dataDir}/client_session_key.aes
           chmod 0600 ${cfg.dataDir}/client_session_key.aes

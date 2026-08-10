@@ -18,60 +18,88 @@ instance View IndexView where
   html IndexView {..} =
     renderLayout
       [hsx|
-      <div class="header">
-        <h1>Dashboard</h1>
+      <div class="page-header">
+        <div>
+          <h1>Dashboard</h1>
+          <div class="subtitle">{nCams} cameras · {nHosts} hosts</div>
+        </div>
       </div>
 
-      <h2>Hosts</h2>
+      <div class="section-h">Hosts</div>
       {renderHosts hosts}
 
-      <h2>Cameras</h2>
+      <div class="section-h">Cameras</div>
       {renderCameras cameras}
     |]
     where
-      renderHosts [] = [hsx|<p>No hosts reporting yet.</p>|]
+      nCams = tshow (length cameras) :: Text
+      nHosts = tshow (length hosts) :: Text
+
+      renderHosts [] = [hsx|<div class="empty"><span class="empty-icon">⌖</span>No hosts reporting yet.</div>|]
       renderHosts hs =
         [hsx|
-          <table>
-            <thead>
-              <tr><th>Host</th><th>Leader</th><th>Last health</th><th>GPU</th></tr>
-            </thead>
-            <tbody>{forEach hs renderHost}</tbody>
-          </table>
+          <div class="card">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="w-4"></th>
+                  <th>Host</th>
+                  <th>Role</th>
+                  <th>Last health</th>
+                  <th>GPU</th>
+                </tr>
+              </thead>
+              <tbody>{forEach hs renderHost}</tbody>
+            </table>
+          </div>
         |]
       renderHost h =
         [hsx|
           <tr>
-            <td>{h.id}</td>
-            <td>{tshow h.isLeader}</td>
-            <td>{fromMaybe "—" (fmap tshow h.lastHealthAt)}</td>
-            <td>{fromMaybe "—" h.gpuModel}</td>
+            <td>{healthLedFor h.lastHealthAt}</td>
+            <td class="mono text-zinc-100">{h.id}</td>
+            <td>{roleBadgeFor h.isLeader}</td>
+            <td class="mono">{fromMaybe "—" (fmap tshow h.lastHealthAt)}</td>
+            <td class="mono">{fromMaybe "—" h.gpuModel}</td>
           </tr>
         |]
+      healthLedFor mh
+        | Just _ <- mh = [hsx|<span class="led led-on" title="reporting"></span>|]
+        | otherwise = [hsx|<span class="led led-off" title="never seen"></span>|]
+      roleBadgeFor True = [hsx|<span class="badge badge-info">LEADER</span>|]
+      roleBadgeFor False = [hsx|<span class="badge badge-mute">WORKER</span>|]
 
-      renderCameras [] = [hsx|<p>No cameras yet. Add some via the Cameras page.</p>|]
+      renderCameras [] = [hsx|<div class="empty"><span class="empty-icon">⌖</span>No cameras yet. Add some via the Cameras page.</div>|]
       renderCameras cs =
         [hsx|
-          <div class="grid">
+          <div class="cam-grid">
             {forEach cs renderCamera}
           </div>
         |]
-      renderCamera cam = [hsx|{card}|]
+      renderCamera cam = card
         where
           cid = tshow (cam |> get #id)
           liveUrl = "/ShowLive?cameraId=" <> cid
           showUrl = "/ShowCamera?cameraId=" <> cid
           archiveUrl = "/PlayerArchive?cameraId=" <> cid
+          hostLabel = fromMaybe "unassigned" cam.assignedHost
           card =
             [hsx|
-              <div class="card">
-                <a class="thumb" href={liveUrl}>▶</a>
-                <div class="card-body">
-                  <strong>{cam.slug}</strong>
-                  <div class="meta">{fromMaybe "—" cam.assignedHost}</div>
-                  <a href={showUrl}>config</a>
-                  ·
-                  <a href={archiveUrl}>archive</a>
+              <div class="cam-card group">
+                <a class="cam-thumb" href={liveUrl}>
+                  <span class="rec-flag">
+                    <span class="led led-rec"></span>REC
+                  </span>
+                  <span class="host-flag">{hostLabel}</span>
+                  <span class="play-icon">▶</span>
+                </a>
+                <div class="cam-body">
+                  <span class="slug">{cam.slug}</span>
+                  <span class="links">
+                    <a href={showUrl}>config</a>
+                    <span class="text-zinc-700">·</span>
+                    <a href={archiveUrl}>archive</a>
+                  </span>
                 </div>
               </div>
             |]
