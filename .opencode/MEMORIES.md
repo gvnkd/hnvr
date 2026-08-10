@@ -775,6 +775,30 @@ ffprobe notes:
        first (matches `/whep/*`), then healthz (`/healthz`), then IHP.
        Put the most-specific path-prefix middleware leftmost.
 
+   63. **IHP HSX does NOT splice `{...}` inside `<script>` or `<style>`
+       tags** (Aug 10 2026) — `ihp-hsx/IHP/HSX/Parser.hs:111-124` treats
+       script/style bodies as pre-escaped raw text (so CSS like
+       `h1 { color:red }` doesn't get re-parsed as a splice). Symptom:
+       `[hsx|<script>{myJs}</script>|]` outputs the literal string
+       `{myJs}` as JS → browser JS parse error
+       (`Uncaught SyntaxError: missing ) after argument list` at
+       column 1, since the literal text starts with `{`). Both
+       `View/Live/Show.hs` and `View/Archive/Player.hs` had this bug
+       for ~all of Phase 2 (live view JS never ran, archive player
+       silently no-op'd). Fix: build the entire `<script>…</script>`
+       element in Haskell and inject as a single body-level splice:
+       ```haskell
+       [hsx|
+         ...
+         <div>...</div>
+         {scriptTag}
+       |]
+         where
+           scriptTag = preEscapedTextValue ("<script>" <> js <> "</script>" :: Text)
+       ```
+       Verify via `curl -b cookie http://leader/ShowLive?... | grep script` —
+       you should see actual JS, not `{preEscapedTextValue …}`.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.

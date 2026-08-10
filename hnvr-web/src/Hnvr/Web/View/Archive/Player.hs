@@ -39,13 +39,17 @@ instance View PlayerView where
         <span id="hnvr-status">Loading player…</span>
       </div>
       <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
-      <script>{preEscapedTextValue js}</script>
+      {scriptTag}
     |]
     where
       playlistUrl = "/PlaylistArchive?cameraId=" <> tshow (camera |> get #id)
       cid = tshow (camera |> get #id)
       liveUrl = "/ShowLive?cameraId=" <> cid
       editUrl = "/ShowCamera?cameraId=" <> cid
+      -- IHP HSX doesn't splice {…} inside <script> tags (treats script
+      -- body as pre-escaped text). Build the entire <script> element
+      -- in Haskell and inject as a single body-level splice. See pitfall #63.
+      scriptTag = preEscapedTextValue ("<script>" <> js <> "</script>" :: Text)
 
       js =
         "const video = document.getElementById('hnvr-player');"

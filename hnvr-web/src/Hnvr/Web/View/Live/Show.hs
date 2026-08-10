@@ -46,10 +46,16 @@ instance View ShowView where
         <span id="hnvr-live-led" class="led led-warn"></span>
         <span id="hnvr-live-status">Connecting…</span>
       </div>
-      <script>{preEscapedTextValue (whepJs camera)}</script>
+      {scriptTag}
     |]
     where
       archiveUrl = "/PlayerArchive?cameraId=" <> tshow (camera |> get #id)
+      -- IHP HSX deliberately does NOT splice {…} inside <script> tags
+      -- (parser treats script/style bodies as pre-escaped text so that
+      -- CSS like `h1 { color:red }` doesn't get re-parsed). Build the
+      -- entire <script>…</script> element in Haskell and inject it as
+      -- a single body-level splice. See pitfall #63.
+      scriptTag = preEscapedTextValue ("<script>" <> whepJs camera <> "</script>" :: Text)
 
 -- | Inline WHEP client. ~40 LOC vanilla JS. Talks to our /whep/<slug>
 -- proxy which forwards to MediaMTX. Updates the status pill + LED
