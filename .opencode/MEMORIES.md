@@ -590,12 +590,13 @@ ffprobe notes:
        - **MediaMTX 1.20.0 (was 1.18.2, bumped Aug 10 2026)** — overlay
          in flake.nix overrides nixpkgs to v1.20.0 via buildGo126Module
          (vendorHash + hls.js v1.6.16 fetched separately). API stays
-         `/v3/*` so the readiness probe is unchanged. `Hnvr.Web.
+         `/v3/*` so the readiness probe is unchanged. **`Hnvr.Web.
          MediaMTXConfigSyncer` still calls `PUT /v2/config/paths/<slug>`
-         which 404s — that's a separate bug in our code (mediamtx
-         migrated to `/v3/config/paths/{add,patch}` in 1.16+), not a
-         version issue. Track + fix when Phase 2 Slice 3 WHEP testing
-         resumes.
+         which 404s — tracked in Taiga issue #467** (Priority High,
+         Severity Important, blocks Phase 2 Slice 3 WHEP demo). Fix:
+         migrate to `/v3/config/paths/{add,patch}/<slug>` per v1.20.0
+         openapi.yaml. The bug is in our code (mediamtx migrated in
+         v1.16), not a version issue — v1.20.0 bump did NOT auto-fix it.
        - **MediaMTX crashes if HLS port :8888 collides** — Sergey's box
          has another service on :8888. Bootstrap config
          (`mediamtxBootstrap` in flake.nix) sets `rtsp/rtmp/hls/srt/
