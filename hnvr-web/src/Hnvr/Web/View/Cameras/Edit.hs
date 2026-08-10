@@ -23,9 +23,10 @@ instance View EditView where
       {renderForm camera}
       <hr />
       <h3>Probe</h3>
-      <p>Probe the main RTSP URL with ffprobe to fill the codec field automatically.</p>
+      <p>Probe the main RTSP URL (and the sub URL when present) with ffprobe
+        to fill codec + sub-stream fields automatically.</p>
       <form method="POST" action={probeUrl}>
-        <button class="btn" type="submit">Probe Main Stream</button>
+        <button class="btn" type="submit">Probe Streams</button>
       </form>
     |]
     where

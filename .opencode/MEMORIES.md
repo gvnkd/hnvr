@@ -583,7 +583,7 @@ ffprobe notes:
             directly).
       - ✅ Slice 8 (Aug 10 2026, phase-audit-fix): Cameras admin gate —
             IHP v1.6.0 `AuthSupport` wiring (`Hnvr.Web.Auth`,
-            `Controller/Sessions.hs`, `View/Sessions/New.hs`),
+            `Controller/Sessions.hs`, `View/Sessions.New.hs`),
             `users` table, `beforeAction = ensureIsUser` on
             `CamerasController`, `AuthMiddleware (authMiddleware @User)`
             in `Config.hs`, `seedAdminUser` initializer reads
@@ -592,6 +592,13 @@ ffprobe notes:
             `/NewSession`, `/CreateSession`, `/DeleteSession` (top-level,
             IHP AutoRoute default). Nav shows Login/Logout link. Closed
             audit-report-2 §2 row "Cameras CRUD admin gate".
+      - ✅ Slice 9 (Aug 10 2026, phase-audit-fix): Probe sub-stream —
+            `ProbeAction` now probes main URL + (when present) sub URL
+            and persists `codec` (main) + `substreamCodec`/
+            `substreamWidth`/`substreamHeight` (sub). Main-probe failure
+            short-circuits; sub-probe failure logs but doesn't block
+            main. EditView button relabeled "Probe Streams". Closed
+            audit-report-2 §2 row "Probe sub-stream button".
 - [x] **Phase 1 — Recording MVP complete** (code; live VM test pending).
 - [~] **Phase 2 — Live View + Multi-Host. Code complete (Aug 10 2026),
       live VM test pending**. Slices shipped:

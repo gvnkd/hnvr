@@ -101,25 +101,39 @@ instance Controller CamerasController where
     setSuccessMessage "Camera deleted"
     redirectTo IndexAction
 
-  -- \| Probe the main RTSP URL with ffprobe and fill codec/width/height.
-  -- Triggered by the "Probe" button on EditView. Best-effort: failures
-  -- set a flash error and redirect back to Edit.
+  -- \| Probe the main RTSP URL (and sub URL when present) with ffprobe and
+  -- fill the codec + sub-stream fields. Triggered by the "Probe Streams"
+  -- button on EditView. Best-effort: main-probe failure short-circuits with
+  -- a flash error; sub-probe failure is logged but does not block main-probe
+  -- persistence.
   action ProbeAction {cameraId} = do
     camera <- fetch cameraId
-    result <- liftIO (probe (camera |> get #rtspUrl))
-    case result of
+    mainResult <- liftIO (probe (camera |> get #rtspUrl))
+    case mainResult of
       Left err -> do
-        setErrorMessage ("Probe failed: " <> err)
+        setErrorMessage ("Probe failed (main): " <> err)
         redirectTo EditAction {cameraId}
-      Right info -> do
-        camera <-
-          camera
-            |> set #codec info.probeCodec
-            |> set #substreamWidth (camera |> get #substreamWidth)
-            |> set #substreamHeight (camera |> get #substreamHeight)
-            |> updateRecord
-        setSuccessMessage "Probe OK"
-        redirectTo EditAction {cameraId = camera |> get #id}
+      Right mainInfo -> do
+        subResult <- case camera |> get #rtspSubUrl of
+          Nothing -> pure Nothing
+          Just subUrl | subUrl == "" -> pure Nothing
+          Just subUrl -> liftIO (fmap Just (probe subUrl))
+        let camera1 =
+              camera
+                |> set #codec mainInfo.probeCodec
+                |> applySubProbe subResult
+        camera2 <- camera1 |> updateRecord
+        case subResult of
+          Just (Right _) -> setSuccessMessage "Probe OK (main + sub)"
+          Just (Left subErr) -> setErrorMessage ("Probe OK (main); sub failed: " <> subErr)
+          Nothing -> setSuccessMessage "Probe OK (main only; no sub URL)"
+        redirectTo EditAction {cameraId = camera2 |> get #id}
+        where
+          applySubProbe (Just (Right sub)) =
+            set #substreamCodec sub.probeCodec
+              . set #substreamWidth (Just sub.probeWidth)
+              . set #substreamHeight (Just sub.probeHeight)
+          applySubProbe _ = id
 
   -- \| POST /cameras/:id/assign — admin override of assigned_host.
   -- Sets @manual_assign = true@ so the AssignmentCoordinator doesn't
