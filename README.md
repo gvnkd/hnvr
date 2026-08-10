@@ -70,20 +70,63 @@ hnvr/
 
 ## Development environment
 
+The devShell is **flake-integrated [devenv](https://devenv.sh)** — `nix develop` lands in a devenv-aware shell, and `devenv up` launches the four services the leader VM normally provides (PostgreSQL, MinIO, NATS, MediaMTX). All `HNVR_*` env vars consumed by HNVR binaries are pre-wired.
+
 ### Enter the dev shell
 
 ```bash
-nix develop
+# --no-pure-eval is required: devenv needs to resolve $PWD at runtime
+# to locate state (.devenv/state/). direnv (via .envrc) passes it
+# automatically.
+nix develop --no-pure-eval
 ```
 
 Provides GHC 9.12, cabal, ghcid, hlint, ormolu, cabal-fmt, nixpkgs-fmt,
-ffmpeg_7-full, onnxruntime, nats-server, curl, jq, direnv. Pre-commit
+ffmpeg_7-full, onnxruntime, curl, jq, direnv, devenv CLI. Pre-commit
 hooks (ormolu, hlint, nixpkgs-fmt, end-of-file-fixer,
-trim-trailing-whitespace) are wired into the shell via
-`pre-commit-hooks.nix`.
+trim-trailing-whitespace) are wired via `pre-commit-hooks.nix`.
 
 With direnv installed, the shell loads automatically on `cd` (`.envrc`
-contains `use flake`).
+contains `use flake . --no-pure-eval`).
+
+### Start dev services
+
+In a separate terminal inside the shell:
+
+```bash
+devenv up     # process-compose TUI; Ctrl-C or 'q' to stop
+```
+
+Brings up four services with readiness probes:
+
+| Service | Port(s) | Health check |
+|---------|---------|--------------|
+| PostgreSQL 18 | 15432 | (devenv `pg_isready`) |
+| MinIO (S3) | 9100 (API), 9101 (console) | `GET /minio/health/live` |
+| NATS + JetStream | 4222, monitor 8222 | `GET /healthz` |
+| MediaMTX | 9997 (REST), 8889 (WebRTC) | `GET /v3/info` |
+
+> **Port 15432, not 5432** — Sergey's dev box runs a system postgres on
+> :5432 (langfuse). The devenv PG uses :15432; `DATABASE_URL` is
+> pre-wired accordingly.
+
+Env vars consumed by HNVR binaries (`HNVR_NATS_URI`, `HNVR_S3_*`,
+`DATABASE_URL`, `HNVR_MEDIAMTX_*`, `PORT=18001`) are exported inside
+the shell — `./result/bin/hnvr-leader` and cabal-built integration
+binaries drop straight in without manual `export`.
+
+### Stop a hung devenv
+
+If the process-compose TUI freezes (rare; usually a stuck child), from
+another console:
+
+```bash
+~/bin/devenv-kill              # SIGKILL supervisor + scoped children
+~/bin/devenv-kill --reset-pg   # also wipe .devenv/state/postgres
+```
+
+The script targets `/nix/store/.../bin/{nats-server,mediamtx,minio,postgres}`
+patterns — it will not touch Sergey's system services.
 
 ### Build
 
@@ -185,7 +228,7 @@ running outside a VM):
 | WHEP proxy (WebRTC SDP) | 8000 | 18000 | http://localhost:18000/whep/<slug> |
 | NATS monitor | 8222 | 18222 | http://localhost:18222/varz |
 | MediaMTX WebRTC | 8889 | 18889 | (consumed by WHEP proxy) |
-| MediaMTX REST config | 9997 | 19997 | http://localhost:19997/v2/config/paths |
+| MediaMTX REST config | 9997 | 19997 | http://localhost:19997/v3/info |
 | Postgres (leader VM) | 5432 | — | `postgresql:///hnvr?host=/run/postgresql` (trust auth, in-VM only) |
 
 Smoke tests once the leader VM is up:
@@ -194,7 +237,7 @@ Smoke tests once the leader VM is up:
 curl http://localhost:18000/healthz                 # → ok, HTTP 200
 curl http://localhost:18000/                        # → dashboard (camera grid + hosts)
 curl http://localhost:18000/hosts                   # → per-host status
-curl http://localhost:19997/v2/config/paths         # → mediamtx live path config
+curl http://localhost:19997/v3/info                 # → mediamtx version + start time
 curl -s http://localhost:18222/varz | jq '.in_msgs' # → increments ~1/s/camera
 ```
 
@@ -207,6 +250,11 @@ HNVR_NATS_URI="nats://nats:nats@localhost:4222" PORT=8002 \
 ```
 
 ## Local S3 (MinIO) for testing
+
+**Now managed by devenv** — `devenv up` starts MinIO on `127.0.0.1:9100`
+with credentials `minioadmin/minioadmin` and auto-creates the
+`hnvr-recordings` bucket. The manual recipe below is only needed if you
+want MinIO outside devenv.
 
 MinIO is `marked insecure` in nixpkgs; build it impurely:
 
@@ -224,6 +272,10 @@ mc mb local/hnvr-recordings
 Production uses SeaweedFS (SaaS), not MinIO.
 
 ## Local NATS for testing
+
+**Now managed by devenv** — `devenv up` starts NATS+JetStream on
+`127.0.0.1:4222` (monitor `:8222`) with auth `nats:nats`. The manual
+recipe below is only needed outside devenv.
 
 ```bash
 printf 'port: 4222\nhttp_port: 8222\nauthorization {\n  user: n\n  password: n\n}\n' \

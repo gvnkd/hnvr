@@ -26,9 +26,18 @@
     # Phase 6+ (secrets, disks):
     #   sops-nix.url   = "github:Mic92/sops-nix";
     #   disko.url      = "github:nix-community/disko";
+
+    # devenv — manages local dev services (Postgres, MinIO, NATS, MediaMTX)
+    # via `devenv up` inside `nix develop`. Flake-integrated: the devShell
+    # is built via devenv.lib.mkShell instead of plain pkgs.mkShell, so
+    # `nix develop` lands in a devenv-aware shell.
+    devenv = {
+      url = "github:cachix/devenv";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = inputs@{ self, nixpkgs, flake-utils, pre-commit-hooks, ihp, ... }:
+  outputs = inputs@{ self, nixpkgs, flake-utils, pre-commit-hooks, ihp, devenv, ... }:
     let
       supportedSystems = [ "x86_64-linux" ];
 
@@ -209,46 +218,250 @@
             };
           };
         };
+
+        # -------------------------------------------------------------
+        # devenv-only pkgs instance. MinIO is `meta.insecure = true` in
+        # nixpkgs and the eval check looks at `config.permittedInsecurePackages`,
+        # which can only be set via `import nixpkgs { config = ...; }` (not
+        # via overlays on legacyPackages). We compose IHP's overlay on top
+        # so `ghc912` resolves the same way as the main `pkgs` above; our
+        # hnvrHaskellOverlay layers on top of that to expose our packages
+        # for fast cabal-style iteration inside the devenv shell.
+        #
+        # Production deployments use the SeaweedFS SaaS for object storage,
+        # never this dev MinIO — the bypass is dev-shell-only.
+        # -------------------------------------------------------------
+        minioVersion = (import nixpkgs { inherit system; overlays = [ ihp.overlays.default ]; }).minio.name;
+        devenvPkgs = import nixpkgs {
+          inherit system;
+          overlays = [ ihp.overlays.default ];
+          config.permittedInsecurePackages = [ minioVersion ];
+        };
+        devenvHpkgs = devenvPkgs.ghc912.extend (hnvrHaskellOverlay devenvPkgs.haskell.lib);
+
+        # MediaMTX bootstrap config — leader pushes per-camera path
+        # config via REST API (PUT /v2/config/paths/<slug>) once cameras
+        # are added in the IHP UI. Mirrors the stubConfig in
+        # nix/mediamtx.nix (NixOS module) so prod + dev behave the same.
+        #
+        # Only API + WebRTC are enabled. RTSP/RTMP/HLS/SRT/playback
+        # *server* ports are disabled because (a) HNVR doesn't use them
+        # (live view = WebRTC; archive HLS is served by the leader, not
+        # mediamtx) and (b) the default HLS port :8888 collides with
+        # another service on Sergey's dev box, crashing mediamtx on
+        # startup. mediamtx still pulls RTSP from cameras as a *client*
+        # — that path is independent of the server settings below.
+        mediamtxBootstrap = devenvPkgs.writeText "mediamtx-dev.yml" ''
+          api: yes
+          apiAddress: :9997
+          webrtc: yes
+          webrtcAddress: :8889
+          webrtcEncryption: no
+          webrtcAllowOrigins:
+            - '*'
+          rtsp: no
+          rtmp: no
+          hls: no
+          srt: no
+          playback: no
+          logLevel: info
+        '';
       in
       {
         # `nix build .#hnvr-web` yields a derivation with
         # bin/{hnvr-leader,hnvr-node}.
         packages = localPkgs // { default = localPkgs.hnvr-web; };
 
-        devShells.default = pkgs.mkShell {
-          buildInputs = [
-            hpkgs.ghc
-            hpkgs.cabal-install
-            hpkgs.ghcid
-            hpkgs.hlint
-            pkgs.ormolu
-            hpkgs.cabal-fmt
-            pkgs.nixpkgs-fmt
-            # ---- Runtime deps for local testing ----------------------
-            pkgs.ffmpeg_7-full
-            pkgs.onnxruntime
-            pkgs.nats-server
-            pkgs.mediamtx
-            # NOTE: cabal build all needs pg_config for postgresql-libpq-configure.
-            # We currently can't pull postgresql/libpq here without enabling
-            # nix's experimental pipe-operators feature (nixpkgs at our pinned
-            # rev uses `<|` syntax in the postgresql family). cabal build all
-            # is therefore verified in CI only (CI uses Nix 2.35+).<|code_middle|><d076e6aa>
+        # -------------------------------------------------------------
+        # devenv-integrated dev shell.
+        #
+        # Replaces the previous plain `pkgs.mkShell`. The shell still
+        # works under `nix develop` and direnv (`use flake`), but now
+        # also exposes `devenv up` which launches the four services
+        # the leader VM normally provides (Postgres, MinIO, NATS,
+        # MediaMTX). Env vars consumed by HNVR binaries (HNVR_NATS_URI,
+        # HNVR_S3_*, DATABASE_URL, etc.) are pre-wired so cabal-built
+        # binaries drop straight into a working environment.
+        #
+        # `nix develop` MUST be invoked with `--no-pure-eval` (or via
+        # direnv which already does so) — `devenv up` needs to query
+        # the working directory at runtime, which pure eval forbids.
+        # See https://devenv.sh/guides/using-with-flakes/.
+        #
+        # MinIO is `meta.insecure = true` in nixpkgs (CVE history).
+        # We construct a dedicated pkgs instance for the devenv shell
+        # only — production deployments use the SeaweedFS SaaS, never
+        # this dev MinIO.
+        # -------------------------------------------------------------
+        devShells.default = devenv.lib.mkShell {
+          inherit inputs;
+          pkgs = devenvPkgs;
+          modules = [
+            ({ pkgs, config, lib, ... }: {
+              # devenv auto-detects root via `builtins.getEnv "PWD"`,
+              # which returns "" under pure eval (CI `nix flake check`).
+              # Fall back to the flake's own source path so the shell
+              # evaluates cleanly in pure mode. Under no-pure-eval (real
+              # `nix develop`), PWD wins and points at Sergey's working
+              # tree so state files land in the right place.
+              devenv.root =
+                let pwd = builtins.getEnv "PWD";
+                in if pwd != "" then pwd else inputs.self.outPath;
 
-            # ---- Utilities -------------------------------------------
-            pkgs.curl
-            pkgs.jq
-            pkgs.direnv
+              packages = [
+                devenvHpkgs.ghc
+                devenvHpkgs.cabal-install
+                devenvHpkgs.ghcid
+                devenvHpkgs.hlint
+                pkgs.ormolu
+                devenvHpkgs.cabal-fmt
+                pkgs.nixpkgs-fmt
+                # ---- Runtime deps for local testing --------------------
+                pkgs.ffmpeg_7-full
+                pkgs.onnxruntime
+                # NOTE: cabal build all needs pg_config for postgresql-libpq-configure.
+                # We currently can't pull postgresql/libpq here without enabling
+                # nix's experimental pipe-operators feature (nixpkgs at our pinned
+                # rev uses `<|` syntax in the postgresql family). cabal build all
+                # is therefore verified in CI only (CI uses Nix 2.35+).
+
+                # ---- Utilities -------------------------------------------
+                pkgs.curl
+                pkgs.jq
+                pkgs.direnv
+              ];
+
+              # ---- Services (managed by `devenv up`) ----------------------
+
+              # PostgreSQL 18 — matches the design's SaaS PG version.
+              # IHP needs TCP (not just unix socket) because the leader
+              # binary may run as a different user than the dev shell.
+              # Trust auth mirrors the leader VM (nix/module.nix).
+              #
+              # Port 15432 (not the default 5432) — Sergey's dev box
+              # runs a system postgres on :5432 (langfuse / zulip-dicts
+              # build). Use a non-conflicting port; DATABASE_URL below
+              # is updated to match.
+              services.postgres = {
+                enable = true;
+                package = pkgs.postgresql_18;
+                listen_addresses = "127.0.0.1";
+                port = 15432;
+                initialDatabases = [{
+                  name = "hnvr";
+                  user = "hnvr";
+                }];
+                hbaConf = ''
+                  local all all trust
+                  host  all all 127.0.0.1/32 trust
+                  host  all all ::1/128 trust
+                '';
+              };
+
+              # MinIO — S3-compatible storage for fMP4 segments. Buckets
+              # are auto-created on first start; no `mc mb` needed.
+              # Matches the credentials used in MEMORIES.md pitfall #30
+              # and the hnvr-s3-upload integration binary examples.
+              services.minio = {
+                enable = true;
+                listenAddress = "127.0.0.1:9100";
+                consoleAddress = "127.0.0.1:9101";
+                accessKey = "minioadmin";
+                secretKey = "minioadmin";
+                buckets = [ "hnvr-recordings" ];
+              };
+
+              # NATS — IPC spine. Auth + JetStream on; matches what the
+              # VM runs (nix/nats-server.nix) and the URI form the binaries
+              # expect (user:pass@host — pitfall #31).
+              services.nats = {
+                enable = true;
+                port = 4222;
+                monitoring.enable = true;
+                monitoring.port = 8222;
+                authorization = {
+                  enable = true;
+                  user = "nats";
+                  password = "nats";
+                };
+                jetstream.enable = true;
+              };
+
+              # MediaMTX — RTSP→WebRTC WHEP bridge (leader-only). Not a
+              # built-in devenv service, so we drive it as a custom
+              # process. The bootstrap config only enables REST + WebRTC
+              # listeners; the leader's MediaMTXConfigSyncer pushes
+              # per-camera path config live via PUT /v2/config/paths/<slug>
+              # once cameras are added in the IHP UI.
+              processes.mediamtx.exec =
+                "${pkgs.mediamtx}/bin/mediamtx ${mediamtxBootstrap}";
+              # Readiness probe — mediamtx 1.18.2 uses /v3/* API prefix
+              # (NOT /v2/* — that was 1.7-1.15; HNVR's MediaMTXConfigSyncer
+              # has a separate bug to migrate). /v3/info is the lightest
+              # unauthenticated GET (returns version + start time).
+              processes.mediamtx.ready = {
+                exec = "${pkgs.curl}/bin/curl -fsS -o /dev/null http://127.0.0.1:9997/v3/info";
+                initial_delay = 2;
+                period = 5;
+                probe_timeout = 3;
+                failure_threshold = 5;
+              };
+
+              # MinIO's built-in devenv service module defines
+              # `processes.minio.exec` but no readiness probe — the TUI
+              # shows "no health status" until we add one. /minio/health/
+              # live is MinIO's official unauthenticated liveness check.
+              processes.minio.ready = {
+                exec = "${pkgs.curl}/bin/curl -fsS -o /dev/null http://127.0.0.1:9100/minio/health/live";
+                initial_delay = 2;
+                period = 5;
+                probe_timeout = 3;
+                failure_threshold = 5;
+              };
+
+              # ---- Environment variables consumed by HNVR binaries ------
+              #
+              # These mirror what the NixOS leader VM sets via the
+              # systemd Environment= block. Sergey's canonical dev
+              # commands (./result/bin/hnvr-leader, hnvr-node,
+              # hnvr-capture-loop, hnvr-s3-upload) read these and just
+              # work — no manual export needed.
+              env = {
+                HNVR_NATS_URI = "nats://nats:nats@localhost:4222";
+                HNVR_HOST = "hnvr-2";
+                HNVR_S3_ENDPOINT = "http://localhost:9100";
+                HNVR_S3_ACCESS_KEY = "minioadmin";
+                HNVR_S3_SECRET_KEY = "minioadmin";
+                HNVR_S3_BUCKET = "hnvr-recordings";
+                HNVR_MEDIAMTX_API = "http://127.0.0.1:9997";
+                HNVR_MEDIAMTX_WEBRTC = "http://127.0.0.1:8889";
+                # ConfigSyncer writes here in prod (/run/hnvr/mediamtx.yml).
+                # In dev we point it at DEVENV_STATE so the leader can
+                # write without root.
+                HNVR_MEDIAMTX_CONFIG_PATH = "${config.env.DEVENV_STATE}/hnvr-mediamtx.yml";
+                # IHP reads DATABASE_URL when present. Devenv's PG unix
+                # socket lives under $DEVENV_RUNTIME/postgres; the TCP
+                # port matches services.postgres.port (15432 — Sergey's
+                # system postgres owns :5432).
+                DATABASE_URL = "postgresql:///hnvr?host=127.0.0.1&port=15432";
+                # Port 8000 is Taiga on Sergey's box (pitfall #13).
+                PORT = "18001";
+              };
+
+              enterShell = preCommit.shellHook + ''
+                echo ""
+                echo "  HNVR dev shell — $(ghc --version)"
+                echo "  Build:     cabal build all"
+                echo "  REPL:      cabal repl"
+                echo "  Services:  devenv up   (postgres :15432, minio :9100,"
+                echo "                          nats :4222, mediamtx :9997)"
+                echo "  Health:    curl localhost:8222/healthz         (nats)"
+                echo "             curl localhost:9997/v2/config/paths  (mediamtx)"
+                echo "             curl localhost:9101/minio/health/live (minio)"
+                echo ""
+              '';
+            })
           ];
-
-          shellHook = preCommit.shellHook + ''
-            echo ""
-            echo "  HNVR dev shell — $(ghc --version)"
-            echo "  Build:    cabal build all"
-            echo "  REPL:     cabal repl"
-            echo "  Nix:      nix flake check"
-            echo ""
-          '';
         };
 
         checks = {

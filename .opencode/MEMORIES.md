@@ -55,14 +55,23 @@ phased plan. This file is the cheat-sheet; the design docs are authoritative.
 | Secrets | sops-nix |
 | Deploy | NixOS flake, 2 hosts (`hnvr-1-vm`, `hnvr-2-vm` wired) |
 
-## Verified commands (Aug 8 2026)
+## Verified commands (Aug 10 2026 — devenv-integrated devShell)
 
 ```bash
 # Build everything (IHP overlay applied; first build ~30 min, then cached)
 nix build .#hnvr-web
 
-# Enter dev shell (ormolu, hlint, cabal, ffmpeg, onnxruntime, nats-server)
-nix develop
+# Enter dev shell — devenv-integrated (Postgres, MinIO, NATS, MediaMTX
+# wired as services; all HNVR_* env vars pre-set). MUST pass --no-pure-eval
+# (or use direnv — .envrc already passes it).
+nix develop --no-pure-eval
+
+# Start all four services in another terminal (process-compose TUI):
+devenv up
+
+# Run the leader / node against devenv-managed services (env vars already set):
+./result/bin/hnvr-leader   # PORT=18001, NATS=4222, PG via $DATABASE_URL
+./result/bin/hnvr-node
 
 # Cabal-side build of our own packages (NOT hnvr-web — see pitfalls #14):
 cabal build hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz
@@ -550,6 +559,54 @@ ffprobe notes:
        initializers (`Config.hs`) you need the explicit import. Returns
        `IO Text`. No `bcrypt-hs` dependency needed; it's all transitive
        via `ihp`.
+
+   55. **devenv flake integration** (Aug 10 2026) — `devShells.default`
+       is now `devenv.lib.mkShell` (NOT `pkgs.mkShell`). Things to know:
+       - **`nix develop` MUST pass `--no-pure-eval`** — devenv needs to
+         resolve `PWD` to locate state dir (`.devenv/state/`). direnv
+         already does this (`.envrc` has `use flake . --no-pure-eval`).
+         Pure-eval `nix develop` falls back to `inputs.self.outPath`
+         which is read-only and crashes on first write.
+       - **Services live via `devenv up`** in a separate terminal —
+         process-compose TUI shows Postgres (:15432), MinIO (:9100/:9101),
+         NATS (:4222, monitor :8222), MediaMTX (:9997, WebRTC :8889).
+         Ctrl-C or `q` stops everything. No `nixosModules` or systemd
+         units needed for local dev.
+       - **MinIO requires `permittedInsecurePackages`** — dev only;
+         `devenvPkgs = import nixpkgs { config = ...; }` constructs a
+         separate pkgs instance just for the devShell. Production uses
+         the SeaweedFS SaaS.
+       - **Port 15432, not 5432, for devenv PG** — Sergey's dev box
+         runs a system postgres on :5432 (langfuse /
+         `postgresql-with-zulip-dicts`). devenv PG binds :15432;
+         `DATABASE_URL=postgresql:///hnvr?host=127.0.0.1&port=15432`.
+         Symptom if forgotten: PG shows "not ready" in TUI → restart
+         loop → "failed".
+       - **Stale `.devenv/state/postgres/` after config changes** —
+         devenv only writes `pg_hba.conf` + `postgresql.conf` during
+         `initdb`; on subsequent starts the existing datadir is reused
+         with OLD config. Fix: `~/bin/devenv-kill --reset-pg` then
+         `devenv up` again.
+       - **MediaMTX 1.18.2 API is `/v3/*`, NOT `/v2/*`** — readiness
+         probe uses `GET /v3/info` (200 OK). HNVR's
+         `MediaMTXConfigSyncer` still calls `PUT /v2/config/paths/<slug>`
+         which 404s against 1.18.2 — latent bug, fix when bumping to
+         v1.20.0 or migrating to `/v3/config/paths/{add,patch}`.
+       - **MediaMTX crashes if HLS port :8888 collides** — Sergey's box
+         has another service on :8888. Bootstrap config
+         (`mediamtxBootstrap` in flake.nix) sets `rtsp/rtmp/hls/srt/
+         playback: no` since HNVR only uses API + WebRTC.
+       - **Stopping a hung devenv** — `~/bin/devenv-kill` (committed
+         locally to ~/bin, not the repo). Scoped to `/nix/store/...`
+         paths so it never touches Sergey's system services.
+       Env vars consumed by HNVR binaries (`HNVR_NATS_URI`, `HNVR_S3_*`,
+       `DATABASE_URL`, `HNVR_MEDIAMTX_*`, `PORT=18001`) are pre-wired —
+       cabal-built binaries drop straight into the running services.
+       `nix flake check --no-build --keep-going` passes for `devShells.*`,
+       `packages.*`, `checks.*`, `formatter`, `nixosModules.*`; the
+       pre-existing `nixosConfigurations.hnvr-{1,2}-vm` failure (missing
+       `fileSystems` + `boot.loader.grub.devices` assertions) is unrelated
+       and predates devenv.
 
 ## Sergey's working style
 
