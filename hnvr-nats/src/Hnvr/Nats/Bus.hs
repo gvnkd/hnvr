@@ -19,6 +19,7 @@ module Hnvr.Nats.Bus
     withBus,
     connect,
     disconnect,
+    hostFromUri,
 
     -- * Pub/sub
     publish,

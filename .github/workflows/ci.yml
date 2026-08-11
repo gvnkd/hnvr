@@ -81,4 +81,8 @@ jobs:
       - name: cabal test (non-web packages)
         run: |
           nix develop --command \
-            bash -c 'cabal update && cabal test hnvr-core hnvr-capture'
+            bash -c 'cabal update && cabal test hnvr-core hnvr-nats hnvr-storage hnvr-capture'
+        # Integration tests in hnvr-nats/hnvr-storage are gated on
+        # HNVR_TEST_INTEGRATION=1 and silently skip without it. The
+        # nightly devenv-integration job (design_docs/09-testing.md)
+        # will exercise them against live services.

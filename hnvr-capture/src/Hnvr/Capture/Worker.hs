@@ -34,6 +34,11 @@ module Hnvr.Capture.Worker
     captureWorker,
     captureWorkerWithStop,
 
+    -- * Internal helpers (exported for unit tests; do not use outside)
+    backoffDuration,
+    countRecent,
+    recordRestart,
+
     -- * Re-exports
     Transport (..),
   )
