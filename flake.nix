@@ -406,6 +406,11 @@
                 pkgs.nixpkgs-fmt
                 # CSS toolchain — tailwind standalone cli (no npm)
                 pkgs.tailwindcss
+                # ---- Playwright E2E (tests/e2e/) -----------------------
+                # node + npm for the dev-only Playwright UI test suite
+                # (S4 deliverable, design_docs/10-test-plan.md). The
+                # production build is npm-free; this is dev-only.
+                pkgs.nodejs
                 # ---- Runtime deps for local testing --------------------
                 pkgs.ffmpeg_7-full
                 pkgs.onnxruntime
