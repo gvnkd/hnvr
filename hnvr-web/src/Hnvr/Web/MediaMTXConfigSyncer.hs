@@ -167,7 +167,20 @@ writeAtomic path body = do
 
 -- | Render a minimal mediamtx.yml from the cameras table. Each enabled
 -- camera becomes a path keyed by its slug, with @sourceOnDemand: yes@
--- so mediamtx only pulls RTSP when a viewer is watching.
+-- so mediamtx only pulls RTSP when a viewer is watching. The
+-- @rtspTransport@ comes from the camera's @rtsp_transport@ column
+-- (M1) so cameras that require UDP (e.g. Sergey's cam-196 per pitfall
+-- "196 (UDP!)") don't get force-fed TCP by both the CaptureWorker and
+-- mediamtx.
+--
+-- Field-name gotcha (Aug 11 2026): mediamtx's Path config exposes BOTH
+-- @sourceProtocol@ and @rtspTransport@. For RTSP @source@ URLs,
+-- mediamtx uses @rtspTransport@ (per internal/api/path.go in v1.20.0);
+-- @sourceProtocol@ only applies to non-RTSP sources. Setting the
+-- wrong field silently leaves the RTSP transport at its default (tcp),
+-- which causes immediate teardown on cameras that reject TCP SETUP
+-- (cam-196). Pinned by manual verification: after this fix the
+-- @read tcp ... connection reset by peer@ errors disappear.
 renderMediaMtxYaml :: [Camera] -> Text
 renderMediaMtxYaml cameras =
   T.unlines $
@@ -178,6 +191,12 @@ renderMediaMtxYaml cameras =
       "webrtcAddress: :8889",
       "webrtcEncryption: no",
       "webrtcAllowOrigin: '*'",
+      -- RTSP *server* on :8554 — CaptureWorker pulls from
+      -- rtsp://localhost:8554/<slug> instead of from the camera so
+      -- mediamtx is the single ingestion point. Required for cameras
+      -- with a 1-concurrent-RTSP-session cap (cam-196, cam-198).
+      "rtsp: yes",
+      "rtspAddress: :8554",
       "paths:"
     ]
       <> concatMap pathFor cameras
@@ -189,7 +208,7 @@ renderMediaMtxYaml cameras =
             then
               [ "  " <> slug <> ":",
                 "    source: " <> src,
-                "    sourceProtocol: tcp",
+                "    rtspTransport: " <> cam.rtspTransport,
                 "    sourceOnDemand: yes"
               ]
             else mempty
@@ -239,12 +258,15 @@ listRemotePaths mgr apiBase = do
       items <- o Aeson..: "items"
       mapM (Aeson.withObject "PathItem" (Aeson..: "name")) items
 
--- | Per-path source config payload. Matches @renderMediaMtxYaml@.
+-- | Per-path source config payload. Matches @renderMediaMtxYaml@ —
+-- uses @rtspTransport@ (the field mediamtx actually reads for RTSP
+-- sources; setting @sourceProtocol@ instead is a silent no-op that
+-- leaves the RTSP stuck on TCP — see Haddock on 'renderMediaMtxYaml').
 pathConfig :: Camera -> Value
 pathConfig cam =
   object
     [ "source" .= cam.rtspUrl,
-      "sourceProtocol" .= ("tcp" :: Text),
+      "rtspTransport" .= cam.rtspTransport,
       "sourceOnDemand" .= True
     ]
 

@@ -957,6 +957,71 @@ ffprobe notes:
         pattern `UTCTime day diffTime` still works once the constructor
         is in scope.
 
+    72. **IHP `Id' "table"` constructor import** (Aug 11 2026 M1) — to
+        extract the underlying `UUID` from a `Camera`'s `id` field for
+        wire transmission, neither `Data.Coerce.coerce` nor the
+        apparent `import IHP.ModelSupport (Id (..))` works. Coerce
+        fails with `[GHC-18872] Couldn't match representation ... The
+        data constructor 'IHP.ModelSupport.Types.Id' of newtype
+        'IHP.ModelSupport.Types.Id'' is not in scope`. The `Id (..)`
+        import only brings the TYPE alias into scope (no constructor).
+        **Working pattern**:
+        ```haskell
+        import IHP.ModelSupport (Id' (Id))
+        ...
+        case cam |> get #id of Id uuid -> uuid
+        ```
+        `Id'` is the type constructor (with prime); `Id` (no prime) is
+        the data constructor. `IHP.ModelSupport (Id' (Id))` exports
+        both correctly. The generated code in `View/Hosts/Index.hs`
+        uses `Data.Coerce (coerce)` to `Text` and works because
+        `IHP.ViewPrelude` re-exports the constructor transitively.
+
+    73. **`file-embed`'s `embedFile` vs `embedFileRelative` under nix
+        sandbox** (Aug 11 2026 M2) — `embedFileRelative` claims to
+        resolve relative to the source file but in nix sandbox it
+        resolves relative to CWD (the package root). Result: the same
+        splice works under cabal but errors out under nix build with
+        `/build/hnvr-web/../../Application/Schema.sql: does not exist`.
+        **Use `embedFile "Application/Schema.sql"`** (CWD-relative,
+        works in both) for any file outside the cabal `hs-source-dirs`
+        listing. CWD is reliably set to the package root by both
+        cabal-install and nix's `callCabal2nix`.
+
+    74. **`postgresql-simple-migration` 0.1.15.0 API** (Aug 11 2026 M2):
+        - `MigrationResult` is **kind `* -> *`**, parameterized by the
+          error payload type. `MigrationInitialization` produces
+          `MigrationResult String`, `MigrationScript` produces
+          `MigrationResult ByteString`. Write handlers as
+          `Show a => ... -> MigrationResult a -> ...` or split into
+          two specialized handlers.
+        - Constructors: `MigrationSuccess` (no payload) and
+          `MigrationError a` (payload of type `a`).
+        - `runMigration` requires the caller to wrap in
+          `withTransaction` — the library does NOT auto-commit.
+        - Hackage 0.1.15.0 cabal revision 1 + nixpkgs both ship the
+          `* -> *` version. The plain `data MigrationResult` shape
+          shown in old blog posts is from a pre-0.1.x release.
+        - The library's `bytestring <0.11`, `text <1.3`, `time <1.10`
+          bounds are stale on GHC 9.12; `doJailbreak` in
+          `flake.nix`'s `hnvrHaskellOverlay` lifts them.
+
+    75. **NoFieldSelectors pitfall generalised** (Aug 11 2026 M1,
+        extends pitfall #46) — `rec.field` is the ONLY access form
+        inside hnvr-web library modules (NoFieldSelectors is in the
+        library default-extensions). This applies to BOTH reads
+        (`sup.csConfig`) AND writes via record-update in module-
+        qualified positions. The trap fires whenever you write a new
+        module in hnvr-web with the standard extension set. Watch for
+        `[GHC-88464] Variable not in scope: <fieldSelector> ::
+        <Type> -> <FieldType> Suggested fix: Notice that '<field>' is
+        a field selector belonging to the type '<Type>' that has been
+        suppressed by NoFieldSelectors.` Fix: switch `f x` → `x.f`.
+        Add `{-# LANGUAGE OverloadedRecordDot #-}` to the module if
+        it's not already there (it IS in hnvr-web.cabal
+        default-extensions but module-local LANGUAGE pragmas can
+        shadow).
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -966,7 +1031,7 @@ ffprobe notes:
 - Wants to design for horizontal scale even when v1 doesn't need it (hence
   NATS from day one).
 
-## Roadmap status (Aug 9 2026)
+## Roadmap status (Aug 11 2026 — M1+M2 landed)
 
 - [x] Design docs complete
 - [x] Cabal scaffold + flake.nix
@@ -1006,7 +1071,53 @@ ffprobe notes:
             short-circuits; sub-probe failure logs but doesn't block
             main. EditView button relabeled "Probe Streams". Closed
             audit-report-2 §2 row "Probe sub-stream button".
-- [x] **Phase 1 — Recording MVP complete** (code; live VM test pending).
+- [~] **Phase 1 — Recording MVP.** Audit (Aug 11 2026,
+      `.opencode/PHASE1_COMPLETION_MILESTONES.md`) found the previous
+      "Phase 1 complete" claim overstated: no `CaptureSupervisor`
+      existed, so nothing actually recorded in production. **M1 + M2
+      landed Aug 11 2026** (this commit):
+      - ✅ **M1 — CaptureSupervisor wiring.** New modules
+            `Hnvr.Node.CaptureSupervisor` (per-worker async + stop TVar
+            + idempotent start/stop/restart), `Hnvr.Web.CommandTypes`
+            (`AssignPayload`/`ControlPayload` carrying full
+            `CameraSnapshot` so receiving host spawns worker without
+            extra round-trip), `Hnvr.Web.SnapshotResponder` (leader
+            answers `hnvr.commands.snapshot.<host>` with current camera
+            set; bridges the no-JetStream bootstrap problem),
+            `Hnvr.Core.CameraSnapshot` (wire type for camera→worker
+            config). `Bus.request`/`requestJson`/`reply` added to
+            `Hnvr.Nats.Bus` (nats-queue has `Nats.request` but no
+            timeout — wrapped with `System.Timeout.timeout`).
+            `ConfigWatcher` now dispatches to CaptureSupervisor
+            (start/stop/restart) instead of just logging.
+            `AssignmentCoordinator.applyAssignment` projects Camera →
+            CameraSnapshot via `projectCamera` and includes it in
+            AssignPayload. NodeMain + LeaderMain (via Config.hs
+            `startNodeRoles`) both spawn CaptureSupervisor, request
+            initial snapshot from leader, and start workers for
+            assigned cameras. Schema gained `rtsp_transport` column
+            (default `'tcp'`) on `cameras` so the node knows whether
+            to use `-rtsp_transport tcp` or `udp`.
+      - ✅ **M2 — Versioned migrations via postgresql-simple-migration.**
+            New module `Hnvr.Web.SchemaMigration` runs
+            `MigrationInitialization` + `MigrationScript "0001-initial"`
+            (embedded `Application/Schema.sql` via `file-embed`'s
+            `embedFile`) inside a transaction at leader boot, BEFORE
+            `IHP.Server.run`. Tracked in `schema_migrations` table so
+            subsequent boots skip. `postgresql-simple-migration`
+            jailbroken in `flake.nix` `hnvrHaskellOverlay` (0.1.15.0
+            pins bytestring/text/time bounds that are stale on GHC
+            9.12). `MigrationResult a` is parameterized by error type
+            (`String` for init, `ByteString` for script) — `handleResult`
+            is `Show a => String -> MigrationResult a -> IO ()`.
+      - ⏳ **M1+M2 integration test (manual):** boot leader via
+            `devenv up` + `./result/bin/hnvr-leader`, add a camera via
+            `/NewCamera`, verify `mc ls --recursive local/hnvr-recordings/<slug>/`
+            shows segments within ~5 s, verify `psql -c 'SELECT count(*) FROM segments'`
+            increments. See PHASE1_COMPLETION_MILESTONES.md §6 checklist.
+      - [ ] M3 (camera password decrypt path), M4 (sops-nix wiring),
+            M5 (audio), M6 (retention sweep), M7 (spool drainer),
+            M8 (doc cleanup) — see `.opencode/PHASE1_COMPLETION_MILESTONES.md`.
 - [~] **Phase 2 — Live View + Multi-Host. Code complete (Aug 10 2026),
       live VM test pending**. Slices shipped:
       - ✅ Slice 1: `nix/mediamtx.nix` NixOS module + flake input.

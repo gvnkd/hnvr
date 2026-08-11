@@ -44,11 +44,11 @@ sql touchedFieldsList =
             let (g, offset') = valueGroup tf offset
             in (gs ++ [g], offset')
             ) ([], 1) touchedFieldsList
-    in "INSERT INTO cameras (id, slug, name, rtsp_url, rtsp_template, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, enabled, retention_days, assigned_host, manual_assign, created_at, updated_at) VALUES "
+    in "INSERT INTO cameras (id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, enabled, retention_days, assigned_host, manual_assign, created_at, updated_at) VALUES "
         <> Text.intercalate ", " valueGroups
-        <> " RETURNING id, slug, name, rtsp_url, rtsp_template, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, enabled, retention_days, assigned_host, manual_assign, created_at, updated_at"
+        <> " RETURNING id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, enabled, retention_days, assigned_host, manual_assign, created_at, updated_at"
   where
-    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, False), (5, False), (6, True), (7, False), (8, False), (9, False), (10, True), (11, False), (12, False), (13, True), (14, True), (15, False), (16, False), (17, True), (18, True), (19, True), (20, True), (21, False), (22, True), (23, True), (24, True)]
+    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, False), (5, True), (6, False), (7, True), (8, False), (9, False), (10, False), (11, True), (12, False), (13, False), (14, True), (15, True), (16, False), (17, False), (18, True), (19, True), (20, True), (21, True), (22, False), (23, True), (24, True), (25, True)]
     valueGroup tf offset =
         let step (parts, off) (bitIdx, hasDefault) =
                 if hasDefault && not (testBit tf bitIdx)
@@ -67,26 +67,27 @@ singleEncoder touchedFields = mconcat $ catMaybes
     , Just ((.name) >$< Encoders.param (Encoders.nonNullable Encoders.text))
     , Just ((.rtspUrl) >$< Encoders.param (Encoders.nonNullable Encoders.text))
     , Just ((.rtspTemplate) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , if testBit touchedFields 5 then Just ((.rtspTransport) >$< Encoders.param (Encoders.nonNullable Encoders.text)) else Nothing
     , Just ((.host) >$< Encoders.param (Encoders.nullable Encoders.text))
-    , if testBit touchedFields 6 then Just ((.port) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 7 then Just ((.port) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , Just ((.username) >$< Encoders.param (Encoders.nullable Encoders.text))
     , Just ((.passwordEnc) >$< Encoders.param (Encoders.nullable ((\ (Database.PostgreSQL.Simple.Types.Binary bs) -> bs) >$< Encoders.bytea)))
     , Just ((.passwordNonce) >$< Encoders.param (Encoders.nullable ((\ (Database.PostgreSQL.Simple.Types.Binary bs) -> bs) >$< Encoders.bytea)))
-    , if testBit touchedFields 10 then Just ((.codec) >$< Encoders.param (Encoders.nonNullable Mapping.encoder)) else Nothing
+    , if testBit touchedFields 11 then Just ((.codec) >$< Encoders.param (Encoders.nonNullable Mapping.encoder)) else Nothing
     , Just ((.rtspSubUrl) >$< Encoders.param (Encoders.nullable Encoders.text))
     , Just ((.rtspSubTemplate) >$< Encoders.param (Encoders.nullable Encoders.text))
-    , if testBit touchedFields 13 then Just ((.useSubstreamForAnalysis) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 14 then Just ((.substreamCodec) >$< Encoders.param (Encoders.nonNullable Mapping.encoder)) else Nothing
+    , if testBit touchedFields 14 then Just ((.useSubstreamForAnalysis) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
+    , if testBit touchedFields 15 then Just ((.substreamCodec) >$< Encoders.param (Encoders.nonNullable Mapping.encoder)) else Nothing
     , Just ((.substreamWidth) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
     , Just ((.substreamHeight) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
-    , if testBit touchedFields 17 then Just ((.recordAudio) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 18 then Just ((.analysisFps) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
-    , if testBit touchedFields 19 then Just ((.enabled) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 20 then Just ((.retentionDays) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 18 then Just ((.recordAudio) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
+    , if testBit touchedFields 19 then Just ((.analysisFps) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 20 then Just ((.enabled) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
+    , if testBit touchedFields 21 then Just ((.retentionDays) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , Just ((.assignedHost) >$< Encoders.param (Encoders.nullable Encoders.text))
-    , if testBit touchedFields 22 then Just ((.manualAssign) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 23 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
-    , if testBit touchedFields 24 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 23 then Just ((.manualAssign) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
+    , if testBit touchedFields 24 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 25 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 decoder :: Decoders.Result [Generated.ActualTypes.Camera]

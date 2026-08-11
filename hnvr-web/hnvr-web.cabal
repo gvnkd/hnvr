@@ -46,17 +46,21 @@ library
     Generated.Types
     Generated.User
     Generated.UserInclude
+    Hnvr.Node.CaptureSupervisor
     Hnvr.Node.ConfigWatcher
     Hnvr.Node.HealthReporter
     Hnvr.Web
     Hnvr.Web.AssignmentCoordinator
     Hnvr.Web.Auth
+    Hnvr.Web.CommandTypes
     Hnvr.Web.Config
     Hnvr.Web.ConfigBroadcaster
     Hnvr.Web.EventWriter
     Hnvr.Web.FrontController
     Hnvr.Web.HealthCache
     Hnvr.Web.MediaMTXConfigSyncer
+    Hnvr.Web.SchemaMigration
+    Hnvr.Web.SnapshotResponder
     Hnvr.Web.View.Archive.Player
     Hnvr.Web.View.Cameras.Edit
     Hnvr.Web.View.Cameras.Index
@@ -84,13 +88,14 @@ library
   build-depends:
     , aeson
     , async
-    , base                    >=4.18 && <5
+    , base                         >=4.18 && <5
     , basic-prelude
     , bytestring
     , containers
     , data-default
     , deepseq
     , directory
+    , file-embed
     , filepath
     , hasql
     , hasql-implicits
@@ -106,8 +111,10 @@ library
     , http-types
     , ihp
     , postgresql-simple
+    , postgresql-simple-migration
     , postgresql-types
     , scientific
+    , stm
     , string-conversions
     , text
     , time
@@ -167,9 +174,12 @@ executable hnvr-node
   main-is:          NodeMain.hs
   hs-source-dirs:   app
   build-depends:
+    , aeson
     , base
+    , hnvr-capture
     , hnvr-core
     , hnvr-nats
+    , hnvr-storage
     , hnvr-web
     , stm
     , text

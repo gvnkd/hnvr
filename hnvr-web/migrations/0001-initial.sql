@@ -1,27 +1,28 @@
--- HNVR schema (Phase 1 subset).
+-- HNVR migration 0001 — initial schema (idempotent).
 --
--- Source of truth for IHP SchemaCompiler. Generated.Types is produced
--- via the IHP schema-compiler tool and committed to the source tree under
--- src/Hnvr/Web/Generated/. Rerun when this file changes.
+-- This is the runtime-migration version of Application/Schema.sql. It
+-- uses IF NOT EXISTS / DO-$$ blocks / ALTER-ADD-COLUMN-IF-NOT-EXISTS
+-- so it is safe to run against:
+--   * a fresh DB (creates everything), AND
+--   * a pre-existing DB that was populated by an earlier non-migration
+--     workflow (IHP IDE / manual `psql -f Application/Schema.sql` from
+--     before M2 landed).
 --
--- Phase 1 scope: cameras + hosts only. rules, segments, events, etc. land
--- in later phases. PTZ columns on cameras are deferred to Phase 5; CV
--- columns to Phase 3.
+-- The migration framework (postgresql-simple-migration) records this
+-- script's checksum in `schema_migrations` after a successful run, so
+-- it executes exactly once per database. Editing this file after it
+-- has been applied to any environment causes a checksum mismatch on
+-- the next boot — version-bump to 0002-foo.sql instead.
 --
--- NOTE: this file must stay IHP-parseable. IHP's schema parser does NOT
--- accept `CREATE TABLE IF NOT EXISTS` or `DO $$ ... $$` blocks. The
--- idempotent version that the leader's runtime migration actually runs
--- lives in `migrations/0001-initial.sql` — keep both files in sync when
--- changing schema. The migration file is what production deploys use;
--- this file is what IHP codegen uses.
---
--- IMPORTANT: IHP schema parser does not accept comments INSIDE CREATE
--- TABLE bodies. Keep column docs in the module Haddocs or in design_docs.
+-- Application/Schema.sql stays in sync with this file but uses bare
+-- CREATE statements because IHP's schema parser doesn't accept
+-- IF NOT EXISTS / DO blocks. Keep both files in sync when changing
+-- schema; the duplication is deliberate.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-CREATE TABLE hosts (
+CREATE TABLE IF NOT EXISTS hosts (
     id              TEXT PRIMARY KEY,
     display_name    TEXT NOT NULL,
     gpu_model       TEXT,
@@ -32,9 +33,15 @@ CREATE TABLE hosts (
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE TYPE codec_kind AS ENUM ('h264', 'hevc', 'unknown');
+-- CREATE TYPE has no IF NOT EXISTS form; wrap in a DO block catching
+-- duplicate_object. The enum values are immutable once any row uses
+-- them, so this block never mutates an existing type.
+DO $$ BEGIN
+    CREATE TYPE codec_kind AS ENUM ('h264', 'hevc', 'unknown');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
-CREATE TABLE cameras (
+CREATE TABLE IF NOT EXISTS cameras (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     slug            TEXT NOT NULL UNIQUE,
     name            TEXT NOT NULL,
@@ -64,9 +71,15 @@ CREATE TABLE cameras (
     FOREIGN KEY (assigned_host) REFERENCES hosts(id) ON DELETE SET NULL
 );
 
-CREATE INDEX cameras_assigned_idx ON cameras (assigned_host) WHERE enabled;
+CREATE INDEX IF NOT EXISTS cameras_assigned_idx ON cameras (assigned_host) WHERE enabled;
 
-CREATE TABLE segments (
+-- Backfill rtsp_transport on pre-existing cameras rows (column added
+-- Aug 11 2026 with M1; Sergey's dev DB had cameras without it). On a
+-- fresh DB the CREATE TABLE above already includes the column, so this
+-- ALTER is a no-op. Postgres supports ADD COLUMN IF NOT EXISTS since 9.6.
+ALTER TABLE cameras ADD COLUMN IF NOT EXISTS rtsp_transport TEXT NOT NULL DEFAULT 'tcp';
+
+CREATE TABLE IF NOT EXISTS segments (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     camera_id       UUID NOT NULL,
     start_ts        TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -82,12 +95,12 @@ CREATE TABLE segments (
     UNIQUE (camera_id, start_ts)
 );
 
-CREATE INDEX segments_cam_start_idx ON segments (camera_id, start_ts DESC);
+CREATE INDEX IF NOT EXISTS segments_cam_start_idx ON segments (camera_id, start_ts DESC);
 
--- Phase 1 audit-fix: admin gate. IHP AuthSupport requires these exact column
--- names: id, email, password_hash, locked_at, failed_login_attempts.
+-- Phase 1 audit-fix: admin gate. IHP AuthSupport requires these exact
+-- column names: id, email, password_hash, locked_at, failed_login_attempts.
 -- is_admin is HNVR-specific (single admin user for v1; viewer role Phase 6).
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id                      UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     email                   TEXT NOT NULL UNIQUE,
     password_hash           TEXT NOT NULL,

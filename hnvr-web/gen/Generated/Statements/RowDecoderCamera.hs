@@ -40,6 +40,7 @@ rowDecoder = do
     name <- Decoders.column (Decoders.nonNullable Decoders.text)
     rtspUrl <- Decoders.column (Decoders.nonNullable Decoders.text)
     rtspTemplate <- Decoders.column (Decoders.nullable Decoders.text)
+    rtspTransport <- Decoders.column (Decoders.nonNullable Decoders.text)
     host <- Decoders.column (Decoders.nullable Decoders.text)
     port <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int4))
     username <- Decoders.column (Decoders.nullable Decoders.text)
@@ -60,4 +61,4 @@ rowDecoder = do
     manualAssign <- Decoders.column (Decoders.nonNullable Decoders.bool)
     createdAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
     updatedAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
-    pure (let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTemplate host port username passwordEnc passwordNonce codec rtspSubUrl rtspSubTemplate useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps enabled retentionDays assignedHost manualAssign createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)
+    pure (let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTemplate rtspTransport host port username passwordEnc passwordNonce codec rtspSubUrl rtspSubTemplate useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps enabled retentionDays assignedHost manualAssign createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)

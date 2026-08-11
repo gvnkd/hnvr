@@ -8,6 +8,7 @@ build-type:    Simple
 library
   exposed-modules:
     Hnvr.Core.Assignment
+    Hnvr.Core.CameraSnapshot
     Hnvr.Core.Crypto
     Hnvr.Core.Geometry
     Hnvr.Core.Id

@@ -54,12 +54,16 @@ tcpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = TcpTransport}
 udpCfg :: RecordingConfig
 udpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = UdpTransport}
 
--- The flags documented in design_docs/03-capture-and-storage.md.
+-- The flags documented in design_docs/03-capture-and-storage.md plus
+-- the Sergey-camera-noise suppressors added Aug 11 2026
+-- (@-loglevel error@, @-fflags +genpts+igndts+discardcorrupt@).
 expectedTcp :: [String]
 expectedTcp =
   [ "-hide_banner",
     "-loglevel",
-    "warning",
+    "error",
+    "-fflags",
+    "+genpts+igndts+discardcorrupt",
     "-rtsp_transport",
     "tcp",
     "-timeout",

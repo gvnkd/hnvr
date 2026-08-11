@@ -1,4 +1,5 @@
 {-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoImplicitPrelude #-}
@@ -21,19 +22,28 @@ module Hnvr.Web.Config
 where
 
 import qualified Control.Exception as E
-import Control.Monad (void)
+import Control.Monad (forM_, void, when)
+import Data.Aeson (object, (.=))
 import Data.Maybe (fromMaybe, maybe)
 import qualified Data.Text as T
 import Generated.Types
+import Hnvr.Capture.Worker (CaptureConfig (..))
+import Hnvr.Core.CameraSnapshot (CameraSnapshotBatch (..))
+import Hnvr.Core.Id (HostId (..))
 import Hnvr.Core.Logging (logError, logInfo)
 import qualified Hnvr.Nats.Bus as Bus
+import Hnvr.Nats.Subjects (commandSnapshot)
+import Hnvr.Node.CaptureSupervisor (startCamera, startCaptureSupervisor)
+import Hnvr.Node.ConfigWatcher (startConfigWatcher)
 import Hnvr.Node.HealthReporter (startHealthReporter)
+import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
 import Hnvr.Web.EventWriter (startEventWriter)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
+import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
 import Hnvr.Web.WhepProxy (whepMiddleware)
 import IHP.AuthSupport.Authentication (hashPassword)
 import IHP.FrameworkConfig
@@ -45,6 +55,7 @@ import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Middleware.HealthCheckEndpoint as HealthCheck
 import qualified System.Environment as Env
+import qualified System.Timeout as Timeout
 
 -- | 'IHP.FrameworkConfig.ConfigBuilder' consumed by @IHP.Server.run@.
 config :: ConfigBuilder
@@ -126,10 +137,73 @@ connectNatsAndStartEventWriter = do
         _ <- startHealthCache bus
         startAssignmentCoordinator bus
         startConfigBroadcaster bus
+        -- Leader-only: respond to node snapshot requests so workers
+        -- can bootstrap their initial camera set on boot.
+        startSnapshotResponder bus
+          `E.catch` \(e :: E.SomeException) ->
+            logError ("leader: SnapshotResponder start failed: " <> cs (show e))
+        -- Leader also runs the full node role (CaptureSupervisor +
+        -- ConfigWatcher + HealthReporter) per @01-architecture.md:21@
+        -- — "leader = all of node + leader roles".
         host <- maybe "hnvr-2" T.pack <$> Env.lookupEnv "HNVR_HOST"
+        startNodeRoles bus host
+          `E.catch` \(e :: E.SomeException) ->
+            logError ("leader: node-role start failed: " <> cs (show e))
         startHealthReporter bus host
   connect' `E.catch` \(e :: E.SomeException) ->
     logError ("leader: NATS connect failed (continuing without bus): " <> cs (show e))
+
+-- | Wire the node-side roles on the leader: build CaptureConfig from
+-- env, start the CaptureSupervisor, subscribe ConfigWatcher, and
+-- request the initial snapshot from ourselves (we ARE the leader, so
+-- the SnapshotResponder replies locally). Best-effort — failures here
+-- don't crash the leader.
+startNodeRoles :: Bus.Bus -> Text -> IO ()
+startNodeRoles bus host = do
+  mS3 <- readS3Config
+  spool <- fromMaybe "/var/lib/hnvr/spool" <$> Env.lookupEnv "HNVR_SPOOL_DIR"
+  let cfg =
+        CaptureConfig
+          { capBus = Just bus,
+            capS3 = S3.connectInfo <$> mS3,
+            capBucket = maybe "hnvr-recordings" S3.s3cBucket mS3,
+            capHostId = HostId host,
+            capSpoolDir = spool
+          }
+  sup <- startCaptureSupervisor cfg
+  startConfigWatcher bus host sup
+  let subject = commandSnapshot host
+      req = object ["host" .= host]
+  mBatch <- Timeout.timeout 5_000_000 (Bus.requestJson bus subject req 5_000_000)
+  case mBatch :: Maybe (Maybe CameraSnapshotBatch) of
+    Just (Just batch) -> do
+      logInfo ("leader: local snapshot reply contained " <> cs (show (length (csbCameras batch))) <> " camera(s)")
+      forM_ (csbCameras batch) (startCamera sup)
+    _ -> logInfo "leader: no local snapshot reply (continuing)"
+
+-- | Read S3 config from the standard @HNVR_S3_*@ env vars. Mirrors the
+-- same helper in 'Web.Controller.Archive' and @NodeMain@; kept
+-- duplicated to avoid the import tangle (Archive is controller-side
+-- and pulls in IHP controller deps that don't belong here).
+readS3Config :: IO (Maybe S3.S3Config)
+readS3Config = do
+  let lookupText var = fmap T.pack <$> Env.lookupEnv var
+  mEndpoint <- lookupText "HNVR_S3_ENDPOINT"
+  mAccessKey <- lookupText "HNVR_S3_ACCESS_KEY"
+  mSecretKey <- lookupText "HNVR_S3_SECRET_KEY"
+  mBucket <- lookupText "HNVR_S3_BUCKET"
+  pure $ do
+    endpoint <- mEndpoint
+    accessKey <- mAccessKey
+    secretKey <- mSecretKey
+    bucket <- mBucket
+    Just
+      S3.S3Config
+        { S3.s3cEndpoint = endpoint,
+          S3.s3cAccessKey = accessKey,
+          S3.s3cSecretKey = secretKey,
+          S3.s3cBucket = bucket
+        }
 
 -- | WAI middleware that short-circuits @/healthz@ and @/_healthz@ with 200 OK.
 -- Falls through to the inner IHP app for everything else.

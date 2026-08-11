@@ -29,18 +29,25 @@ module Hnvr.Nats.Bus
     Subscription,
     unsubscribe,
     Message (..),
+
+    -- * Request/reply
+    request,
+    requestJson,
+    reply,
   )
 where
 
 import Control.Concurrent.STM
 import Control.Exception (bracket)
-import Data.Aeson (ToJSON, encode)
+import Data.Aeson (FromJSON, ToJSON, encode)
+import qualified Data.Aeson
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
 import qualified Data.Text as T
 import Network.Nats (Nats, NatsSID)
 import qualified Network.Nats as Nats
+import System.Timeout (timeout)
 
 -- | Opaque handle to a connected bus.
 newtype Bus = Bus {busNats :: Nats}
@@ -153,3 +160,50 @@ readMessage sub = atomically $ readTChan (subChan sub)
 -- | Cancel a subscription. Best-effort.
 unsubscribe :: Bus -> Subscription -> IO ()
 unsubscribe bus sub = Nats.unsubscribe (busNats bus) (subSid sub)
+
+-- | One-shot request/reply: publishes @payload@ on @subject@ and waits up
+-- to @timeoutMicros@ for the first reply.
+--
+-- Implementation: wraps @nats-queue@'s 'Nats.request' with
+-- 'System.Timeout.timeout'. @Nats.request@ blocks on an 'MVar' which our
+-- timeout will interrupt via async exception; the internal 'bracket'
+-- ensures the inbox subscription is cleaned up. Returns 'Nothing' on
+-- timeout or no-responder.
+request ::
+  Bus ->
+  -- | Request subject
+  Text ->
+  -- | Request payload
+  ByteString ->
+  -- | Timeout in microseconds
+  Int ->
+  IO (Maybe ByteString)
+request bus subject payload timeoutMicros = do
+  mResp <-
+    timeout timeoutMicros $
+      Nats.request (busNats bus) (T.unpack subject) (BL.fromStrict payload)
+  pure (BL.toStrict <$> mResp)
+
+-- | JSON-typed 'request'. Decodes the reply payload into @resp@; returns
+-- 'Nothing' on timeout OR parse failure. Callers that need to distinguish
+-- the two should call 'request' and decode manually.
+requestJson ::
+  (ToJSON req, FromJSON resp) =>
+  Bus ->
+  Text ->
+  req ->
+  Int ->
+  IO (Maybe resp)
+requestJson bus subject req timeoutMicros = do
+  let payload = BL.toStrict (encode req)
+  mResp <- request bus subject payload timeoutMicros
+  pure (mResp >>= Data.Aeson.decodeStrict)
+
+-- | Reply to a previously-received request message: publishes @payload@ on
+-- the supplied reply-to subject. No-op if the reply-to is 'Nothing' (the
+-- original sender didn't supply one).
+reply :: Bus -> Maybe Text -> ByteString -> IO ()
+reply bus mReplyTo payload =
+  case mReplyTo of
+    Nothing -> pure ()
+    Just replyTo -> publish bus replyTo payload

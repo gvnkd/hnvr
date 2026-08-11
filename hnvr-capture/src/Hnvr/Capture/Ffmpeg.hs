@@ -51,11 +51,29 @@ data RecordingConfig = RecordingConfig
 -- | Raw argv list for the recording ffmpeg. Use this if you want to spawn
 -- the process via "System.Process" or your own runtime; prefer
 -- 'recordingProc' for typed-process callers.
+--
+-- Flags tuned for Sergey's consumer-grade RTSP cameras (XM / Hikvision
+-- OEM / icamra firmware — see "Sergey's cameras" in MEMORIES.md):
+--
+--   * @-loglevel error@ — silence the noisy non-fatal warnings
+--     (@Timestamps are unset in a packet@, @Non-monotonic DTS@,
+--     @Failed reading RTSP data: Connection timed out@) that the
+--     cameras produce constantly. Real failures still appear, and
+--     our own 'CaptureWorker' logs every ffmpeg exit + backoff cycle
+--     through the locked 'Hnvr.Core.Logging.logInfo' so visibility is
+--     preserved at the supervisor level.
+--   * @-fflags +genpts+igndts+discardcorrupt@ — fix the timestamp /
+--     DTS warnings at the source rather than just hiding them:
+--     @genpts@ regenerates missing PTS, @igndts@ ignores the
+--     non-monotonic DTS, @discardcorrupt@ drops malformed packets
+--     instead of complaining.
 recordingArgs :: RecordingConfig -> [String]
 recordingArgs cfg =
   [ "-hide_banner",
     "-loglevel",
-    "warning",
+    "error",
+    "-fflags",
+    "+genpts+igndts+discardcorrupt",
     "-rtsp_transport",
     transportArg (rcTransport cfg),
     "-timeout",

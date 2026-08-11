@@ -59,6 +59,7 @@ import Data.Time.Clock (UTCTime, addUTCTime, getCurrentTime)
 import Hnvr.Capture.Ffmpeg (RecordingConfig (..), Transport (..), recordingArgs)
 import Hnvr.Capture.Fmp4 (Fmp4State, Fragment (..), feed, finish, initial)
 import Hnvr.Core.Id (CameraId, HostId, Sha256 (..))
+import qualified Hnvr.Core.Logging as Log
 import Hnvr.Core.Segment
   ( Segment (..),
     SegmentKind (..),
@@ -72,7 +73,7 @@ import Hnvr.Storage.S3 (Bucket, putObjectBytes)
 import Network.Minio (ConnectInfo, defaultPutObjectOptions, pooContentType)
 import qualified System.Directory as Dir (createDirectoryIfMissing)
 import System.Exit (ExitCode (..))
-import System.IO (BufferMode (..), Handle, hPutStrLn, hSetBuffering, stderr)
+import System.IO (BufferMode (..), Handle, hSetBuffering)
 import System.Process
   ( CreateProcess (..),
     StdStream (..),
@@ -355,6 +356,11 @@ countRecent ref now = do
 sha256Bytes :: ByteString -> Sha256
 sha256Bytes bs = Sha256 (BA.convert (hash bs :: Digest SHA256))
 
+-- | Per-camera logger wrappers. Route through 'Hnvr.Core.Logging.logInfo'
+-- / 'logError' so the process-global stdout lock prevents interleaved
+-- output when multiple workers run concurrently. The format embeds the
+-- camera slug as a prefix so the reader can grep a single camera's
+-- lines out of the merged log.
 logInfo, logErr :: CameraConfig -> String -> IO ()
-logInfo cam msg = hPutStrLn stderr ("[" <> T.unpack (ccSlug cam) <> " INFO] " <> msg)
-logErr cam msg = hPutStrLn stderr ("[" <> T.unpack (ccSlug cam) <> " ERROR] " <> msg)
+logInfo cam msg = Log.logInfo ("[" <> ccSlug cam <> "] " <> T.pack msg)
+logErr cam msg = Log.logError ("[" <> ccSlug cam <> "] " <> T.pack msg)

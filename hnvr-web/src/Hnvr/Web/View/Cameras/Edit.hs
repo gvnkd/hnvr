@@ -57,6 +57,13 @@ instance View EditView where
             {textFieldFor "slug" "Slug" camera.slug ""}
             {textFieldFor "name" "Name" camera.name ""}
             {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl ""}
+            <div class="field">
+              <label>RTSP transport</label>
+              <select name="rtspTransport">
+                <option value="tcp" selected={camera.rtspTransport == "tcp"}>tcp (default; recommended for LAN)</option>
+                <option value="udp" selected={camera.rtspTransport == "udp"}>udp (use if camera rejects TCP SETUP)</option>
+              </select>
+            </div>
             {textFieldFor "rtspSubUrl" "RTSP URL (sub, optional)" (fromMaybe "" camera.rtspSubUrl) ""}
             {textFieldFor "username" "Username" (fromMaybe "" camera.username) ""}
             {textFieldFor "password" "Password (blank = keep current)" ("" :: Text) "Stored encrypted; leave blank to retain existing value."}

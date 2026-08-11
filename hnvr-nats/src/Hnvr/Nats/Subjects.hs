@@ -12,6 +12,7 @@ module Hnvr.Nats.Subjects
     commandAssign,
     commandControl,
     commandPtz,
+    commandSnapshot,
     health,
     configCameras,
     configRules,
@@ -40,6 +41,15 @@ commandControl host cam action =
 -- | @hnvr.commands.ptz.<cam>@ — UI/leader → host owning the camera.
 commandPtz :: Text -> Text
 commandPtz camSlug = "hnvr.commands.ptz." <> camSlug
+
+-- | @hnvr.commands.snapshot.<host>@ — node → leader request/reply.
+-- Node publishes this on boot (and on any subsequent re-resolve) with a
+-- generated inbox as reply-to. The leader's 'Hnvr.Web.SnapshotResponder'
+-- replies with the JSON list of cameras currently assigned to that host
+-- so the node can spawn 'CaptureWorker's for them. Bridges the lack of
+-- JetStream durability (Phase 0 deferral) for the initial-state problem.
+commandSnapshot :: Text -> Text
+commandSnapshot host = "hnvr.commands.snapshot." <> host
 
 -- | @hnvr.health.<host>@ — node → all. Max-age 15s.
 health :: Text -> Text

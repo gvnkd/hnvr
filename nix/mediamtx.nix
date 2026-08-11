@@ -25,6 +25,8 @@ let
     webrtcAddress: :${toString cfg.webrtcPort}
     webrtcEncryption: no
     webrtcAllowOrigin: '*'
+    rtsp: yes
+    rtspAddress: :${toString cfg.rtspPort}
   '';
 in
 {
@@ -53,6 +55,19 @@ in
       description = "WebRTC (WHEP/WHIP) HTTP port. /whep/<slug> reverse-proxies here.";
     };
 
+    rtspPort = lib.mkOption {
+      type = lib.types.port;
+      default = 8554;
+      description = ''
+        RTSP *server* port. CaptureWorker pulls from
+        rtsp://localhost:<rtspPort>/<slug> instead of from the camera
+        directly so mediamtx becomes the single ingestion point
+        (1 RTSP session per camera regardless of how many consumers —
+        required for cameras with a 1-concurrent-session cap).
+        Default :8554 avoids the :554 conflict with the cameras themselves.
+      '';
+    };
+
     configPath = lib.mkOption {
       type = lib.types.path;
       default = "/run/hnvr/mediamtx.yml";
@@ -74,7 +89,7 @@ in
 
   config = lib.mkIf cfg.enable {
     networking.firewall.allowedTCPPorts = lib.optionals config.networking.firewall.enable
-      [ cfg.apiPort cfg.webrtcPort ];
+      [ cfg.apiPort cfg.webrtcPort cfg.rtspPort ];
 
     # Shared runtime directory — owned by hnvr so both hnvr-leader
     # (ConfigSyncer writes the YAML) and mediamtx (reads it) can access.

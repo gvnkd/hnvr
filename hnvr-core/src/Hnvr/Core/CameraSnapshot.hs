@@ -1,0 +1,100 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+-- | Snapshot types for the leader→node initial-state request/reply
+-- (M1 of the Phase 1 completion milestones).
+--
+-- When a node boots, it has no idea which cameras are assigned to it
+-- (AssignmentCoordinator only publishes on change, not periodically).
+-- The node publishes a request to @hnvr.commands.snapshot.<host>@; the
+-- leader replies with a 'CameraSnapshotBatch' containing one
+-- 'CameraSnapshot' per camera currently assigned to that host. The node
+-- then spawns a 'Hnvr.Capture.Worker.CaptureWorker' for each.
+--
+-- Defined in @hnvr-core@ so both the leader (@hnvr-web@) and node
+-- (@hnvr-web@, since both binaries link it) can share the JSON shape
+-- without cyclic dependencies.
+module Hnvr.Core.CameraSnapshot
+  ( CameraSnapshot (..),
+    CameraSnapshotBatch (..),
+    Transport (..),
+    transportToText,
+    transportFromText,
+  )
+where
+
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
+import Data.List (intercalate)
+import Data.Text (Text)
+import qualified Data.Text as T
+import GHC.Generics (Generic)
+import Hnvr.Core.Id (CameraId)
+
+-- | Per-camera transport. Mirrors @Hnvr.Capture.Ffmpeg.Transport@ but
+-- defined here so @hnvr-core@ doesn't depend on @hnvr-capture@. The
+-- text form is what goes on the wire (lowercase, matches ffmpeg
+-- @-rtsp_transport@ flag values).
+data Transport = TcpTransport | UdpTransport
+  deriving stock (Eq, Show, Enum, Bounded)
+
+transportToText :: Transport -> Text
+transportToText TcpTransport = "tcp"
+transportToText UdpTransport = "udp"
+
+-- | Parse a transport from text. Accepts the lowercase wire form.
+-- Returns 'Nothing' on unknown values; callers should log + default
+-- to TCP (the safer choice for LAN RTSP).
+transportFromText :: Text -> Maybe Transport
+transportFromText "tcp" = Just TcpTransport
+transportFromText "udp" = Just UdpTransport
+transportFromText _ = Nothing
+
+instance ToJSON Transport where
+  toJSON = toJSON . transportToText
+
+instance FromJSON Transport where
+  parseJSON v =
+    parseJSON v >>= \t ->
+      case transportFromText t of
+        Just tr -> pure tr
+        Nothing ->
+          fail $
+            "Unknown transport: "
+              <> T.unpack t
+              <> ". Expected one of: "
+              <> intercalate ", " (map (T.unpack . transportToText) [minBound .. maxBound])
+
+-- | Snapshot of one camera row, as sent over the wire from leader to
+-- node. The fields are exactly what the CaptureSupervisor needs to
+-- spawn a 'Hnvr.Capture.Worker.CaptureWorker' — nothing more.
+--
+-- @csRtspUrl@ carries the credentials embedded in the URL. The schema
+-- also stores @password_enc@ / @password_nonce@ for the future
+-- @rtsp_template@ rendering path (M3 in the milestones doc); until
+-- that lands, the leader renders the URL at snapshot time and the node
+-- gets a ready-to-use string.
+data CameraSnapshot = CameraSnapshot
+  { csId :: !CameraId,
+    csSlug :: !Text,
+    csRtspUrl :: !Text,
+    csTransport :: !Transport
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | Wire shape of the snapshot reply. A list so we can extend with
+-- metadata (batch sequence number, leader id, etc.) without breaking
+-- clients that just want the camera list.
+data CameraSnapshotBatch = CameraSnapshotBatch
+  { csbCameras :: ![CameraSnapshot]
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON CameraSnapshotBatch where
+  toJSON b = object ["cameras" .= csbCameras b]
+
+instance FromJSON CameraSnapshotBatch where
+  parseJSON = withObject "CameraSnapshotBatch" $ \o ->
+    CameraSnapshotBatch <$> o .: "cameras"

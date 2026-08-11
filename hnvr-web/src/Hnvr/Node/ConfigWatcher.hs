@@ -2,19 +2,21 @@
 
 -- | Per-host ConfigWatcher (node-side).
 --
--- Subscribes to the two command channels targeted at this host:
+-- Subscribes to the three command channels that drive the
+-- 'Hnvr.Node.CaptureSupervisor':
 --
 --   * @hnvr.commands.assign.>@ — reassignment decisions from the
---     leader's 'AssignmentCoordinator'. Tells us which cameras we now own.
+--     leader's 'AssignmentCoordinator'. Carries 'AssignPayload' with
+--     the full 'CameraSnapshot' (when the camera is enabled) so we can
+--     spawn a worker without an extra round-trip.
 --   * @hnvr.commands.control.<this_host>.>@ — start/stop/restart
 --     directives from the leader (typically emitted on reassignment so
 --     the /old/ host can drain gracefully; may also be sent by future
 --     admin UI actions like "force-restart worker").
---
--- Both handlers are stubs for Phase 2: they decode + log. Phase 3 wires
--- them to the CaptureSupervisor that will own per-camera worker asyncs
--- inside the node process (today the CaptureWorker runs as a separate
--- CLI binary, so there's nothing to dispatch against yet).
+--   * @hnvr.config.cameras.>@ — broadcast on row change. We log the
+--     receipt but do NOT dispatch (the assign + control channels cover
+--     lifecycle; live config updates land in a follow-up slice and
+--     will reuse this channel).
 module Hnvr.Node.ConfigWatcher
   ( startConfigWatcher,
   )
@@ -23,50 +25,34 @@ where
 import Control.Applicative ((<*>))
 import Control.Concurrent.Async (async)
 import Control.Monad (forever, when)
-import Data.Aeson (FromJSON (..), decodeStrict')
-import Data.Aeson.Types (withObject, (.:))
+import Data.Aeson (decodeStrict')
 import qualified Data.ByteString as B
 import Data.Text (Text)
 import qualified Data.Text as T
+import Hnvr.Core.CameraSnapshot (CameraSnapshot (..))
+import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Logging (logInfo, logWarn)
 import Hnvr.Nats.Bus (Bus, Message (..))
 import qualified Hnvr.Nats.Bus as Bus
-
--- | Wire payload for @hnvr.commands.assign.<slug>@.
-data AssignMsg = AssignMsg
-  { amSlug :: !Text,
-    amHost :: !Text
-  }
-  deriving (Show)
-
-instance FromJSON AssignMsg where
-  parseJSON = withObject "AssignMsg" $ \o ->
-    AssignMsg
-      <$> o .: "slug"
-      <*> o .: "host"
-
--- | Wire payload for @hnvr.commands.control.<host>.<cam>.<action>@.
--- Mirrors 'Hnvr.Web.AssignmentCoordinator.ControlMsg'.
-data ControlMsg = ControlMsg
-  { cmSlug :: !Text,
-    cmAction :: !Text
-  }
-  deriving (Show)
-
-instance FromJSON ControlMsg where
-  parseJSON = withObject "ControlMsg" $ \o ->
-    ControlMsg
-      <$> o .: "slug"
-      <*> o .: "action"
+import Hnvr.Node.CaptureSupervisor
+  ( CaptureSupervisor,
+    restartCamera,
+    startCamera,
+    stopCamera,
+  )
+import Hnvr.Web.CommandTypes
+  ( AssignPayload (..),
+    ControlPayload (..),
+  )
 
 -- | Spawn the subscriber. Reads messages forever in background asyncs
 -- (one per subject — nats-queue delivers each on its own thread via
 -- the subscription's TChan). @host@ is this node's id, used to filter
 -- the control subject to directives aimed at us.
-startConfigWatcher :: Bus -> Text -> IO ()
-startConfigWatcher bus host = do
-  _ <- async assignLoop
-  _ <- async (controlLoop host)
+startConfigWatcher :: Bus -> Text -> CaptureSupervisor -> IO ()
+startConfigWatcher bus host sup = do
+  _ <- async (assignLoop host sup)
+  _ <- async (controlLoop host sup)
   _ <- async configLoop
   logInfo
     ( "ConfigWatcher: subscribed to hnvr.commands.assign.>, \
@@ -76,18 +62,18 @@ startConfigWatcher bus host = do
         <> host
     )
   where
-    assignLoop =
+    assignLoop thisHost supervisor =
       forever $ do
         sub <- Bus.subscribe bus "hnvr.commands.assign.>"
         msg <- Bus.readMessage sub
-        handleAssign host msg
+        handleAssign thisHost supervisor msg
 
-    controlLoop thisHost =
+    controlLoop thisHost supervisor =
       forever $ do
         let subject = "hnvr.commands.control." <> thisHost <> ".>"
         sub <- Bus.subscribe bus subject
         msg <- Bus.readMessage sub
-        handleControl msg
+        handleControl supervisor msg
 
     configLoop =
       forever $ do
@@ -95,50 +81,66 @@ startConfigWatcher bus host = do
         msg <- Bus.readMessage sub
         handleConfig msg
 
--- | Decode the assign message and decide whether this camera is now
--- ours. Slice 5 stub: just log. Slice 6+: start/stop CaptureSupervisor.
-handleAssign :: Text -> Message -> IO ()
-handleAssign host msg =
-  case decodeStrict' (msgPayload msg) :: Maybe AssignMsg of
-    Just am -> do
-      let ours = am.amHost == host
-      logInfo
-        ( "ConfigWatcher: assign "
-            <> am.amSlug
-            <> " -> "
-            <> am.amHost
-            <> (if ours then " (ours)" else " (not ours)")
-        )
+-- | Decide whether a 'AssignPayload' is aimed at us and dispatch:
+--   * host matches + Just snapshot  → startCamera
+--   * host matches + Nothing        → stopCamera (camera disabled)
+--   * host doesn't match            → defensive stopCamera (in case we
+--     were the previous owner and missed the control.stop)
+handleAssign :: Text -> CaptureSupervisor -> Message -> IO ()
+handleAssign host sup msg =
+  case decodeStrict' (msgPayload msg) :: Maybe AssignPayload of
+    Just ap -> do
+      let camId = CameraId ap.apCameraId
+      if ap.apHost == host
+        then case ap.apCamera of
+          Just snap -> do
+            when (csId snap /= camId) $
+              logWarn ("ConfigWatcher: snapshot id mismatch on " <> ap.apSlug)
+            startCamera sup snap
+          Nothing -> do
+            logInfo ("ConfigWatcher: assign " <> ap.apSlug <> " -> " <> ap.apHost <> " (disabled, stopping)")
+            stopCamera sup camId
+        else do
+          -- Defensive: we might be the previous owner and missed the
+          -- control.stop. Idempotent — no-op if we don't own it.
+          stopCamera sup camId
     Nothing ->
       logWarn ("ConfigWatcher: failed to decode assign payload on " <> msgSubject msg)
 
--- | Decode a control directive. Slice 5 stub: just log. Phase 3 will
--- dispatch start/stop/restart to the CaptureSupervisor owning the
--- named camera.
-handleControl :: Message -> IO ()
-handleControl msg =
-  case decodeStrict' (msgPayload msg) :: Maybe ControlMsg of
-    Just cm ->
-      when (cm.cmAction == "start" || cm.cmAction == "stop" || cm.cmAction == "restart") $
-        logInfo
-          ( "ConfigWatcher: control "
-              <> cm.cmSlug
-              <> " "
-              <> cm.cmAction
-              <> " (CaptureSupervisor dispatch lands in Phase 3) on "
-              <> msgSubject msg
-          )
+-- | Decode a control directive and dispatch start/stop/restart.
+--
+--   * @stop@    → 'stopCamera' by CameraId.
+--   * @restart@ → 'stopCamera' then ask the leader for a fresh
+--     snapshot to respawn with. (M1 does NOT auto-respawn here because
+--     'ControlPayload' doesn't carry the new snapshot — the leader's
+--     restart UX should publish a fresh 'AssignPayload' instead. So
+--     @restart@ currently degrades to @stop@.)
+--   * @start@   → no-op without a snapshot (same reason; use
+--     'AssignPayload' to start a worker).
+handleControl :: CaptureSupervisor -> Message -> IO ()
+handleControl sup msg =
+  case decodeStrict' (msgPayload msg) :: Maybe ControlPayload of
+    Just cp -> do
+      let camId = CameraId cp.cpCameraId
+      case cp.cpAction of
+        "stop" -> do
+          logInfo ("ConfigWatcher: control stop " <> cp.cpSlug)
+          stopCamera sup camId
+        "restart" -> do
+          logInfo ("ConfigWatcher: control restart " <> cp.cpSlug <> " (degrades to stop; respawn via assign)")
+          stopCamera sup camId
+        "start" ->
+          logInfo ("ConfigWatcher: control start " <> cp.cpSlug <> " (no-op; assign carries snapshot)")
+        other ->
+          logWarn ("ConfigWatcher: unknown control action " <> other <> " for " <> cp.cpSlug)
     Nothing ->
       logWarn ("ConfigWatcher: failed to decode control payload on " <> msgSubject msg)
 
 -- | Receive a broadcast camera row from the leader's
--- 'Hnvr.Web.ConfigBroadcaster'. The payload is the raw JSON the
--- 'Camera' record serializes to. Phase 3 will decode + populate an
--- @IORef (Map CameraId Camera)@ for the analyzer pipeline; Phase 2
--- just logs receipt so we can verify the channel is wired.
---
--- The subject token after the last dot is the slug (per
--- 'Hnvr.Nats.Subjects.configCameras'); we extract it for the log line.
+-- 'Hnvr.Web.ConfigBroadcaster'. M1 logs receipt only — live config
+-- updates (RTSP URL rotation, password rotation) without an explicit
+-- re-assign will land in a follow-up slice that decodes the row JSON
+-- and calls 'restartCamera' with the new 'CameraSnapshot'.
 handleConfig :: Message -> IO ()
 handleConfig msg = do
   let slug = lastDotToken (msgSubject msg)
@@ -147,7 +149,7 @@ handleConfig msg = do
         <> slug
         <> " ("
         <> T.pack (show (B.length (msgPayload msg)))
-        <> " bytes; Phase 3 will populate the IORef)"
+        <> " bytes; live-update dispatch lands in a follow-up slice)"
     )
   where
     lastDotToken s = case T.breakOnEnd "." s of

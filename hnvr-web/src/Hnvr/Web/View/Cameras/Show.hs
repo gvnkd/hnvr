@@ -37,6 +37,7 @@ instance View ShowView where
           <tbody>
             {kvRow "Name" camera.name}
             {kvRow "RTSP (main)" camera.rtspUrl}
+            {kvRow "RTSP transport" camera.rtspTransport}
             {kvRow "RTSP (sub)" (fromMaybe "—" camera.rtspSubUrl)}
             {kvRow "Host" (fromMaybe "—" camera.host)}
             {kvRow "Port" (tshow camera.port)}

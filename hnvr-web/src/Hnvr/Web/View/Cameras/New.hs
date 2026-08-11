@@ -41,6 +41,13 @@ instance View NewView where
             {textFieldFor "slug" "Slug" camera.slug "Unique handle, e.g. floor_2_5"}
             {textFieldFor "name" "Name" camera.name "Human-friendly label"}
             {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl "Main stream — typically high-res"}
+            <div class="field">
+              <label>RTSP transport</label>
+              <select name="rtspTransport">
+                <option value="tcp" selected={camera.rtspTransport == "tcp"}>tcp (default; recommended for LAN)</option>
+                <option value="udp" selected={camera.rtspTransport == "udp"}>udp (use if camera rejects TCP SETUP)</option>
+              </select>
+            </div>
             {textFieldFor "rtspSubUrl" "RTSP URL (sub, optional)" (fromMaybe "" camera.rtspSubUrl) "Analysis stream — lower-res"}
             {textFieldFor "username" "Username" (fromMaybe "" camera.username) "RTSP credentials"}
             {textFieldFor "password" "Password (stored encrypted)" ("" :: Text) "AES-256-GCM at rest"}

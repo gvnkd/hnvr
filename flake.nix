@@ -70,6 +70,13 @@
           }
           { });
 
+        # postgresql-simple-migration 0.1.15.0 (last released 2020) pins
+        # bytestring <0.11, text <1.3, time <1.10 — all stale on GHC 9.12.
+        # doJailbreak lifts the bounds; the library is otherwise compatible
+        # (postgresql-simple >=0.4 covers our 0.8.x at runtime).
+        postgresql-simple-migration =
+          libHs.doJailbreak prev.postgresql-simple-migration;
+
         # IHP ships without profiling libs; matching that here avoids
         # "Could not load module … Perhaps you haven't installed the
         # profiling libraries for package ihp" at link time.
@@ -332,13 +339,19 @@
         # are added in the IHP UI. Mirrors the stubConfig in
         # nix/mediamtx.nix (NixOS module) so prod + dev behave the same.
         #
-        # Only API + WebRTC are enabled. RTSP/RTMP/HLS/SRT/playback
-        # *server* ports are disabled because (a) HNVR doesn't use them
-        # (live view = WebRTC; archive HLS is served by the leader, not
-        # mediamtx) and (b) the default HLS port :8888 collides with
-        # another service on Sergey's dev box, crashing mediamtx on
-        # startup. mediamtx still pulls RTSP from cameras as a *client*
-        # — that path is independent of the server settings below.
+        # Only API + WebRTC + RTSP-server are enabled. RTMP/HLS/SRT/playback
+        # stay off because (a) HNVR doesn't use them (live view = WebRTC;
+        # archive HLS is served by the leader, not mediamtx) and (b) the
+        # default HLS port :8888 collides with another service on Sergey's
+        # dev box, crashing mediamtx on startup.
+        #
+        # The RTSP *server* on :8554 is enabled (Aug 11 2026 M1 fix) so
+        # CaptureWorker pulls from rtsp://localhost:8554/<slug> instead of
+        # from the camera directly. mediamtx becomes the single ingestion
+        # point: one RTSP session per camera regardless of how many
+        # internal consumers (CaptureWorker + N WHEP viewers). Required
+        # for cameras with a 1-concurrent-RTSP-session cap (Sergey's
+        # cam-196 and cam-198 per Aug 11 2026 debugging).
         mediamtxBootstrap = devenvPkgs.writeText "mediamtx-dev.yml" ''
           api: yes
           apiAddress: :9997
@@ -347,7 +360,8 @@
           webrtcEncryption: no
           webrtcAllowOrigins:
             - '*'
-          rtsp: no
+          rtsp: yes
+          rtspAddress: :8554
           rtmp: no
           hls: no
           srt: no

@@ -6,18 +6,24 @@
 --   * CaptureSupervisor + AnalyzerSupervisor + PtzSupervisor (worker role)
 --   * EventWriter (drains @hnvr.events@ → Postgres)
 --   * MediaMTXConfigSyncer (watches cameras table → rewrites mediamtx.yml)
---   * RetentionSweeper (hourly SeaweedFS + Postgres cleanup)
+--   * SnapshotResponder (answers node bootstrap requests)
+--   * RetentionSweeper (hourly SeaweedFS + Postgres cleanup) — Phase 6
 --   * AssignmentCoordinator (camera → host)
---   * LeaderLease (JetStream KV TTL)
+--   * LeaderLease (JetStream KV TTL) — Phase 6
 --
--- Phase 0 wires IHP and the @/healthz@ route; the rest lands per roadmap.
+-- Schema migrations run BEFORE IHP starts so the leader boots clean on
+-- a fresh DB. After migrations, IHP's @Server.run@ wires all
+-- leader-role + node-role initializers via 'Hnvr.Web.Config.config'.
 module Main (main) where
 
 import Hnvr.Web.Config (config)
 import Hnvr.Web.FrontController ()
+import Hnvr.Web.SchemaMigration (runLeaderMigrations)
 import qualified IHP.Server
 
 -- brings FrontController/Worker RootApplication instances
 
 main :: IO ()
-main = IHP.Server.run config
+main = do
+  runLeaderMigrations
+  IHP.Server.run config
