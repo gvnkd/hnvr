@@ -9,8 +9,13 @@ import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-newtype PlayerView = PlayerView
-  { camera :: Camera
+data PlayerView = PlayerView
+  { camera :: Camera,
+    mFrom :: Maybe Text,
+    mTo :: Maybe Text,
+    -- | Seconds from the window start for hls.js @startPosition@
+    -- (deep-link @?t=…@ auto-seek, design 05 §Events view).
+    startOffset :: Maybe Int
   }
 
 instance View PlayerView where
@@ -23,9 +28,10 @@ instance View PlayerView where
             <span class="led led-on"></span>
             Archive · <span class="font-mono">{camera.slug}</span>
           </h1>
-          <div class="subtitle">HLS playback · segments served from SeaweedFS</div>
+          <div class="subtitle">{windowLabel}</div>
         </div>
         <div class="actions">
+          <a class="btn btn-ghost" href={archiveUrl}>Browse</a>
           <a class="btn btn-ghost" href={liveUrl}>Live</a>
           <a class="btn btn-ghost" href={editUrl}>Config</a>
         </div>
@@ -42,14 +48,25 @@ instance View PlayerView where
       {scriptTag}
     |]
     where
-      playlistUrl = "/PlaylistArchive?cameraId=" <> tshow (camera |> get #id)
+      playlistUrl = "/PlaylistArchive?cameraId=" <> cid <> windowParams
+      windowParams = param "from" mFrom <> param "to" mTo
+      param _ Nothing = ""
+      param name (Just v) = "&" <> name <> "=" <> v
+      windowLabel = case (mFrom, mTo) of
+        (Just f, Just t) -> "Window " <> f <> " → " <> t
+        _ -> "Most recent 1-hour window"
       cid = tshow (camera |> get #id)
+      archiveUrl = "/Archive"
       liveUrl = "/ShowLive?cameraId=" <> cid
       editUrl = "/ShowCamera?cameraId=" <> cid
       -- IHP HSX doesn't splice {…} inside <script> tags (treats script
       -- body as pre-escaped text). Build the entire <script> element
       -- in Haskell and inject as a single body-level splice. See pitfall #63.
       scriptTag = preEscapedTextValue ("<script>" <> js <> "</script>" :: Text)
+
+      hlsConfig = case startOffset of
+        Just off -> "{ startPosition: " <> tshow off <> " }"
+        Nothing -> ""
 
       js =
         "const video = document.getElementById('hnvr-player');"
@@ -61,9 +78,12 @@ instance View PlayerView where
           <> "';"
           <> "if (video.canPlayType('application/vnd.apple.mpegurl')) {"
           <> "  video.src = src;"
+          <> seekJs
           <> "  status.textContent = 'Native HLS (Safari)'; setLed('led-on');"
           <> "} else if (window.Hls && Hls.isSupported()) {"
-          <> "  const hls = new Hls();"
+          <> "  const hls = new Hls("
+          <> hlsConfig
+          <> ");"
           <> "  hls.loadSource(src);"
           <> "  hls.attachMedia(video);"
           <> "  hls.on(Hls.Events.MANIFEST_PARSED, () => { status.textContent = 'Ready'; setLed('led-on'); });"
@@ -71,3 +91,9 @@ instance View PlayerView where
           <> "} else {"
           <> "  status.textContent = 'HLS not supported in this browser'; setLed('led-off');"
           <> "}"
+      seekJs = case startOffset of
+        Just off ->
+          "  video.addEventListener('loadedmetadata', () => { video.currentTime = "
+            <> tshow off
+            <> "; });"
+        Nothing -> ""

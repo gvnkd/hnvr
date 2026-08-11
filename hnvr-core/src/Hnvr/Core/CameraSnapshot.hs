@@ -91,8 +91,8 @@ data CameraSnapshot = CameraSnapshot
 -- | Wire shape of the snapshot reply. A list so we can extend with
 -- metadata (batch sequence number, leader id, etc.) without breaking
 -- clients that just want the camera list.
-data CameraSnapshotBatch = CameraSnapshotBatch
-  { csbCameras :: ![CameraSnapshot]
+newtype CameraSnapshotBatch = CameraSnapshotBatch
+  { csbCameras :: [CameraSnapshot]
   }
   deriving stock (Eq, Show, Generic)
 

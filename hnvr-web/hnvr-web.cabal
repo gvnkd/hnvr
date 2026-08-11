@@ -62,6 +62,7 @@ library
     Hnvr.Web.RetentionSweeper
     Hnvr.Web.SchemaMigration
     Hnvr.Web.SnapshotResponder
+    Hnvr.Web.View.Archive.Index
     Hnvr.Web.View.Archive.Player
     Hnvr.Web.View.Cameras.Edit
     Hnvr.Web.View.Cameras.Index

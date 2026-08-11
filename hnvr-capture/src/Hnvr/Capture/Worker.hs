@@ -267,7 +267,8 @@ processStream cfg cam isAudio h st pending = do
 data PendingFrag = PendingFrag
   { pfStart :: !UTCTime,
     pfBytes :: !ByteString,
-    pfSha :: !Sha256
+    pfSha :: !Sha256,
+    pfKey :: !Text
   }
 
 -- | Compute sha256, push to S3 (or spool), publish 'SegmentWritten' on
@@ -301,7 +302,7 @@ handleFragment cfg cam isAudio pending frag =
       if isAudio
         then pure ()
         else flushPendingAt cfg cam ts pending
-      pure (Just (PendingFrag ts bs sha))
+      pure (Just (PendingFrag ts bs sha key))
     `catch` \(e :: SomeException) -> do
       logErr cam $ "fragment handler failed: " <> show e
       pure pending
@@ -319,6 +320,11 @@ flushPending cfg cam isAudio pending = do
 -- | Publish the pending 'SegmentWritten' on @hnvr.events@ with the
 -- supplied end timestamp. No-op if there is no pending fragment or no
 -- Bus configured.
+--
+-- The object key comes from 'pfKey' — the exact key the fragment bytes
+-- were uploaded under (millisecond precision, pitfall #25); recomputing
+-- it here at second precision would point the DB row at a nonexistent
+-- object.
 flushPendingAt :: CaptureConfig -> CameraConfig -> UTCTime -> Maybe PendingFrag -> IO ()
 flushPendingAt cfg cam endTs pending =
   case (capBus cfg, pending) of
@@ -334,7 +340,7 @@ flushPendingAt cfg cam endTs pending =
                 sKind = Video,
                 sHostId = capHostId cfg
               }
-       in Bus.publishJson bus events (toSegmentWritten seg)
+       in Bus.publishJson bus events (toSegmentWritten (pfKey p) seg)
     _ -> pure ()
 
 -- | Upload to S3 if configured; otherwise write to the local spool dir.
@@ -359,15 +365,6 @@ spoolLocally cfg keyBytes bytes = do
       dir = reverse (dropWhile (/= '/') (reverse p))
   Dir.createDirectoryIfMissing True dir
   B.writeFile p bytes
-
--- | Publish a 'SegmentWritten' on @hnvr.events@ if a Bus is configured.
--- Object key is recomputed by `toSegmentWritten` from slug + start time,
--- so callers don't need to thread it through.
---
--- Note: actual publishing now happens in 'flushPendingAt' so we can stamp
--- @sEnd = next fragment arrival@. Kept here as a documentation hook;
--- callers wanting a one-shot publish with explicit timestamps should use
--- 'Bus.publishJson' directly with a fully-populated 'Segment'.
 
 -- | Exponential backoff (seconds): 2, 4, 8, 16, 30, 30, 30, ...
 backoffDuration :: Int -> Int

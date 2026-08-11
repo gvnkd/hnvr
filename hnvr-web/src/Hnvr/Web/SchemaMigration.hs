@@ -60,6 +60,12 @@ import qualified System.Environment as Env
 initialSchemaSql :: ByteString
 initialSchemaSql = $(embedFile "migrations/0001-initial.sql")
 
+-- | BRIN index on @segments.start_ts@ (M6). Separate script because
+-- 0001-initial had already been applied when the index was added —
+-- see the file header.
+brinIndexSql :: ByteString
+brinIndexSql = $(embedFile "migrations/0002-brin-index.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -83,6 +89,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0001-initial" initialSchemaSql) True conn
     handleResult "0001-initial" scriptRes
+    brinRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0002-brin-index" brinIndexSql) True conn
+    handleResult "0002-brin-index" brinRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

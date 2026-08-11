@@ -183,9 +183,8 @@ instance Controller CamerasController where
           )
       Nothing ->
         setErrorMessage
-          ( "No encrypted password stored OR decryption failed. If the\
-            \ row was created with a different HNVR_DATA_KEY, the\
-            \ stored ciphertext is unrecoverable; re-enter the password\
-            \ in Edit to re-encrypt with the current key."
-          )
+          "No encrypted password stored OR decryption failed. If the\
+          \ row was created with a different HNVR_DATA_KEY, the\
+          \ stored ciphertext is unrecoverable; re-enter the password\
+          \ in Edit to re-encrypt with the current key."
     redirectTo ShowCameraAction {cameraId}

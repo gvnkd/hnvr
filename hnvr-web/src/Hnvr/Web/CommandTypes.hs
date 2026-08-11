@@ -97,8 +97,8 @@ instance FromJSON ControlPayload where
 -- Currently empty (the host id is in the subject); kept as a record so
 -- we can add fields like @since@ (sequence number) without breaking
 -- clients.
-data SnapshotRequest = SnapshotRequest
-  { srHost :: !Text
+newtype SnapshotRequest = SnapshotRequest
+  { srHost :: Text
   }
   deriving stock (Eq, Show)
 

@@ -1,5 +1,4 @@
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -53,7 +52,7 @@ import Control.Concurrent.STM
   ( TVar,
     atomically,
     newTVarIO,
-    readTVar,
+    readTVarIO,
     writeTVar,
   )
 import Control.Monad (forM_, void)
@@ -139,7 +138,7 @@ startCamera sup snap = do
             ccTransport = TcpTransport,
             ccRecordAudio = csRecordAudio snap
           }
-      shouldStop = atomically (readTVar stopTVar)
+      shouldStop = readTVarIO stopTVar
   a <- async (captureWorkerWithStop sup.csConfig camCfg shouldStop)
   let handle = WorkerHandle {whStop = stopTVar, whAsync = a}
   modifyIORef' sup.csWorkers (Map.insert (csId snap) handle)

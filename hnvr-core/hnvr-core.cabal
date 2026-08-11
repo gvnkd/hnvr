@@ -13,7 +13,9 @@ library
     Hnvr.Core.Geometry
     Hnvr.Core.Id
     Hnvr.Core.Logging
+    Hnvr.Core.Playlist
     Hnvr.Core.Prelude
+    Hnvr.Core.Recording
     Hnvr.Core.Segment
     Hnvr.Core.Time
     Hnvr.Core.Whep
@@ -53,6 +55,8 @@ test-suite hnvr-core-test
     Hnvr.Core.CryptoSpec
     Hnvr.Core.GeometrySpec
     Hnvr.Core.IdSpec
+    Hnvr.Core.PlaylistSpec
+    Hnvr.Core.RecordingSpec
     Hnvr.Core.SegmentSpec
     Hnvr.Core.TimeSpec
     Hnvr.Core.WhepSpec

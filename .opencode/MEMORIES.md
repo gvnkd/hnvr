@@ -1007,20 +1007,56 @@ ffprobe notes:
           `flake.nix`'s `hnvrHaskellOverlay` lifts them.
 
     75. **NoFieldSelectors pitfall generalised** (Aug 11 2026 M1,
-        extends pitfall #46) — `rec.field` is the ONLY access form
-        inside hnvr-web library modules (NoFieldSelectors is in the
-        library default-extensions). This applies to BOTH reads
-        (`sup.csConfig`) AND writes via record-update in module-
-        qualified positions. The trap fires whenever you write a new
-        module in hnvr-web with the standard extension set. Watch for
-        `[GHC-88464] Variable not in scope: <fieldSelector> ::
-        <Type> -> <FieldType> Suggested fix: Notice that '<field>' is
-        a field selector belonging to the type '<Type>' that has been
-        suppressed by NoFieldSelectors.` Fix: switch `f x` → `x.f`.
-        Add `{-# LANGUAGE OverloadedRecordDot #-}` to the module if
-        it's not already there (it IS in hnvr-web.cabal
-        default-extensions but module-local LANGUAGE pragmas can
-        shadow).
+         extends pitfall #46) — `rec.field` is the ONLY access form
+         inside hnvr-web library modules (NoFieldSelectors is in the
+         library default-extensions). This applies to BOTH reads
+         (`sup.csConfig`) AND writes via record-update in module-
+         qualified positions. The trap fires whenever you write a new
+         module in hnvr-web with the standard extension set. Watch for
+         `[GHC-88464] Variable not in scope: <fieldSelector> ::
+         <Type> -> <FieldType> Suggested fix: Notice that '<field>' is
+         a field selector belonging to the type '<Type>' that has been
+         suppressed by NoFieldSelectors.` Fix: switch `f x` → `x.f`.
+         Add `{-# LANGUAGE OverloadedRecordDot #-}` to the module if
+         it's not already there (it IS in hnvr-web.cabal
+         default-extensions but module-local LANGUAGE pragmas can
+         shadow).
+
+    76. **hlint misparses OverloadedRecordDot `c.id` as composition**
+         (Aug 11 2026 archive-browser) — `camUuid c = case c.id of ...`
+         trips "Redundant id" (hlint sees `c . id`). Fix: use
+         `case c |> get #id of Id u -> u` instead of record dot for
+         `id` fields specifically; other field names are unaffected.
+
+    77. **IHP `paramOrNothing` is PURE** (Aug 11 2026 archive-browser) —
+         `paramOrNothing :: (?request :: Request) => ByteString -> Maybe Text`,
+         not `IO (Maybe Text)`. Bind with `let`, not `<-`. Ideal for
+         optional query params when AutoRoute only handles the typed
+         constructor fields.
+
+    78. **Never edit an already-applied migration file** (Aug 11 2026) —
+         m3-m8 appended the BRIN index to `migrations/0001-initial.sql`
+         AFTER dev DBs had applied it → `schema_migrations` checksum
+         mismatch → leader refuses to boot with the cryptic error
+         `SchemaMigration 0001-initial failed: "0001-initial"`. Fixed by
+         restoring 0001 to its applied checksum and moving the index to
+         `0002-brin-index.sql` (+ a second `MigrationScript` in
+         `SchemaMigration.runLeaderMigrations`). Policy (already written
+         in the file header, now enforced by pain): new schema change =
+         new `NNNN-name.sql` + new embed + new runMigration call.
+
+    79. **Headless `devenv up` needs a pseudo-TTY** (Aug 11 2026) —
+         `devenv up --detach` does NOT exist (process-compose prints its
+         own usage and exits); `nohup … devenv up` dies with
+         `TUI startup error: open /dev/tty`. Working headless form:
+         `nohup script -qec "nix develop --no-pure-eval --command devenv up" /tmp/pc.log &`.
+
+    80. **Playwright strict mode + hidden form inputs** (Aug 11 2026) —
+         `locator('input[name="from"]')` matches BOTH the filter-form
+         datetime input AND the hidden inputs in per-row delete forms →
+         strict-mode violation. Scope form assertions to
+         `page.locator('form[action="/Archive"] …')` whenever a page
+         carries more than one form.
 
 ## Sergey's working style
 
@@ -1032,6 +1068,21 @@ ffprobe notes:
   NATS from day one).
 
 ## Roadmap status (Aug 11 2026 — M1+M2 landed)
+
+- [x] **Archive browser/manager** (Aug 11 2026) — `/Archive`: filter by
+      camera/time-window (24h cap)/min-duration/slug-search, segments
+      grouped into recordings (30s gap tolerance) via pure
+      `Hnvr.Core.Recording` + `Hnvr.Core.Playlist` (cabal-tested,
+      pitfall #14 extraction pattern); windowed playlist (from/to, ≤6h
+      per design 05, default = last 1h ending at latest segment) fixing
+      the oldest-3600-segments bug; player deep-links `?from&to&t` with
+      hls.js startPosition; admin-gated DeleteRecording (S3 best-effort
+      + rows). Prereq fix: `toSegmentWritten` now takes the ms-precision
+      upload key as a param — DB object_key no longer diverges from the
+      uploaded object (pitfall #25 class). Auth gate now covers
+      ArchiveController (was: presigned URLs served unauthenticated).
+      7 Playwright specs in tests/e2e/archive-browser.spec.ts (13 total
+      green). Not committed yet — pending Sergey review.
 
 - [x] Design docs complete
 - [x] Cabal scaffold + flake.nix

@@ -25,7 +25,6 @@ import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Hnvr.Core.Id (CameraId, HostId, Sha256)
 import Hnvr.Core.Prelude (UTCTime)
-import Hnvr.Core.Time (formatSegmentObjectKey)
 
 -- | One 1-second fMP4 fragment captured from a camera.
 data Segment = Segment
@@ -60,10 +59,14 @@ data SegmentWritten = SegmentWritten
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
--- | Project a 'Segment' into its 'SegmentWritten' envelope, computing the
--- SeaweedFS object key from the slug + start timestamp.
-toSegmentWritten :: Segment -> SegmentWritten
-toSegmentWritten s =
+-- | Project a 'Segment' into its 'SegmentWritten' envelope. The object
+-- key is supplied by the caller: the capture worker computes it with
+-- millisecond precision ('Hnvr.Core.Time.formatSegmentObjectKeyMs') at
+-- upload time, and recomputing it here at second precision would make
+-- the published key diverge from the uploaded object (pitfall #25 —
+-- HEVC cameras emit 2+ fragments per wall-clock second).
+toSegmentWritten :: Text -> Segment -> SegmentWritten
+toSegmentWritten objectKey s =
   SegmentWritten
     { swCamera = sCamera s,
       swSlug = sSlug s,
@@ -73,5 +76,5 @@ toSegmentWritten s =
       swSha = sSha s,
       swKind = sKind s,
       swHostId = sHostId s,
-      swObjectKey = formatSegmentObjectKey (sSlug s) (sStart s)
+      swObjectKey = objectKey
     }

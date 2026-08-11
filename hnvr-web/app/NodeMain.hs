@@ -65,7 +65,7 @@ main = do
     bootstrapFromSnapshot bus host sup
       `catch` \(e :: SomeException) ->
         logError ("node: snapshot bootstrap failed (will rely on assign messages): " <> T.pack (show e))
-    void $ forever $ threadDelay 1000000000
+    void $ forever $ threadDelay 1_000_000_000
 
 -- | Construct the process-wide 'CaptureConfig' from environment.
 -- Defaults match the devenv service wiring (MinIO on :9100,

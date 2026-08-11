@@ -29,7 +29,7 @@ tests =
     "Hnvr.Core.Segment"
     [ testCase "toSegmentWritten projects every field" $ do
         let seg = sampleSegment
-            sw = toSegmentWritten seg
+            sw = toSegmentWritten sampleKey seg
         assertEqual "swCamera" (sCamera seg) (swCamera sw)
         assertEqual "swSlug" (sSlug seg) (swSlug sw)
         assertEqual "swStart" (sStart seg) (swStart sw)
@@ -38,21 +38,23 @@ tests =
         assertEqual "swKind" (sKind seg) (swKind sw)
         assertEqual "swHostId" (sHostId seg) (swHostId sw)
         assertEqual "swBytes" (fromIntegral (B.length (sBytes seg)) :: Word) (fromIntegral (swBytes sw) :: Word),
-      testCase "toSegmentWritten computes object key from slug + start" $ do
-        let seg = sampleSegment
-            sw = toSegmentWritten seg
-        assertEqual
-          "object key"
-          "cam-197/2026-08-07/12-30-45.mp4"
-          (swObjectKey sw),
+      testCase "toSegmentWritten uses the caller-supplied object key verbatim" $ do
+        let sw = toSegmentWritten sampleKey sampleSegment
+        assertEqual "object key" sampleKey (swObjectKey sw),
       testCase "SegmentWritten ToJSON/FromJSON roundtrip" $ do
-        let sw = toSegmentWritten sampleSegment
+        let sw = toSegmentWritten sampleKey sampleSegment
             enc = encode sw
             dec = decode enc :: Maybe SegmentWritten
         assertEqual "roundtrip" (Just sw) dec
     ]
 
 -- ---- fixtures ------------------------------------------------------
+
+-- | Millisecond-precision key, as the capture worker computes it at
+-- upload time. The envelope must carry it verbatim — recomputing at
+-- second precision breaks the DB→S3 join for HEVC cameras (pitfall #25).
+sampleKey :: Text
+sampleKey = "cam-197/2026-08-07/12-30-45.123.mp4"
 
 sampleSegment :: Segment
 sampleSegment =

@@ -28,7 +28,7 @@ where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException, bracket, catch)
-import Control.Monad (forM_, forever, void, when)
+import Control.Monad (forM_, forever, unless, void, when)
 import qualified Data.ByteString.Char8 as BSC
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -78,7 +78,7 @@ sweepOnce = do
           PG.query_
             conn
             "SELECT id, slug, retention_days FROM cameras WHERE enabled ORDER BY slug"
-        when (not (null cams)) $
+        unless (null cams) $
           logInfo ("RetentionSweeper: sweeping " <> T.pack (show (length cams)) <> " camera(s)")
         forM_ cams (sweepCamera s3cfg conn)
 

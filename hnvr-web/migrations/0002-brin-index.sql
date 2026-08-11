@@ -1,0 +1,11 @@
+-- HNVR migration 0002 — BRIN index on segments.start_ts (M6).
+--
+-- BRIN is essentially free on naturally time-ordered inserts (~17 M
+-- rows/year per camera at 1 segment/sec). Without it the retention
+-- sweeper's `WHERE end_ts < NOW() - INTERVAL '<n> days'` falls back to
+-- a seq scan that grows linearly with table size.
+--
+-- Lives in a separate migration because 0001-initial had already been
+-- applied to dev DBs when the index was added (m3-m8 originally edited
+-- 0001 in place, tripping the schema_migrations checksum guard).
+CREATE INDEX IF NOT EXISTS segments_start_ts_brin ON segments USING brin (start_ts);
