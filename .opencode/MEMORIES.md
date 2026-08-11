@@ -1068,6 +1068,24 @@ ffprobe notes:
          grouping is `groupRecordingsBy spCameraId`. Any future
          timeline/density logic has the same constraint.
 
+    82. **IHP AutoRoute maps `Delete*` constructors to HTTP DELETE
+         only** (Aug 12 2026) — `DeleteRecordingAction` 405'd our plain
+         `<form method="POST">` with `UnexpectedMethodException
+         {allowedMethods = [DELETE]}`. IHP's own delete forms rely on
+         ihp.js's method-override helper, which our custom Layout.hs
+         doesn't load; there is no `_method` middleware in v1.6.0.
+         Workaround: name destructive POST actions without the `Delete`
+         prefix (`PurgeRecordingAction`, same pattern as
+         `AssignCameraAction`).
+
+    83. **`nix build` overwrites `./result` with the LAST-built attr**
+         (Aug 12 2026) — running `nix build .#checks…pre-commit` after
+         `.#hnvr-web` replaced `./result` with the pre-commit-run
+         output, and the next leader restart died with
+         `result/bin/hnvr-leader: No such file or directory`. Use a
+         dedicated out-link for the app: `nix build .#hnvr-web -o
+         result-web` and run `./result-web/bin/hnvr-leader`.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.

@@ -185,7 +185,7 @@ instance View IndexView where
                   </form>
                 |]
               else [hsx||]
-          deleteUrl = "/DeleteRecording?cameraId=" <> r.rrCameraId
+          deleteUrl = "/PurgeRecording?cameraId=" <> r.rrCameraId
 
       pagination =
         [hsx|

@@ -16,9 +16,12 @@
 --   * 'PlaylistArchiveAction' — VOD m3u8 with presigned S3 GET URLs for
 --     the segments overlapping the requested window (design 05 §Archive
 --     playback: window validated ≤ 6 h; default = most recent 1 h).
---   * 'DeleteRecordingAction' — admin-only; deletes the window's S3
+--   * 'PurgeRecordingAction' — admin-only; deletes the window's S3
 --     objects (best-effort) and segment rows, mirroring RetentionSweeper
---     semantics.
+--     semantics. Named "Purge", not "Delete": AutoRoute maps @Delete*@
+--     constructors to HTTP DELETE only, and our plain POST forms don't
+--     load ihp.js's method-override helper (AssignCameraAction uses the
+--     same unprefixed-name POST pattern).
 --
 -- Optional query params are read via 'paramOrNothing' — AutoRoute only
 -- sees the @cameraId@ field.
@@ -54,7 +57,7 @@ data ArchiveController
   = ArchiveAction
   | PlayerArchiveAction {cameraId :: !(Id Camera)}
   | PlaylistArchiveAction {cameraId :: !(Id Camera)}
-  | DeleteRecordingAction {cameraId :: !(Id Camera)}
+  | PurgeRecordingAction {cameraId :: !(Id Camera)}
   deriving stock (Eq, Show, Data)
 
 instance AutoRoute ArchiveController
@@ -194,7 +197,7 @@ instance Controller ArchiveController where
         setHeader ("Content-Type", "application/vnd.apple.mpegurl")
         setHeader ("Cache-Control", "private, max-age=0")
         renderPlain (cs m3u8 :: LByteString)
-  action DeleteRecordingAction {cameraId} = do
+  action PurgeRecordingAction {cameraId} = do
     let isAdmin = maybe False (.isAdmin) (currentUserOrNothing @User)
     if not isAdmin
       then setErrorMessage "Recording deletion requires an admin user"
