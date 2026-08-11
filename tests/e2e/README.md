@@ -30,25 +30,23 @@ Bootstrap admin credentials come from the devenv env block
 (`admin@hnvr.local` / `hnvr-dev`). Override with `HNVR_ADMIN_EMAIL` /
 `HNVR_ADMIN_PASSWORD` for non-devenv environments.
 
-### Headless-shell library loading under nix-shell
+### Chromium launches cleanly inside `nix develop`
 
-The playwright-downloaded `chrome-headless-shell` is a typical Linux
-binary that expects `libglib-2.0.so.0`, `libnss3`, `libgbm`, etc. on
-`LD_LIBRARY_PATH`. Pure `nix develop` shells don't expose these by
-default — chromium fails to launch with
-`error while loading shared libraries: libglib-2.0.so.0`.
+The flake.nix `enterShell` hook extends `NIX_LD_LIBRARY_PATH` with the
+chromium runtime deps (glib, nss, atk, libxcb, libgbm, xorg libs,
+pango, cairo, alsa-lib, expat — full list in the `chromiumRuntimeDeps`
+binding). With Sergey's system `programs.nix-ld.enable = true` config,
+this is enough for the Playwright-downloaded `chrome-headless-shell`
+to find every lib it needs via the nix-ld loader.
 
-Two known workarounds:
+Verified Aug 11 2026: `npx playwright test` runs cleanly inside
+`nix develop` against a `./result/bin/hnvr-leader` started in another
+terminal. No need to exit the nix shell.
 
-1. **Run from outside the nix shell.** Exit `nix develop` before
-   `npm test`; system chrome libs are visible there.
-2. **Add `pkgs.nix-ld` to devenv packages** and set
-   `NIX_LD_LIBRARY_PATH` to include `pkgs.glib`, `pkgs.nss`, `pkgs.gbm`,
-   etc. The full list is what `pkgs.chromium` would pull in as
-   `buildInputs`. (TODO: wire this in flake.nix — not in S4's scope.)
-
-The CI nightly job sidesteps this by running Playwright from a regular
-ubuntu-24.04 runner (not `nix develop`).
+If you change the chromium runtime dep set (e.g. after a Playwright
+version bump surfaces a new missing lib), edit `chromiumRuntimeDeps`
+in flake.nix. The full list is what `pkgs.chromium` itself declares as
+`runtimeDependencies` in nixpkgs.
 
 ## Layout
 

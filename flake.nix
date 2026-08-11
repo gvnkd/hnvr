@@ -354,6 +354,52 @@
           playback: no
           logLevel: info
         '';
+
+        # -------------------------------------------------------------
+        # Chromium runtime deps for Playwright (tests/e2e/).
+        #
+        # Playwright's `npx playwright install chromium` drops a stock
+        # Linux chromium at ~/.cache/ms-playwright/. On NixOS the
+        # system loader (nix-ld, configured via programs.nix-ld.enable
+        # in Sergey's system config) needs to find chromium's ~20
+        # shared libs. The system bundle at
+        # /run/current-system/sw/share/nix-ld/lib covers glibc + systemd
+        # + a few others; we extend NIX_LD_LIBRARY_PATH in enterShell
+        # with the chromium-specific deps via pkgs.lib.makeLibraryPath.
+        #
+        # With this in place, `npx playwright test` works inside
+        # `nix develop` without needing to exit to a system shell.
+        # -------------------------------------------------------------
+        chromiumRuntimeDeps = with devenvPkgs; [
+          glib
+          nss
+          nspr
+          atk
+          at-spi2-atk
+          at-spi2-core
+          cups
+          libdrm
+          dbus
+          libxkbcommon
+          xorg.libX11
+          xorg.libXcomposite
+          xorg.libXdamage
+          xorg.libXext
+          xorg.libXfixes
+          xorg.libXrandr
+          xorg.libXScrnSaver
+          xorg.libxshmfence
+          xorg.libXi
+          xorg.libXtst
+          xorg.libxcb
+          mesa
+          libgbm
+          pango
+          cairo
+          alsa-lib
+          expat
+        ];
+        chromiumLibPath = devenvPkgs.lib.makeLibraryPath chromiumRuntimeDeps;
       in
       {
         # `nix build .#hnvr-web` yields a derivation with
@@ -573,6 +619,16 @@
               };
 
               enterShell = preCommit.shellHook + ''
+                # Extend the system nix-ld library path with chromium's
+                # runtime deps so Playwright's `npx playwright install`
+                # binary can launch inside `nix develop`. See the
+                # `chromiumRuntimeDeps` binding above + tests/e2e/README.md.
+                if [ -n "''${NIX_LD_LIBRARY_PATH:-}" ]; then
+                  export NIX_LD_LIBRARY_PATH="${chromiumLibPath}:$NIX_LD_LIBRARY_PATH"
+                else
+                  export NIX_LD_LIBRARY_PATH="${chromiumLibPath}"
+                fi
+
                 echo ""
                 echo "  HNVR dev shell — $(ghc --version)"
                 echo "  Build:     cabal build all"
@@ -582,6 +638,7 @@
                 echo "  Health:    curl localhost:8222/healthz         (nats)"
                 echo "             curl localhost:9997/v2/config/paths  (mediamtx)"
                 echo "             curl localhost:9101/minio/health/live (minio)"
+                echo "  E2E:       cd tests/e2e && npm install && npx playwright install chromium && npm test"
                 echo ""
               '';
             })
