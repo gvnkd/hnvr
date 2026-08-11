@@ -588,9 +588,81 @@
           ];
         };
 
+        # -------------------------------------------------------------
+        # NixOS VM smoke test (S5 deliverable, design_docs/10-test-plan.md).
+        # Boots the leader VM via the test framework, waits for
+        # hnvr-leader.service + /healthz, and probes the dashboard.
+        # Runs as part of `nix flake check` (under #checks.x86_64-linux).
+        #
+        # The two-node failover variant is TODO — it requires
+        # reconfiguring both VMs to peer with a shared NATS cluster so
+        # health messages cross VM boundaries (current worker VM uses
+        # its own localhost NATS per Phase 0 demo wiring).
+        # -------------------------------------------------------------
         checks = {
           pre-commit = preCommit;
           build-all = localPkgs.hnvr-web;
+          hnvr-leader-smoke = pkgs.testers.nixosTest {
+            name = "hnvr-leader-smoke";
+
+            nodes.leader = { pkgs, ... }: {
+              nixpkgs.overlays = [
+                ihp.overlays.default
+                mediamtxOverlay
+                hnvrTopOverlay
+              ];
+
+              imports = [
+                self.nixosModules.hnvr-nats
+                self.nixosModules.hnvr-mediamtx
+                self.nixosModules.hnvr
+              ];
+
+              services.hnvr.nats.enable = true;
+              services.hnvr.mediamtx.enable = true;
+              services.hnvr.leader.enable = true;
+              services.hnvr.leader.hostName = "hnvr-2";
+
+              # IHP needs a Postgres. Local for the VM test; production
+              # pulls from the SaaS via DATABASE_URL.
+              services.postgresql.enable = true;
+              services.postgresql.ensureDatabases = [ "hnvr" ];
+              services.postgresql.ensureUsers = [{
+                name = "hnvr";
+                ensureDBOwnership = true;
+              }];
+              services.postgresql.authentication = ''
+                local all all trust
+              '';
+
+              virtualisation.memorySize = 2048;
+              virtualisation.cores = 2;
+
+              # Trust LAN — disable firewall for dev simplicity.
+              networking.firewall.enable = false;
+            };
+
+            testScript = ''
+              start_all()
+
+              # Wait for systemd to bring up the hnvr-leader service. The
+              # leader has several initializers (NATS connect,
+              # schema ensureTrigger, ConfigBroadcaster LISTEN,
+              # MediaMTXConfigSyncer) — give it room.
+              leader.wait_for_unit("hnvr-leader.service", timeout=120)
+              leader.wait_for_open_port(8000, timeout=60)
+
+              # /healthz works even when other deps are flapping
+              # (Config.hs CustomMiddleware short-circuits before
+              # IHP's request flow — pitfall #60).
+              leader.succeed("curl -fsS -o /dev/null http://localhost:8000/healthz")
+
+              # Login page renders (Slice 8 Aug 10 2026 admin gate).
+              leader.succeed("curl -fsS -o /dev/null http://localhost:8000/NewSession")
+
+              print("hnvr-leader-smoke: PASS")
+            '';
+          };
         };
 
         formatter = pkgs.nixpkgs-fmt;
