@@ -75,11 +75,15 @@ instance FromJSON Transport where
 -- @rtsp_template@ rendering path (M3 in the milestones doc); until
 -- that lands, the leader renders the URL at snapshot time and the node
 -- gets a ready-to-use string.
+--
+-- @csRecordAudio@ gates the parallel audio ffmpeg (M5). Per
+-- @03-capture-and-storage.md@ §3.
 data CameraSnapshot = CameraSnapshot
   { csId :: !CameraId,
     csSlug :: !Text,
     csRtspUrl :: !Text,
-    csTransport :: !Transport
+    csTransport :: !Transport,
+    csRecordAudio :: !Bool
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

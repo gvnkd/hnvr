@@ -124,15 +124,14 @@ SORT (Bewley et al. 2016) in `Hnvr.Cv.Tracker.Sort`: ~250 LOC. Kalman filter wit
 
 | Library | Version | Why |
 |---------|---------|-----|
-| **`amazonka-s3`** | **2.0** (with `jailbreakCabal` to allow GHC 9.12) | SeaweedFS speaks S3 API. Uses presigned URLs for archive playback. |
-| `amazonka-core` | 2.0 | Required peer. |
+| **`minio-hs`** | nixpkgs pin | S3-compatible client (SeaweedFS, MinIO). Path-style addressing by default — exactly what SeaweedFS needs. Replaces the originally-planned `amazonka-s3` (which doesn't compile under GHC 9.12 without source patches — see MEMORIES.md pitfall #28). Same operations surface (putObject/getObject/presignUrl/listObjects/removeObject). |
 | **PostgreSQL 18** (external SaaS) | n/a — connect via env URL | Async I/O, virtual generated columns, improved logical replication. IHP uses libpq, fully compatible. |
-| IHP's bundled `postgresql-libpq` | IHP-managed | Don't add `postgresql-simple` or `persistent` — IHP owns the DB layer. |
+| IHP's bundled `postgresql-libpq` | IHP-managed | Don't add `postgresql-simple` or `persistent` — IHP owns the DB layer. (HNVR's leader-side LISTEN/NOTIFY loops and migrations DO use `postgresql-simple` directly, outside IHP's Hasql pool, because Hasql 1.9.x has no Notification module and IHP v1.6.0's `sqlExec` is broken for DDL — see pitfalls #41, #42.) |
 
-**SeaweedFS specifics**
+**SeaweedFS / MinIO specifics**
 - S3 API endpoint via env var `HNVR_S3_ENDPOINT` (e.g. `https://s3.example.internal`).
-- Path-style addressing — set amazonka S3 config to path-style (SeaweedFS may not handle virtual-hosted-style).
-- Lifecycle policies: SeaweedFS supports per-bucket TTL, but we sweep ourselves (don't rely on it).
+- Path-style addressing — minio-hs default; no virtual-hosted-style.
+- Lifecycle policies: SeaweedFS supports per-bucket TTL, but we sweep ourselves via `Hnvr.Web.RetentionSweeper` (M6, Aug 11 2026) — don't rely on it.
 - Erasure coding is internal to SeaweedFS — we just see a normal S3 API.
 
 **Postgres 18 specifics we use**

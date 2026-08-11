@@ -59,6 +59,7 @@ library
     Hnvr.Web.FrontController
     Hnvr.Web.HealthCache
     Hnvr.Web.MediaMTXConfigSyncer
+    Hnvr.Web.RetentionSweeper
     Hnvr.Web.SchemaMigration
     Hnvr.Web.SnapshotResponder
     Hnvr.Web.View.Archive.Player

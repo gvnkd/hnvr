@@ -43,6 +43,7 @@ import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
 import Hnvr.Web.EventWriter (startEventWriter)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
+import Hnvr.Web.RetentionSweeper (startRetentionSweeper)
 import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
 import Hnvr.Web.WhepProxy (whepMiddleware)
 import IHP.AuthSupport.Authentication (hashPassword)
@@ -128,6 +129,10 @@ connectNatsAndStartEventWriter = do
   startMediaMTXConfigSyncer
     `E.catch` \(e :: E.SomeException) ->
       logError ("leader: MediaMTXConfigSyncer start failed: " <> cs (show e))
+  -- Retention sweep also independent of NATS (just PG + S3). Best-effort.
+  startRetentionSweeper
+    `E.catch` \(e :: E.SomeException) ->
+      logError ("leader: RetentionSweeper start failed: " <> cs (show e))
   let defaultUri = "nats://nats:nats@localhost:4222"
   uri <- fromMaybe defaultUri <$> Env.lookupEnv "HNVR_NATS_URI"
   let connect' = do

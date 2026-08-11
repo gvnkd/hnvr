@@ -21,9 +21,16 @@
     # Phase 2 (live view): mediamtx bumped to v1.20.0 (design lock) via
     # the mediamtxOverlay defined below — nixpkgs pins 1.18.2 but the
     # overlay rebuilds from source via buildGo126Module.
-    # Phase 6+ (secrets, disks):
-    #   sops-nix.url   = "github:Mic92/sops-nix";
-    #   disko.url      = "github:nix-community/disko";
+    # M4 (Aug 11 2026): sops-nix for production secrets. Dev (devenv)
+    # keeps using plaintext env vars — sops-nix activation is opt-in
+    # per-host via `services.hnvr.secrets.enable = true;`.
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # Phase 6+ (disks):
+    #   disko.url = "github:nix-community/disko";
 
     # devenv — manages local dev services (Postgres, MinIO, NATS, MediaMTX)
     # via `devenv up` inside `nix develop`. Flake-integrated: the devShell
@@ -35,7 +42,7 @@
     };
   };
 
-  outputs = inputs@{ self, nixpkgs, flake-utils, pre-commit-hooks, ihp, devenv, ... }:
+  outputs = inputs@{ self, nixpkgs, flake-utils, pre-commit-hooks, ihp, devenv, sops-nix, ... }:
     let
       supportedSystems = [ "x86_64-linux" ];
 
@@ -186,8 +193,10 @@
 
       mkLeaderVmModules = [
         baseVmConfig
+        sops-nix.nixosModules.sops
         self.nixosModules.hnvr-nats
         self.nixosModules.hnvr-mediamtx
+        self.nixosModules.hnvr-secrets
         self.nixosModules.hnvr
         {
           services.hnvr.nats.enable = true;
@@ -212,7 +221,9 @@
 
       mkWorkerVmModules = [
         baseVmConfig
+        sops-nix.nixosModules.sops
         self.nixosModules.hnvr-nats
+        self.nixosModules.hnvr-secrets
         ({ pkgs, ... }: {
           # Worker VM runs its own local NATS for Phase 0 demo purposes
           # (so the node has something to connect to without inter-VM
@@ -744,6 +755,7 @@
       nixosModules = {
         hnvr-nats = import ./nix/nats-server.nix;
         hnvr-mediamtx = import ./nix/mediamtx.nix;
+        hnvr-secrets = import ./nix/secrets.nix;
         hnvr = import ./nix/module.nix;
         default = self.nixosModules.hnvr;
       };

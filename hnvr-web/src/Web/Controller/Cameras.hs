@@ -21,6 +21,8 @@ module Web.Controller.Cameras
   )
 where
 
+import Data.Text (Text)
+import qualified Data.Text as Text
 import Generated.Types
 import Hnvr.Web.Auth ()
 import Hnvr.Web.View.Cameras.Edit
@@ -42,6 +44,7 @@ data CamerasController
   | DeleteCameraAction {cameraId :: !(Id Camera)}
   | ProbeCameraAction {cameraId :: !(Id Camera)}
   | AssignCameraAction {cameraId :: !(Id Camera)}
+  | TestCryptoCameraAction {cameraId :: !(Id Camera)}
   deriving stock (Eq, Show, Data)
 
 instance AutoRoute CamerasController
@@ -157,3 +160,32 @@ instance Controller CamerasController where
         then "Assignment cleared (auto mode)"
         else "Assigned to " <> hostParam
     redirectTo ShowCameraAction {cameraId = camera'' |> get #id}
+
+  -- \| POST /TestCryptoCamera?cameraId=… — diagnostic that confirms the
+  -- row's @password_enc@ + @password_nonce@ decrypt cleanly with the
+  -- current @HNVR_DATA_KEY@. Catches the silent failure mode where the
+  -- key was rotated between Create and a future use (e.g. a future
+  -- @rtsp_template@ rendering slice, or an audit).
+  --
+  -- Records no state. Flash message reports OK + the decrypted length
+  -- (we deliberately don't show the plaintext in the UI to keep the
+  -- browser's session storage clean), or the error.
+  action TestCryptoCameraAction {cameraId} = do
+    camera <- fetch cameraId
+    mPlain <- liftIO (decryptPassword (camera |> get #passwordEnc) (camera |> get #passwordNonce))
+    case mPlain of
+      Just plain ->
+        setSuccessMessage
+          ( "Decryption OK: password_enc decrypts cleanly with the\
+            \ current HNVR_DATA_KEY (length "
+              <> tshow (Text.length plain)
+              <> " chars)"
+          )
+      Nothing ->
+        setErrorMessage
+          ( "No encrypted password stored OR decryption failed. If the\
+            \ row was created with a different HNVR_DATA_KEY, the\
+            \ stored ciphertext is unrecoverable; re-enter the password\
+            \ in Edit to re-encrypt with the current key."
+          )
+    redirectTo ShowCameraAction {cameraId}

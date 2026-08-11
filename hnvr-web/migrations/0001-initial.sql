@@ -97,6 +97,13 @@ CREATE TABLE IF NOT EXISTS segments (
 
 CREATE INDEX IF NOT EXISTS segments_cam_start_idx ON segments (camera_id, start_ts DESC);
 
+-- BRIN index on start_ts for retention-sweep range scans (M6). BRIN is
+-- essentially free on naturally time-ordered inserts (~17 M rows/year
+-- per camera at 1 segment/sec). Without it the sweeper's
+-- `WHERE end_ts < NOW() - INTERVAL '<n> days'` falls back to a seq
+-- scan that grows linearly with table size.
+CREATE INDEX IF NOT EXISTS segments_start_ts_brin ON segments USING brin (start_ts);
+
 -- Phase 1 audit-fix: admin gate. IHP AuthSupport requires these exact
 -- column names: id, email, password_hash, locked_at, failed_login_attempts.
 -- is_admin is HNVR-specific (single admin user for v1; viewer role Phase 6).

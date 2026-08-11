@@ -127,7 +127,8 @@ projectCamera cam =
             { csId = cameraIdOf cam,
               csSlug = cam.slug,
               csRtspUrl = cam.rtspUrl,
-              csTransport = tr
+              csTransport = tr,
+              csRecordAudio = cam.recordAudio
             }
 
 -- | Unwrap the IHP @Id' "cameras"@ newtype into the underlying 'UUID'

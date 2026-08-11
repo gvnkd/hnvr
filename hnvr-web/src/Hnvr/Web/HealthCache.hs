@@ -5,17 +5,23 @@
 -- | Leader-side HealthCache.
 --
 -- Subscribes to @hnvr.health.>@ on the leader's NATS bus and maintains
--- an in-memory @IORef (Map HostId Health)@. Two consumers:
+-- an in-memory @IORef (Map HostId Health)@. The IORef is currently
+-- write-only — the original plan (Phase 2 Slice 5/6) was to have the
+-- @/hosts@ dashboard and @AssignmentCoordinator@ read from it for O(1)
+-- access. In practice both consumers query Postgres directly:
 --
---   * @/hosts@ dashboard (Phase 2 Slice 6) reads the IORef directly for
---     O(1) rendering.
---   * @AssignmentCoordinator@ (Phase 2 Slice 5) reads the IORef to
---     detect host-down (no entry updated in 15 s).
+--   * @Controller/Hosts.hs@ runs `query @Host |> fetch` per request.
+--   * @AssignmentCoordinator.healthyHosts@ runs a `sqlQuery` for
+--     `last_health_at >= NOW() - INTERVAL '15 seconds'`.
+--
+-- The IORef is kept around as a future optimisation target (Phase 6
+-- operational hardening can wire it as a read-through cache). For now
+-- it's just a sink that gets updated on every heartbeat.
 --
 -- Also writes the latest health to the @hosts@ table on every message
--- (debounced write — single UPDATE per heartbeat, ~0.2 QPS at 5 s
--- heartbeat × 2 hosts). The DB row is the source of truth for cross-
--- process restart scenarios; the IORef is the hot read path.
+-- (single UPSERT per heartbeat, ~0.2 QPS at 5 s heartbeat × 2 hosts).
+-- The DB row is the actual source of truth for cross-process restart
+-- scenarios; the IORef is the (currently unused) hot read path.
 module Hnvr.Web.HealthCache
   ( startHealthCache,
     HealthCache,

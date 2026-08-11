@@ -64,6 +64,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hnvr.Capture.Ffmpeg (Transport (..))
+import Hnvr.Capture.SpoolDrainer (startSpoolDrainer)
 import Hnvr.Capture.Worker
   ( CameraConfig (..),
     CaptureConfig (..),
@@ -97,6 +98,10 @@ data WorkerHandle = WorkerHandle
 startCaptureSupervisor :: CaptureConfig -> IO CaptureSupervisor
 startCaptureSupervisor cfg = do
   ref <- newIORef Map.empty
+  -- SpoolDrainer is process-wide (not per-camera) so it can clean up
+  -- after camera reassignments too. Started here so it shares the
+  -- supervisor's CaptureConfig (capS3, capBucket, capSpoolDir).
+  startSpoolDrainer cfg
   logInfo "CaptureSupervisor: started"
   pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref})
 
@@ -131,7 +136,8 @@ startCamera sup snap = do
           { ccId = csId snap,
             ccSlug = csSlug snap,
             ccRtspUrl = relayUrl,
-            ccTransport = TcpTransport
+            ccTransport = TcpTransport,
+            ccRecordAudio = csRecordAudio snap
           }
       shouldStop = atomically (readTVar stopTVar)
   a <- async (captureWorkerWithStop sup.csConfig camCfg shouldStop)

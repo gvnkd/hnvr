@@ -76,8 +76,8 @@ handleRequest bus msg =
       ("", _) -> s
       (_, t) -> t
 
--- | One-shot PG connection: SELECT id, slug, rtsp_url, rtsp_transport
--- FROM cameras WHERE assigned_host = ? AND enabled = TRUE.
+-- | One-shot PG connection: SELECT id, slug, rtsp_url, rtsp_transport,
+-- record_audio FROM cameras WHERE assigned_host = ? AND enabled = TRUE.
 -- Cameras with an unrecognised transport value are silently skipped
 -- (matches 'Hnvr.Web.CommandTypes.projectCamera' semantics — better to
 -- under-populate than to spawn a worker that will crash on ffmpeg SETUP).
@@ -88,18 +88,19 @@ fetchAssignedCameras host = do
     rows <-
       PG.query
         conn
-        "SELECT id, slug, rtsp_url, rtsp_transport FROM cameras WHERE assigned_host = ? AND enabled = TRUE"
+        "SELECT id, slug, rtsp_url, rtsp_transport, record_audio FROM cameras WHERE assigned_host = ? AND enabled = TRUE"
         (Only host)
     pure (foldMap mkSnapshot rows)
   where
-    mkSnapshot (cid, slug, url, transportTxt) =
+    mkSnapshot (cid, slug, url, transportTxt, recordAudio) =
       case transportFromText transportTxt of
         Just tr ->
           [ CameraSnapshot
               { csId = CameraId cid,
                 csSlug = slug,
                 csRtspUrl = url,
-                csTransport = tr
+                csTransport = tr,
+                csRecordAudio = recordAudio
               }
           ]
         Nothing -> []

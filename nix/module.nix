@@ -95,7 +95,7 @@ in
         # Bootstrap admin: leader boot idempotently INSERTs a row into
         # users(email='INITIAL_ADMIN_EMAIL', is_admin=TRUE) using
         # hashPassword(INITIAL_ADMIN_PASSWORD). Real deployments source
-        # these from sops-nix (Phase 6 activation).
+        # these from sops-nix (services.hnvr.secrets.enable = true).
         INITIAL_ADMIN_EMAIL = lib.mkDefault "admin@hnvr.local";
       } // cfg.environment;
 
@@ -108,7 +108,7 @@ in
         Restart = "on-failure";
         RestartSec = 5;
 
-        # Hardening (loosened in Phase 6 when we add GPU access)
+        # Hardening (loosened in Phase 6 when we add GPU access if needed).
         NoNewPrivileges = true;
         PrivateTmp = true;
         ProtectSystem = "strict";
@@ -121,6 +121,12 @@ in
       # Also stage the compiled static assets (app.css) from
       # cfg.staticAssets into ${dataDir}/static/ — IHP's static
       # middleware serves from APP_STATIC (env-configured below).
+      #
+      # When sops-nix is enabled, also generate per-secret systemd
+      # EnvironmentFile fragments from /run/secrets/<name> (single
+      # value per file → KEY=value line). systemd EnvironmentFile
+      # wants the KEY= form; sops-nix's per-secret files contain only
+      # the value.
       preStart = ''
         mkdir -p ${cfg.dataDir}/static
         # Idempotently stage the latest CSS — copy (not symlink) because
@@ -131,8 +137,48 @@ in
           head -c 32 /dev/urandom > ${cfg.dataDir}/client_session_key.aes
           chmod 0600 ${cfg.dataDir}/client_session_key.aes
         fi
+      '' + lib.optionalString config.services.hnvr.secrets.enable ''
+        # Rebuild per-secret EnvironmentFile fragments every boot —
+        # sops-nix may have rotated the underlying /run/secrets/* value
+        # between activations.
+        mkdir -p ${cfg.dataDir}/env
+        for kv in \
+            "HNVR_DATA_KEY=hnvr-data-key" \
+            "HNVR_S3_ENDPOINT=hnvr-s3-endpoint" \
+            "HNVR_S3_ACCESS_KEY=hnvr-s3-access-key" \
+            "HNVR_S3_SECRET_KEY=hnvr-s3-secret-key" \
+            "HNVR_S3_BUCKET=hnvr-s3-bucket" \
+            "HNVR_DB_URL=hnvr-db-url" \
+            "INITIAL_ADMIN_EMAIL=initial-admin-email" \
+            "INITIAL_ADMIN_PASSWORD=initial-admin-password"; do
+          key=''${kv%%=*}
+          src=''${kv#*=}
+          if [ -f /run/secrets/$src ]; then
+            printf "%s=" "$key" > ${cfg.dataDir}/env/$key
+            cat /run/secrets/$src >> ${cfg.dataDir}/env/$key
+            printf "\n" >> ${cfg.dataDir}/env/$key
+          fi
+        done
       '';
     };
+
+    # Inject the EnvironmentFile list. We do this in a separate
+    # assignment so lib.optionals reads config.services.hnvr.secrets.enable
+    # correctly under mkIf (config merging rules).
+    systemd.services.hnvr-leader.serviceConfig.EnvironmentFile =
+      lib.optionals config.services.hnvr.secrets.enable (
+        map (k: "${cfg.dataDir}/env/${k}")
+          [
+            "HNVR_DATA_KEY"
+            "HNVR_S3_ENDPOINT"
+            "HNVR_S3_ACCESS_KEY"
+            "HNVR_S3_SECRET_KEY"
+            "HNVR_S3_BUCKET"
+            "HNVR_DB_URL"
+            "INITIAL_ADMIN_EMAIL"
+            "INITIAL_ADMIN_PASSWORD"
+          ]
+      );
 
     networking.firewall.allowedTCPPorts = lib.optionals config.networking.firewall.enable
       [ cfg.port ];

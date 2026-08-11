@@ -45,8 +45,9 @@ module Hnvr.Capture.Worker
 where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (concurrently)
 import Control.Exception (SomeException, catch)
-import Control.Monad (foldM)
+import Control.Monad (foldM, when)
 import Crypto.Hash (Digest, SHA256 (..), hash)
 import qualified Data.ByteArray as BA (convert)
 import Data.ByteString (ByteString)
@@ -56,7 +57,7 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime, addUTCTime, getCurrentTime)
-import Hnvr.Capture.Ffmpeg (RecordingConfig (..), Transport (..), recordingArgs)
+import Hnvr.Capture.Ffmpeg (RecordingConfig (..), Transport (..), audioArgs, recordingArgs)
 import Hnvr.Capture.Fmp4 (Fmp4State, Fragment (..), feed, finish, initial)
 import Hnvr.Core.Id (CameraId, HostId, Sha256 (..))
 import qualified Hnvr.Core.Logging as Log
@@ -65,7 +66,7 @@ import Hnvr.Core.Segment
     SegmentKind (..),
     toSegmentWritten,
   )
-import Hnvr.Core.Time (formatSegmentObjectKeyMs)
+import Hnvr.Core.Time (formatSegmentObjectKeyMs, formatSegmentObjectKeyMsExt)
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (events)
@@ -89,7 +90,11 @@ data CameraConfig = CameraConfig
   { ccId :: !CameraId,
     ccSlug :: !Text,
     ccRtspUrl :: !Text,
-    ccTransport :: !Transport
+    ccTransport :: !Transport,
+    -- | When True, the worker spawns a second ffmpeg (audioArgs) in
+    -- parallel to capture muxed audio as .m4a fragments. Per
+    -- @03-capture-and-storage.md@ §3. Default False.
+    ccRecordAudio :: !Bool
   }
   deriving stock (Eq, Show)
 
@@ -192,30 +197,45 @@ transition cfg cam recentRef = \case
         pure (FailedPermanent nextAt)
   Stopped -> pure Stopped
 
--- | One ffmpeg run cycle. Spawns ffmpeg, streams stdout into the Fmp4
--- parser, handles each emitted fragment (sha256 + S3 put + NATS publish),
--- waits for ffmpeg exit. Returns the exit code; never throws (caller
--- wraps in `catch`).
+-- | One ffmpeg run cycle. Spawns the video ffmpeg (always) and, when
+-- @ccRecordAudio@ is set, a second audio ffmpeg in parallel via
+-- 'concurrently'. The exit code returned to the driver loop is the
+-- video ffmpeg's — audio failures are isolated (logged, the audio
+-- fragment for that segment is just absent from S3) so they don't
+-- trigger worker-wide backoff.
+--
+-- Both ffmpegs read from the same RTSP source (typically
+-- @rtsp://localhost:8554/<slug>@, the mediamtx internal relay that
+-- became the single-puller point in M1.B). mediamtx holds the single
+-- camera pull; multiple local ffmpegs just multiplex on its internal
+-- fan-out so the camera's 1-session cap is never violated.
 runOnce :: CaptureConfig -> CameraConfig -> IO ExitCode
-runOnce cfg cam = do
-  let args =
-        recordingArgs
-          RecordingConfig
-            { rcUrl = ccRtspUrl cam,
-              rcTransport = ccTransport cam
+runOnce cfg cam
+  | ccRecordAudio cam = do
+      (videoEc, _) <- concurrently (runOnceSingle False) (runOnceSingle True)
+      pure videoEc
+  | otherwise = runOnceSingle False
+  where
+    runOnceSingle isAudio = do
+      let argsConfig =
+            RecordingConfig
+              { rcUrl = ccRtspUrl cam,
+                rcTransport = ccTransport cam
+              }
+          args = if isAudio then audioArgs argsConfig else recordingArgs argsConfig
+      when isAudio $ logInfo cam "spawning audio ffmpeg in parallel with video"
+      (_, mOut, _, ph) <-
+        createProcess
+          (proc "ffmpeg" args)
+            { std_out = CreatePipe,
+              std_err = Inherit
             }
-  (_, mOut, _, ph) <-
-    createProcess
-      (proc "ffmpeg" args)
-        { std_out = CreatePipe,
-          std_err = Inherit
-        }
-  hOut <- case mOut of
-    Just h -> pure h
-    Nothing -> fail "ffmpeg did not give us a stdout pipe"
-  hSetBuffering hOut (BlockBuffering (Just 65_536))
-  processStream cfg cam hOut initial Nothing
-  waitForProcess ph
+      hOut <- case mOut of
+        Just h -> pure h
+        Nothing -> fail "ffmpeg did not give us a stdout pipe"
+      hSetBuffering hOut (BlockBuffering (Just 65_536))
+      processStream cfg cam isAudio hOut initial Nothing
+      waitForProcess ph
 
 -- | Stream ffmpeg's stdout through the Fmp4 parser, handling each emitted
 -- fragment. Returns when stdout hits EOF.
@@ -224,17 +244,23 @@ runOnce cfg cam = do
 -- so its 'sEnd' can be set to the wall-clock arrival time of the next
 -- fragment (the standard HLS segmenter pattern). At EOF we flush it
 -- with 'sEnd = now' as a best-effort bound.
-processStream :: CaptureConfig -> CameraConfig -> Handle -> Fmp4State -> Maybe PendingFrag -> IO ()
-processStream cfg cam h st pending = do
+--
+-- @isAudio=True@ switches the S3 extension to @.m4a@ AND suppresses
+-- the NATS publish (audio is uploaded but not indexed in the segments
+-- table — v1 has no HLS audio integration; the data is preserved for
+-- a future slice that adds @EXT-X-MEDIA@ audio groups to the
+-- playlist).
+processStream :: CaptureConfig -> CameraConfig -> Bool -> Handle -> Fmp4State -> Maybe PendingFrag -> IO ()
+processStream cfg cam isAudio h st pending = do
   chunk <- B.hGetSome h 65_536
   if B.null chunk
     then do
-      for_ (finish st) (handleFragment cfg cam pending)
-      flushPending cfg cam pending
+      for_ (finish st) (handleFragment cfg cam isAudio pending)
+      flushPending cfg cam isAudio pending
     else do
       let (frags, st') = feed st chunk
-      newPending <- foldM (handleFragment cfg cam) pending frags
-      processStream cfg cam h st' newPending
+      newPending <- foldM (handleFragment cfg cam isAudio) pending frags
+      processStream cfg cam isAudio h st' newPending
 
 -- | A previously-received media fragment held back so we can stamp its
 -- @sEnd@ when the next one arrives.
@@ -245,38 +271,50 @@ data PendingFrag = PendingFrag
   }
 
 -- | Compute sha256, push to S3 (or spool), publish 'SegmentWritten' on
--- NATS (if Bus configured). Catches per-fragment errors so one bad put
--- doesn't kill the whole stream.
+-- NATS (if Bus configured AND not the audio stream). Catches per-
+-- fragment errors so one bad put doesn't kill the whole stream.
 --
 -- For 'MediaFragment', this enqueues the fragment as the new pending and
 -- (if there was already a pending) publishes that one with
 -- @sEnd = current wall-clock@. Returns the updated pending state.
-handleFragment :: CaptureConfig -> CameraConfig -> Maybe PendingFrag -> Fragment -> IO (Maybe PendingFrag)
-handleFragment cfg cam pending frag =
+--
+-- @isAudio=True@ switches the S3 extension to @.m4a@ and suppresses the
+-- NATS publish (audio is uploaded but not indexed in the segments table
+-- — v1 has no HLS audio integration).
+handleFragment :: CaptureConfig -> CameraConfig -> Bool -> Maybe PendingFrag -> Fragment -> IO (Maybe PendingFrag)
+handleFragment cfg cam isAudio pending frag =
   case frag of
     InitFragment bs -> do
-      let key = ccSlug cam <> "/init.mp4"
+      let initName = if isAudio then "init.m4a" else "init.mp4"
+          key = ccSlug cam <> "/" <> initName
       storeOrUpload cfg cam key bs "init"
       pure pending
     MediaFragment _tfdt bs -> do
       ts <- getCurrentTime
       let sha = sha256Bytes bs
-          key = formatSegmentObjectKeyMs (ccSlug cam) ts
+          ext = if isAudio then "m4a" else "mp4"
+          key = formatSegmentObjectKeyMsExt (ccSlug cam) ts ext
       -- Upload the current fragment immediately (S3 latency unchanged).
-      storeOrUpload cfg cam key bs "media"
+      storeOrUpload cfg cam key bs (if isAudio then "audio" else "media")
       -- Publish the previous pending (if any) now that we know its end.
-      flushPendingAt cfg cam ts pending
+      -- Audio path skips NATS — no DB rows for audio in v1.
+      if isAudio
+        then pure ()
+        else flushPendingAt cfg cam ts pending
       pure (Just (PendingFrag ts bs sha))
     `catch` \(e :: SomeException) -> do
       logErr cam $ "fragment handler failed: " <> show e
       pure pending
 
 -- | Flush the pending fragment at EOF using the current wall-clock as
--- the best-effort @sEnd@.
-flushPending :: CaptureConfig -> CameraConfig -> Maybe PendingFrag -> IO ()
-flushPending cfg cam pending = do
+-- the best-effort @sEnd@. Audio path is a no-op (no pending was ever
+-- recorded).
+flushPending :: CaptureConfig -> CameraConfig -> Bool -> Maybe PendingFrag -> IO ()
+flushPending cfg cam isAudio pending = do
   now <- getCurrentTime
-  flushPendingAt cfg cam now pending
+  if isAudio
+    then pure ()
+    else flushPendingAt cfg cam now pending
 
 -- | Publish the pending 'SegmentWritten' on @hnvr.events@ with the
 -- supplied end timestamp. No-op if there is no pending fragment or no

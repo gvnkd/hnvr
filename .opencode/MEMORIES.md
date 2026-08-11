@@ -1110,13 +1110,50 @@ ffprobe notes:
             9.12). `MigrationResult a` is parameterized by error type
             (`String` for init, `ByteString` for script) — `handleResult`
             is `Show a => String -> MigrationResult a -> IO ()`.
-      - ⏳ **M1+M2 integration test (manual):** boot leader via
-            `devenv up` + `./result/bin/hnvr-leader`, add a camera via
-            `/NewCamera`, verify `mc ls --recursive local/hnvr-recordings/<slug>/`
-            shows segments within ~5 s, verify `psql -c 'SELECT count(*) FROM segments'`
-            increments. See PHASE1_COMPLETION_MILESTONES.md §6 checklist.
-      - [ ] M3 (camera password decrypt path), M4 (sops-nix wiring),
-            M5 (audio), M6 (retention sweep), M7 (spool drainer),
+      - ✅ **M1+M2 integration test (verified Aug 11 2026):** all 3
+            Sergey's cameras record continuously — 5633 segments in
+            MinIO + matching rows in Postgres; mediamtx-as-single-
+            puller architecture confirmed working (worker ffmpegs
+            pull from rtsp://localhost:8554/<slug>, mediamtx holds
+            single camera RTSP session, all 3 cameras' WHEP live
+            view works concurrently with recording).
+      - ✅ **M3-M7 (Aug 11 2026, post-M1 stability):**
+          * M3 — `password_enc`/`password_nonce` decrypt path is now
+            wired via `TestCryptoCameraAction` (POST endpoint + Show
+            view "Test password decryption" button). Catches the
+            silent HNVR_DATA_KEY rotation bug. Architectural reality:
+            the mediamtx-as-single-puller change made the recording
+            path's credential needs moot (worker pulls from local
+            mediamtx, no creds), so password_enc stays as future-
+            proofing for UI rotation/audit, not a hot-path concern.
+          * M4 — sops-nix flake input uncommented, `nix/secrets.nix`
+            module declares `services.hnvr.secrets.{enable,sopsFile,
+            ageKeyFile}` + 8 sops.secrets.* entries. `nix/module.nix`
+            preStart generates per-KEY systemd EnvironmentFile
+            fragments from /run/secrets/* (sops writes one value per
+            file; systemd wants KEY=value). Dev (devenv) unaffected —
+            sops is opt-in via `services.hnvr.secrets.enable = true`.
+          * M5 — `Hnvr.Capture.Ffmpeg.audioArgs` (the third ffmpeg per
+            `03-capture-and-storage.md` §3). `Worker.runOnce` spawns
+            it in parallel via `concurrently` when `ccRecordAudio=True`.
+            Audio fragments use `.m4a` extension via new
+            `formatSegmentObjectKeyMsExt` helper. NATS publish skipped
+            for audio (no DB rows for v1; HLS audio group tagged for
+            a future slice). Probe now does 2 ffprobe calls (v:0 + a:0)
+            and populates `probeAudio`.
+          * M6 — `Hnvr.Web.RetentionSweeper` hourly cron. Trust-the-DB
+            sweep: queries `object_key` from `segments` past cutoff,
+            deletes from S3 + Postgres in lockstep. Per-camera
+            retention_days column drives the cutoff.
+          * M7 — `Hnvr.Capture.SpoolDrainer` process-wide async
+            started by CaptureSupervisor. 30 s drain interval, 60-
+            file-per-camera cap (drops oldest), re-uploads spooled
+            fragments to S3 when connectivity returns.
+      - ✅ **M8 (Aug 11 2026):** doc cleanup — `design_docs/02-tech-stack.md`
+            amazonka→minio-hs updated; HealthCache IORef-is-write-only
+            Haddock corrected; migrations/0001-initial.sql gained the
+            missing `segments_start_ts_brin` BRIN index from the design.
+      - **Phase 1 — Recording MVP genuinely complete** (Aug 11 2026).
             M8 (doc cleanup) — see `.opencode/PHASE1_COMPLETION_MILESTONES.md`.
 - [~] **Phase 2 — Live View + Multi-Host. Code complete (Aug 10 2026),
       live VM test pending**. Slices shipped:

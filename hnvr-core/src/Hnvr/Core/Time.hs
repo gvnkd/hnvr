@@ -7,6 +7,7 @@
 module Hnvr.Core.Time
   ( formatSegmentObjectKey,
     formatSegmentObjectKeyMs,
+    formatSegmentObjectKeyMsExt,
     formatSegmentDir,
     formatYmdHms,
     formatYmdHmsMs,
@@ -34,7 +35,14 @@ formatSegmentObjectKey slug ts =
 -- wall-clock second (HEVC keyframe-aligned fragmentation on cam-196).
 formatSegmentObjectKeyMs :: Text -> UTCTime -> Text
 formatSegmentObjectKeyMs slug ts =
-  slug <> "/" <> formatYmdHmsMs ts <> ".mp4"
+  formatSegmentObjectKeyMsExt slug ts "mp4"
+
+-- | Generalised version: caller picks the extension. Used by the audio
+-- recording path (M5) which produces @.m4a@ objects instead of @.mp4@.
+-- Extension does NOT include the dot — pass @"m4a"@, not @".m4a"@.
+formatSegmentObjectKeyMsExt :: Text -> UTCTime -> Text -> Text
+formatSegmentObjectKeyMsExt slug ts ext =
+  slug <> "/" <> formatYmdHmsMs ts <> "." <> ext
 
 -- | @cam-196/2026-08-07@ — directory prefix; useful for @ListObjectsV2@
 -- queries during retention sweep.

@@ -23,6 +23,7 @@ module Hnvr.Capture.Ffmpeg
 
     -- * Args
     recordingArgs,
+    audioArgs,
 
     -- * Process (typed-process)
     recordingProc,
@@ -110,3 +111,52 @@ recordingArgs cfg =
 -- redirect or pipe it (typically @setStdout createSource@).
 recordingProc :: RecordingConfig -> ProcessConfig () () ()
 recordingProc cfg = proc "ffmpeg" (recordingArgs cfg)
+
+-- | Raw argv list for the audio recording ffmpeg. Same source URL and
+-- transport as the video ffmpeg; the difference is @-vn -c:a copy@
+-- (drop video, copy audio codec verbatim — zero CPU). Output is fMP4
+-- fragments muxed as .m4a (MPEG-4 audio-only).
+--
+-- Per @03-capture-and-storage.md@ §3 this is the third optional ffmpeg
+-- spawned when the camera's @record_audio@ flag is true. It runs in
+-- parallel with the video ffmpeg in 'Hnvr.Capture.Worker.runOnce'
+-- (each owns its own RTSP session through mediamtx's relay, so the
+-- 1-session camera limit doesn't apply — both ffmpegs connect to
+-- rtsp://localhost:8554/<slug>, mediamtx holds the single camera pull).
+audioArgs :: RecordingConfig -> [String]
+audioArgs cfg =
+  [ "-hide_banner",
+    "-loglevel",
+    "error",
+    "-fflags",
+    "+genpts+igndts+discardcorrupt",
+    "-rtsp_transport",
+    transportArg (rcTransport cfg),
+    "-timeout",
+    "5000000",
+    "-i",
+    T.unpack (rcUrl cfg),
+    "-user_agent",
+    "HNVR/0.1",
+    "-reconnect",
+    "1",
+    "-reconnect_streamed",
+    "1",
+    "-reconnect_delay_max",
+    "5",
+    "-vn",
+    "-c:a",
+    "copy",
+    "-f",
+    "mp4",
+    "-movflags",
+    "+frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset+faststart",
+    "-frag_duration",
+    "1000000",
+    "-reset_timestamps",
+    "1",
+    "pipe:1"
+  ]
+  where
+    transportArg TcpTransport = "tcp"
+    transportArg UdpTransport = "udp"
