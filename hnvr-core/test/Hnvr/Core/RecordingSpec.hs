@@ -7,6 +7,7 @@ module Hnvr.Core.RecordingSpec (tests) where
 import Data.List (sortOn)
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (NominalDiffTime, UTCTime (..), addUTCTime, diffUTCTime, secondsToDiffTime)
+import Data.UUID (UUID)
 import Hnvr.Core.Recording
   ( Gap (..),
     Recording (..),
@@ -43,6 +44,17 @@ tests =
           testCase "input order does not matter" $ do
             let shuffled = [mkSpan 600 5, mkSpan 5 5, mkSpan 0 5, mkSpan 605 5]
             assertEqual "" 2 (length (groupRecordings 30 shuffled)),
+          testCase "interleaved cameras never merge" $ do
+            -- Two cameras capturing concurrently: sub-second interleave
+            -- would merge on a camera-agnostic timeline.
+            let a = [mkSpanCam camA 0 5, mkSpanCam camA 5 5, mkSpanCam camA 10 5]
+                b = [mkSpanCam camB 0 5, mkSpanCam camB 5 5, mkSpanCam camB 10 5]
+                rs = groupRecordings 30 (a <> b)
+            assertEqual "recordings" 2 (length rs)
+            assertEqual
+              "cameras"
+              [camA, camB]
+              (map (spCameraId . head . recSpans) rs),
           testCase "sub-tolerance hole surfaces via recGaps" $ do
             let rec = head (groupRecordings 30 [mkSpan 0 5, mkSpan 15 5, mkSpan 20 5])
             -- hole between end=5 and start=15 is 10s (> 1.5s gapMin, < 30s split)
@@ -82,11 +94,19 @@ base = UTCTime (fromGregorian 2026 8 11) (secondsToDiffTime 0)
 baseT :: Int -> UTCTime
 baseT off = addUTCTime (fromIntegral off) base
 
+camA, camB :: UUID
+camA = read "00000000-0000-0000-0000-00000000000a"
+camB = read "00000000-0000-0000-0000-00000000000b"
+
 -- | A segment starting @off@ seconds after 'base', lasting @dur@ seconds.
 mkSpan :: Int -> Int -> Span
-mkSpan off dur =
+mkSpan = mkSpanCam camA
+
+mkSpanCam :: UUID -> Int -> Int -> Span
+mkSpanCam cam off dur =
   Span
-    { spStart = baseT off,
+    { spCameraId = cam,
+      spStart = baseT off,
       spEnd = baseT (off + dur),
       spBytes = 100,
       spHasAudio = False,
@@ -107,7 +127,8 @@ instance Arbitrary SpansInput where
       mkSpans t (g : gs) =
         let s =
               Span
-                { spStart = addUTCTime (fromIntegral t) base,
+                { spCameraId = camA,
+                  spStart = addUTCTime (fromIntegral t) base,
                   spEnd = addUTCTime (fromIntegral (t + 1)) base,
                   spBytes = 100,
                   spHasAudio = False,

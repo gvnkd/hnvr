@@ -19,6 +19,7 @@ module Hnvr.Core.Recording
     Recording (..),
     Gap (..),
     groupRecordings,
+    groupRecordingsBy,
     recSegmentCount,
     recBytes,
     recHasAudio,
@@ -33,12 +34,14 @@ import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime)
+import Data.UUID (UUID)
 import Data.Word (Word64)
 
 -- | Minimal projection of a @segments@ row needed for grouping. The web
 -- layer projects IHP @Segment@ records into this shape at the call site.
 data Span = Span
-  { spStart :: !UTCTime,
+  { spCameraId :: !UUID,
+    spStart :: !UTCTime,
     spEnd :: !UTCTime,
     spBytes :: !Word64,
     spHasAudio :: !Bool,
@@ -64,18 +67,22 @@ data Recording = Recording
   }
   deriving stock (Eq, Show)
 
--- | Group spans into recordings. Input may be unordered; output is
--- sorted by 'recStart'. Two consecutive (sorted) spans belong to
--- different recordings iff @spStart next - spEnd prev > splitAfter@.
-groupRecordings :: NominalDiffTime -> [Span] -> [Recording]
-groupRecordings splitAfter spans = go (sortOn spStart spans)
+-- | Group spans into recordings, one group per camera (or any key).
+-- Segments from different cameras interleave at sub-second offsets on a
+-- shared timeline, so grouping MUST partition by camera first — the
+-- plain 'groupRecordings' is only correct for a single-camera input.
+-- Input may be unordered; output is sorted by 'recStart'. Two
+-- consecutive (sorted, same-key) spans belong to different recordings
+-- iff @spStart next - spEnd prev > splitAfter@.
+groupRecordingsBy :: (Ord k) => (Span -> k) -> NominalDiffTime -> [Span] -> [Recording]
+groupRecordingsBy key splitAfter spans = go (sortOn (\s -> (key s, spStart s)) spans)
   where
     go [] = []
     go (x : xs) =
       let (run, rest) = collect [x] x xs
        in mkRecording (reverse run) : go rest
     collect run prev (y : ys)
-      | diffUTCTime (spStart y) (spEnd prev) > splitAfter =
+      | key y /= key prev || diffUTCTime (spStart y) (spEnd prev) > splitAfter =
           (run, y : ys)
       | otherwise = collect (y : run) y ys
     collect run _ [] = (run, [])
@@ -85,6 +92,11 @@ groupRecordings splitAfter spans = go (sortOn spStart spans)
           recEnd = maximum (map spEnd run),
           recSpans = run
         }
+
+-- | Single-camera grouping: every span belongs to the same group.
+-- Prefer 'groupRecordingsBy' with 'spCameraId' for mixed-camera input.
+groupRecordings :: NominalDiffTime -> [Span] -> [Recording]
+groupRecordings = groupRecordingsBy spCameraId
 
 recSegmentCount :: Recording -> Int
 recSegmentCount = length . recSpans

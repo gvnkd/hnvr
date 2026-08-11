@@ -118,7 +118,6 @@ instance Controller ArchiveController where
         fetch q3
 
     let spans = map toSpan segments
-        objectKeyToCam = M.fromList [(s.objectKey, s.cameraId) | s <- segments]
         recs0 = groupRecordings splitTolerance spans
         recs1 =
           maybe
@@ -129,24 +128,23 @@ instance Controller ArchiveController where
         total = length recs
         totalPages = max 1 ((total + pageSize - 1) `div` pageSize)
         pageRecs = take pageSize (drop ((page - 1) * pageSize) recs)
-        rows = map (toRow slugMap objectKeyToCam) pageRecs
+        rows = map (toRow slugMap) pageRecs
         isAdmin = maybe False (.isAdmin) (currentUserOrNothing @User)
         queryString = browseQueryString fltCamera fltFrom fltTo fltQ fltMinDur
     render IndexView {..}
     where
       toSpan s =
         Span
-          { spStart = s.startTs,
+          { spCameraId = s.cameraId,
+            spStart = s.startTs,
             spEnd = s.endTs,
             spBytes = fromIntegral s.bytes,
             spHasAudio = s.hasAudio,
             spObjectKey = s.objectKey
           }
-      -- The camera id isn't carried by the pure Span (it's constant per
-      -- query when filtered); recover it from the DB rows by object key.
-      toRow slugs keyToCam r =
+      toRow slugs r =
         let camUuid = case recSpans r of
-              (s : _) -> fromMaybe UUID.nil (M.lookup (spObjectKey s) keyToCam)
+              (s : _) -> spCameraId s
               [] -> UUID.nil
          in RecordingRow
               { rrCameraId = UUID.toText camUuid,

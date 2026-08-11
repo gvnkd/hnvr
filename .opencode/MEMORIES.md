@@ -1058,6 +1058,16 @@ ffprobe notes:
          `page.locator('form[action="/Archive"] …')` whenever a page
          carries more than one form.
 
+    81. **Timeline grouping must partition by camera** (Aug 11 2026) —
+         `groupRecordings` on a mixed-camera segment list merged all
+         three cameras into a handful of cross-camera "recordings"
+         (concurrent captures interleave at sub-second offsets, far
+         below the 30s split tolerance). Symptom: /Archive showed 4
+         rows all labeled low_ent instead of ~12 across 3 cameras.
+         `Hnvr.Core.Recording.Span` now carries `spCameraId` and
+         grouping is `groupRecordingsBy spCameraId`. Any future
+         timeline/density logic has the same constraint.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
