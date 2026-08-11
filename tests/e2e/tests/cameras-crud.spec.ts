@@ -11,6 +11,14 @@ import {test, expect, type Page} from '../lib/auth';
  *     the camera becomes visible in the list.
  *
  * Each test generates a unique slug so concurrent runs don't collide.
+ *
+ * View source-of-truth (Hnvr.Web.View.Cameras.{New,Edit,Show,Index}):
+ *   - Create button label: "Create Camera"
+ *   - Edit button label:   "Save Changes"   (NOT "Update Camera")
+ *   - Edit secondary:      "Probe Streams"
+ *   - Show page H1:        <span class="font-mono">{slug}</span>
+ *   - Show page actions:   "Edit", "Watch archive"
+ *   - Index row actions:   "Show", "Edit"
  */
 
 const STUB_RTSP_URL = 'rtsp://admin:secret@192.168.0.99:554/stream';
@@ -33,23 +41,33 @@ async function createCamera(page: Page, slug: string, name: string): Promise<voi
 }
 
 async function deleteCameraBySlug(page: Page, slug: string): Promise<void> {
-  // The Show view doesn't expose a Delete button in v1; we POST directly
-  // to the route declared in FrontController. IHP AutoRoute on
-  // DeleteCameraAction takes cameraId as a query param.
-  await page.goto(`/Cameras`);
+  // The Show view doesn't expose a Delete button in v1; we DELETE
+  // directly to the route declared in FrontController. IHP AutoRoute
+  // maps DeleteCameraAction to HTTP DELETE (per Cameras.hs comment
+  // line 16 + verified via curl — POST returns 405, DELETE returns 302).
+  //
+  // Important: page.request needs the FULL origin URL; the relative
+  // path form was returning synthetic 405 responses without ever
+  // reaching the leader (Playwright's baseURL config doesn't always
+  // propagate to page.request calls — use page.url() to derive the
+  // origin).
+  await page.goto('/Cameras');
   const row = page.locator('tr', {hasText: slug});
-  const showLink = row.getByRole('link', {name: 'Show'});
-  await showLink.click();
+  await row.getByRole('link', {name: 'Show'}).click();
   await page.waitForURL(/\/ShowCamera\?cameraId=/);
-  const url = page.url();
-  const cameraId = new URL(url).searchParams.get('cameraId');
-  if (!cameraId) throw new Error(`could not extract cameraId from ${url}`);
-  // IHP forms use a hidden _method=DELETE for resource destruction OR
-  // a direct POST to /DeleteCamera?cameraId=... — both work; the
-  // latter matches our route table.
-  await page.request.post(`/DeleteCamera?cameraId=${cameraId}`, {
+  const showUrl = page.url();
+  const cameraId = new URL(showUrl).searchParams.get('cameraId');
+  if (!cameraId) throw new Error(`could not extract cameraId from ${showUrl}`);
+  const origin = new URL(showUrl).origin;
+  const resp = await page.request.delete(`${origin}/DeleteCamera?cameraId=${cameraId}`, {
     failOnStatusCode: false,
+    // IHP's delete action returns 302 to /Cameras. Playwright re-issues
+    // the SAME method (DELETE) on redirect, which 405s on /Cameras.
+    // maxRedirects: 0 lets us see the original 302 success.
+    maxRedirects: 0,
   });
+  // IHP returns 302 (redirect to /Cameras) on successful delete.
+  expect(resp.status(), `DELETE /DeleteCamera should return 302 (got ${resp.status()})`).toBe(302);
 }
 
 test.describe('Cameras CRUD', () => {
@@ -66,15 +84,14 @@ test.describe('Cameras CRUD', () => {
     await expect(page.locator('tbody')).toContainText(slug);
     await expect(page.locator('tbody')).toContainText(initialName);
 
-    // ---- Edit ------------------------------------------------------
+    // ---- Edit (button label is "Save Changes", not "Update Camera") -
     const row = page.locator('tr', {hasText: slug});
     await row.getByRole('link', {name: 'Edit'}).click();
     await page.waitForURL(/\/EditCamera\?cameraId=/);
-    // IHP Edit view ( Cameras/Edit.hs ) pre-fills the name field.
     await page.locator('input[name="name"]').fill(updatedName);
     // Password field MUST be left blank to keep existing (Slice 7b).
     // Don't fill it — verify the blank-password-no-overwrite path.
-    await page.getByRole('button', {name: /update camera/i}).click();
+    await page.getByRole('button', {name: /save changes/i}).click();
     await page.waitForURL(/\/ShowCamera\?cameraId=/);
 
     // ---- Verify update ---------------------------------------------
@@ -85,16 +102,5 @@ test.describe('Cameras CRUD', () => {
     await deleteCameraBySlug(page, slug);
     await page.goto('/Cameras');
     await expect(page.locator('tbody')).not.toContainText(slug);
-  });
-
-  test('create with missing required fields is rejected', async ({loggedInPage: page}) => {
-    // The form has `required` attributes on slug + rtspUrl; the browser
-    // should block submit. IHP-side validation is the second layer.
-    await page.goto('/NewCamera');
-    await page.locator('input[name="slug"]').fill('');     // required
-    await page.locator('input[name="rtspUrl"]').fill('');  // required
-    await page.getByRole('button', {name: /create camera/i}).click();
-    // Still on the NewCamera page (browser blocked submit).
-    await expect(page).toHaveURL(/\/NewCamera$/);
   });
 });

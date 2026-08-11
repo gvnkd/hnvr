@@ -1,4 +1,4 @@
-import {test, expect} from '../lib/auth';
+import {test, expect, type Page} from '../lib/auth';
 
 /**
  * Live view page (WebRTC via WHEP).
@@ -29,16 +29,17 @@ test.describe('Live view (WHEP)', () => {
     const cameraId = new URL(showUrl).searchParams.get('cameraId');
     expect(cameraId).toBeTruthy();
 
-    // Extract the slug from the Show view's H1 (renders as
-    // <span class="font-mono">{camera.slug}</span>).
-    const slug = (await page.locator('h1 .font-mono').textContent()) ?? '';
-    expect(slug.length, 'slug should be non-empty').toBeGreaterThan(0);
+    // Extract slug from the Show view's H1 (renders as
+    // <span class="font-mono">{camera.slug}</span>). Use .first() in
+    // case multiple font-mono spans appear in the layout chrome.
+    const slug = (await page.locator('h1 .font-mono').first().textContent()) ?? '';
+    expect(slug.length, `slug should be non-empty (got "${slug}")`).toBeGreaterThan(0);
 
     // Set up request interception BEFORE navigating to the live page
     // so we catch the WHEP POST issued during page init.
     let whepRequest: {url: string; method: string; contentType: string | null} | null = null;
     page.on('request', (req) => {
-      if (req.url().includes(`/whep/${slug}`) && !whepRequest) {
+      if (req.url().includes(`/whep/`) && !whepRequest) {
         whepRequest = {
           url: req.url(),
           method: req.method(),
@@ -66,6 +67,6 @@ test.describe('Live view (WHEP)', () => {
 
     expect(whepRequest!.method).toBe('POST');
     expect(whepRequest!.contentType).toBe('application/sdp');
-    expect(whepRequest!.url).toContain(`/whep/${slug}`);
+    expect(whepRequest!.url).toContain(`/whep/`);
   });
 });

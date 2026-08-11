@@ -3,20 +3,25 @@ import {test, expect} from '../lib/auth';
 /**
  * Archive playback page.
  *
- * Verifies the page renders the `<video>` element, hls.js is loaded,
- * and the playlist URL is constructed correctly. Does NOT assert the
- * video reaches HAVE_ENOUGH_DATA — that requires actual fMP4 segments
- * in S3 plus a real presigned-URL handshake. The "Ready" status branch
- * is intentionally not asserted; instead we check the loader + the
- * JS-side error path (which fires when the playlist URL returns the
- * empty placeholder from `emptyPlaylist` or a real m3u8 with no
- * segments).
+ * Verifies the page renders the `<video>` element, the hls.js script tag
+ * is loaded, and the playlist URL is fetched client-side. Does NOT
+ * assert the video reaches HAVE_ENOUGH_DATA — that requires actual
+ * fMP4 segments in SeaweedFS plus a presigned-URL handshake; future
+ * slice once a real RTSP camera is wired.
  *
- * See design_docs/05-web-and-live-view.md §"Archive playback" and
- * Hnvr.Web.View.Archive.Player for the source of the JS contract.
+ * The status pill has three possible initial render paths
+ * (Hnvr.Web.View.Archive.Player):
+ *   - "Loading player…"  (HTML literal; shown for one frame)
+ *   - "Native HLS (Safari)"  (chromium headless-shell reports
+ *     video.canPlayType('application/vnd.apple.mpegurl') as 'maybe',
+ *     which is truthy — the Safari branch fires)
+ *   - "Ready" / "Error: …" / "HLS not supported …"
+ *     (hls.js loadSource outcome; depends on real segments)
+ *
+ * We assert just the elements that are stable across these branches.
  */
 test.describe('Archive playback', () => {
-  test('page renders video element + hls.js loader + status pill', async ({loggedInPage: page}) => {
+  test('page renders video element + hls.js loader + issues playlist GET', async ({loggedInPage: page}) => {
     // Pick the first camera from the index. If no cameras exist, the
     // Cameras CRUD test created at least one; otherwise we skip with a
     // clear message.
@@ -31,6 +36,13 @@ test.describe('Archive playback', () => {
     const cameraId = new URL(showUrl).searchParams.get('cameraId');
     expect(cameraId).toBeTruthy();
 
+    // Catch the playlist GET the JS will issue on page load. Set up
+    // the listener BEFORE navigating so we don't miss it.
+    const playlistRequest = page.waitForRequest(
+      (req) => req.url().includes('/PlaylistArchive') && req.method() === 'GET',
+      {timeout: 10_000}
+    );
+
     // Navigate to the archive player for this camera.
     await page.goto(`/PlayerArchive?cameraId=${cameraId}`);
 
@@ -42,21 +54,14 @@ test.describe('Archive playback', () => {
     // succeed in CI without network; we assert the tag, not the load).
     await expect(page.locator('script[src*="hls.js"]')).toHaveCount(1);
 
-    // Status pill is present and starts in "Loading" state.
+    // Status pill is present (text varies by branch — see test docblock).
     const status = page.locator('#hnvr-status');
     await expect(status).toBeVisible();
-    await expect(status).toHaveText(/Loading player/);
 
-    // The playlist URL is built client-side from window.location plus
-    // /PlaylistArchive?cameraId=…; verify the JS issued a fetch to it
-    // (regardless of whether the response was empty or real).
-    const playlistRequest = page.waitForRequest(
-      (req) => req.url().includes('/PlaylistArchive') && req.method() === 'GET',
-      {timeout: 10_000}
-    ).catch(() => null);
-    // Re-load to catch the request from the start.
-    await page.goto(`/PlayerArchive?cameraId=${cameraId}`);
+    // hls.js (or the native-HLS branch) issues a playlist GET regardless
+    // of which status path fired.
     const req = await playlistRequest;
-    expect(req, 'expected a GET /PlaylistArchive request from hls.js').not.toBeNull();
+    expect(req, 'expected a GET /PlaylistArchive request').not.toBeNull();
+    expect(req!.method()).toBe('GET');
   });
 });
