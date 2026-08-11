@@ -1086,6 +1086,21 @@ ffprobe notes:
          dedicated out-link for the app: `nix build .#hnvr-web -o
          result-web` and run `./result-web/bin/hnvr-leader`.
 
+    84. **S3 row-key deletes are blind to legacy/orphan objects**
+         (Aug 12 2026) — rows written before the ms-key fix store
+         second-precision keys while the objects are ms-precision, and
+         S3 DELETE of a nonexistent key silently succeeds. Purging
+         via DB keys alone orphaned ~9.8k objects (4.2 GB) and wedged
+         dev MinIO at its free-drive threshold (`XMinioStorageFull`).
+         `PurgeRecordingAction` now also lists `<slug>/<date>/` per day
+         in the window and deletes by key-embedded timestamp
+         (`parseKeyTimestamp`), independent of the rows. `init.mp4`
+         never matches the segment layout and is deliberately kept.
+         Companion dev fix: `HNVR_SPOOL_DIR` is now set in the devenv
+         env block — NodeMain's `/var/lib/hnvr/spool` default is
+         unwritable outside NixOS, so the spool fallback had been
+         silently failing in dev.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.

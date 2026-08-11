@@ -36,7 +36,7 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Text as T
-import Data.Time.Clock (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
+import Data.Time.Clock (NominalDiffTime, UTCTime (..), addUTCTime, diffUTCTime, getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.UUID (UUID)
@@ -206,6 +206,7 @@ instance Controller ArchiveController where
             mTo = nonemptyParam "to"
         case (mFrom >>= parseWhen, mTo >>= parseWhen) of
           (Just from, Just to) -> do
+            camera <- fetch cameraId
             let cameraUuid = case cameraId of Id u -> u :: UUID
             segments <-
               query @Segment
@@ -214,14 +215,18 @@ instance Controller ArchiveController where
                 |> filterWhereLessThanOrEqualTo (#startTs, to)
                 |> fetch
             mCfg <- liftIO readS3Config
-            forM_ mCfg $ \cfg -> liftIO
-              $ forM_ segments
-              $ \s ->
-                S3.deleteObject (S3.connectInfo cfg) (S3.s3cBucket cfg) s.objectKey
-                  `E.catch` \(_ :: E.SomeException) -> pure ()
+            nObjects <- case mCfg of
+              Nothing -> pure 0
+              Just cfg ->
+                liftIO (purgeObjects cfg camera.slug from to (map (.objectKey) segments))
             deleteRecords segments
-            setSuccessMessage (tshow (length segments) <> " segment(s) deleted")
-          _ -> setErrorMessage "Delete requires valid from/to timestamps"
+            setSuccessMessage
+              ( tshow (length segments)
+                  <> " segment row(s) deleted; "
+                  <> tshow nObjects
+                  <> " S3 delete(s) issued"
+              )
+          _ -> setErrorMessage "Purge requires valid from/to timestamps"
     redirectTo ArchiveAction
 
 -- ---- window resolution ---------------------------------------------
@@ -309,6 +314,46 @@ browseQueryString mCam mFrom mTo mQ mMinDur =
   where
     p _ Nothing = ""
     p name (Just v) = "&" <> name <> "=" <> v
+
+-- | Delete every S3 object covering the window: row keys PLUS orphans
+-- found by prefix listing. Orphans exist because legacy rows stored
+-- second-precision keys while uploads used millisecond precision
+-- (pre-fix worker, pitfall #25 class) — row-key deletes were silent
+-- no-ops for those segments. The prefix pass lists
+-- @\<slug\>/\<YYYY-MM-DD\>/@ per day in the window and deletes objects
+-- whose key-embedded timestamp falls inside @[from, to]@, independent
+-- of what the (possibly already-deleted) DB rows said.
+purgeObjects :: S3.S3Config -> Text -> UTCTime -> UTCTime -> [Text] -> IO Int
+purgeObjects cfg slug from to rowKeys = do
+  let ci = S3.connectInfo cfg
+      bucket = S3.s3cBucket cfg
+      days = enumFromTo (utctDay from) (utctDay to)
+  listed <- fmap concat $ forM days $ \d ->
+    S3.listObjectKeys ci bucket (slug <> "/" <> tshow d <> "/")
+      `E.catch` \(_ :: E.SomeException) -> pure []
+  let orphanKeys =
+        [ k
+        | k <- listed,
+          Just ts <- [parseKeyTimestamp slug k],
+          ts >= from && ts <= to
+        ]
+      keys = nub (rowKeys <> orphanKeys)
+  forM_ keys $ \k ->
+    S3.deleteObject ci bucket k
+      `E.catch` \(_ :: E.SomeException) -> pure ()
+  pure (length keys)
+
+-- | Extract the capture timestamp from an object key
+-- (@slug/2026-08-11/15-02-55[.442].mp4@). Returns Nothing for keys
+-- that don't match the segment layout (e.g. @init.mp4@ — never
+-- purged; future playlists still need it).
+parseKeyTimestamp :: Text -> Text -> Maybe UTCTime
+parseKeyTimestamp slug key = do
+  rest <- T.stripPrefix (slug <> "/") key
+  body <- T.stripSuffix ".mp4" rest
+  let s = T.unpack body
+  parseTimeM True defaultTimeLocale "%Y-%m-%d/%H-%M-%S%Q" s
+    <|> parseTimeM True defaultTimeLocale "%Y-%m-%d/%H-%M-%S" s
 
 -- ---- playlist rendering ---------------------------------------------
 

@@ -641,6 +641,11 @@
                 # Stable so dev DB rows stay decryptable across sessions;
                 # dev-only — production sources from sops-nix.
                 HNVR_DATA_KEY = "j1kGE9Y274/RNq1+TJWKeS4RDocw5+Uu05q3KPKm7XM=";
+                # Spool dir for capture segments when S3 is unreachable
+                # (NodeMain defaults to /var/lib/hnvr/spool, unwritable
+                # for the dev user — spool fallback silently failed in
+                # dev until this was set).
+                HNVR_SPOOL_DIR = "${config.env.DEVENV_STATE}/spool";
               };
 
               enterShell = preCommit.shellHook + ''
