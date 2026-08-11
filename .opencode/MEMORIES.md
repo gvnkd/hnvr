@@ -141,31 +141,62 @@ nix fmt            # nixpkgs-fmt on .nix files
 
 # Pre-commit checks (ormolu, hlint, nixpkgs-fmt)
 nix build .#checks.x86_64-linux.pre-commit
+
+# ---- Test suite (Aug 11 2026) -----------------------------------------
+# All Haskell unit + property tests (fast lane; no services required)
+cabal test hnvr-core hnvr-nats hnvr-storage hnvr-capture
+
+# Same + integration tests against devenv MinIO/NATS (must `devenv up` first)
+HNVR_TEST_INTEGRATION=1 cabal test hnvr-nats hnvr-storage
+
+# NixOS leader smoke test (boots VM, curls /healthz + /NewSession; ~10 s)
+nix build .#checks.x86_64-linux.hnvr-leader-smoke
+
+# Playwright UI tests — chromium launches cleanly inside nix develop
+# (chromiumRuntimeDeps in flake.nix wires NIX_LD_LIBRARY_PATH).
+# Requires devenv services up + a leader on :18001.
+cd tests/e2e && npm install && npx playwright install chromium   # one-time
+nix develop --command bash -c 'cd tests/e2e && npm test'           # ~6 s
 ```
 
 ## Repo layout
 
 ```
 hnvr/
-├── design_docs/         9 files, ~3000 lines, authoritative design
-├── .github/workflows/   ci.yml (nix flake check + nix build .#hnvr-web,
-│                                       .#hnvr-nats; no cabal build — see #14)
+├── design_docs/         11 files (00–08 original + 09-testing.md +
+│                        10-test-plan.md added Aug 11 2026)
+├── tests/
+│   └── e2e/             Playwright TypeScript suite (S4/S5 Aug 11 2026)
+│                        — login.spec, cameras-crud.spec, archive-playback.spec,
+│                          live-view.spec, lib/auth.ts (loggedInPage fixture)
+├── .github/workflows/   ci.yml (nix flake check + nix build .#hnvr-web/.#hnvr-nats
+│                        + cabal-non-web + cabal-test-non-web + nightly playwright-e2e)
 ├── cabal.project        packages + allow-newer + vendored/nats-queue
 ├── flake.nix            ihp overlay + hnvrHaskellOverlay + nixosConfigurations
-├── flake.lock           pinned nixpkgs + flake-utils + pre-commit-hooks + ihp
+│                        + chromiumRuntimeDeps (S5 nix-ld wiring) +
+│                        checks.hnvr-leader-smoke (S5 NixOS VM test)
+├── flake.lock           pinned nixpkgs + flake-utils + pre-commit-hooks + ihp + devenv
 ├── nix/                (see "Repo layout — expanded nix/" block below)
 ├── vendored/
 │   └── nats-queue/      2017 lib + sClose → close patch baked in
-├── hnvr-core/           REAL types: Id, Geometry, Logging, Prelude, Time, Segment, Crypto
+├── hnvr-core/           REAL types + S3-extracted pure logic
+│   ├── src/Hnvr/Core/   Id, Geometry, Logging, Prelude, Time, Segment,
+│   │                    Crypto, Whep (extracted from hnvr-web S3),
+│   │                    Assignment (extracted from hnvr-web S3)
+│   ├── test/            S1+S3 spec suite (28 + 20 tests)
+│   └── app/CryptoTest.hs
 ├── hnvr-nats/           REAL Bus (nats-queue wrapper) + Subjects
+│   └── test/            S2 spec suite (16 tests; env-gated integration)
 ├── hnvr-storage/        REAL S3 wrapper (minio-hs, NOT amazonka — see pitfall #28)
-│                        + hnvr-s3-upload integration binary
+│   ├── src/Hnvr/Storage/S3.hs
+│   ├── test/            S2 spec suite (5 tests; env-gated against MinIO)
+│   └── app/S3Upload.hs  hnvr-s3-upload integration binary
 ├── hnvr-capture/        Fmp4 (REAL), Ffmpeg (REAL), Worker (REAL state machine);
-│                        exes: hnvr-record-frames (capture→disk),
-│                              hnvr-s3-upload (file→S3),
-│                              hnvr-capture-loop (full pipeline w/ NATS+S3+backoff)
+│   ├── test/            S1+S2 spec suite (8 + 17 tests; Fmp4 chunk-boundary
+│   │                    property is the anchor test)
+│   └── app/             exes: hnvr-record-frames, hnvr-s3-upload, hnvr-capture-loop
 ├── hnvr-cv/             OnnxRuntime, Preprocess, Decode, Rules, AutoTrack,
-│                        Tracker/Sort (all stubs)
+│                        Tracker/Sort (all stubs — tests land with Phase 3)
 ├── hnvr-ptz/            Driver (REAL typeclass), Onvif (stub), Controller (stub)
 ├── hnvr-web/            Library + 2 executables (LeaderMain, NodeMain)
 │                        ├── Application/Schema.sql   IHP schema source of truth
@@ -174,34 +205,21 @@ hnvr/
 │                        ├── src/Hnvr/Web.hs                 version stub
 │                        ├── src/Hnvr/Web/Config.hs          IHP config + healthz + NATS init
 │                        │                                  + EventWriter + HealthCache
-│                        │                                  + AssignmentCoordinator
-│                        │                                  + MediaMTXConfigSyncer + WHEP proxy
-│                        ├── src/Hnvr/Web/FrontController.hs RootApplication + parseRoute for
-│                        │                                  Cameras/Archive/Live/Dashboard/Hosts
-│                        ├── src/Web/Controller/Cameras.hs      CRUD + Probe + Assign (Web.* not Hnvr.Web.* — see pitfall #59)
+│                        │                                  + AssignmentCoordinator (imports
+│                        │                                    Hnvr.Core.Assignment — S3 extraction)
+│                        │                                  + MediaMTXConfigSyncer
+│                        ├── src/Hnvr/Web/FrontController.hs RootApplication + parseRoute
+│                        ├── src/Web/Controller/Cameras.hs      CRUD + Probe + Assign
 │                        ├── src/Web/Controller/Cameras/Probe.hs ffprobe JSON parser
 │                        ├── src/Web/Controller/Support/Crypto.hs encryptPassword / decryptPassword / requireKey
-│                        ├── src/Web/Controller/Archive.hs       PlayerArchiveAction + m3u8 PlaylistArchiveAction
-│                        ├── src/Web/Controller/Live.hs          ShowLiveAction
-│                        ├── src/Web/Controller/Dashboard.hs     DashboardAction (startPage → /)
-│                        ├── src/Web/Controller/Hosts.hs         HostsAction
-│                        ├── src/Web/Controller/Sessions.hs      NewSessionAction/CreateSessionAction/DeleteSessionAction
-│                        ├── src/Hnvr/Web/EventWriter.hs              NATS hnvr.events → PG segments
-│                        ├── src/Hnvr/Web/HealthCache.hs              NATS hnvr.health.> → IORef + PG
-│                        ├── src/Hnvr/Web/AssignmentCoordinator.hs    5s poll, host-down → reassign
-│                        ├── src/Hnvr/Web/MediaMTXConfigSyncer.hs     PG LISTEN → /run/hnvr/mediamtx.yml
-│                        │                                          + PUT /v2/config/paths/<slug>
-│                        ├── src/Hnvr/Web/WhepProxy.hs                WAI middleware: /whep/<slug> → mediamtx
-│                        ├── src/Hnvr/Node/HealthReporter.hs          publishes hnvr.health.<host> every 5s
-│                        ├── src/Hnvr/Node/ConfigWatcher.hs           subscribes hnvr.commands.assign.>
-│                        ├── src/Hnvr/Web/View/Layout.hs             default HTML layout + nav
-│                        ├── src/Hnvr/Web/View/Cameras/{Index,New,Edit,Show}.hs
-│                        ├── src/Hnvr/Web/View/Archive/Player.hs      @\<video\>@ + hls.js
-│                        ├── src/Hnvr/Web/View/Live/Show.hs           @\<video\>@ + inline whep.js
-│                        ├── src/Hnvr/Web/View/Dashboard/Index.hs     camera grid + hosts table
-│                        ├── src/Hnvr/Web/View/Hosts/Index.hs         per-host status + cameras
-│                        ├── app/LeaderMain.hs        IHP.Server.run + all initializers
-│                        └── app/NodeMain.hs          withBus + HealthReporter + ConfigWatcher
+│                        ├── src/Web/Controller/{Archive,Live,Dashboard,Hosts,Sessions}.hs
+│                        ├── src/Hnvr/Web/{EventWriter,HealthCache,AssignmentCoordinator,
+│                        │                  ConfigBroadcaster,MediaMTXConfigSyncer,WhepProxy}.hs
+│                        │   (WhepProxy imports Hnvr.Core.Whep — S3 extraction)
+│                        ├── src/Hnvr/Node/{HealthReporter,ConfigWatcher}.hs
+│                        ├── src/Hnvr/Web/View/{Layout,Cameras/*,Archive/Player,Live/Show,
+│                        │                  Dashboard/Index,Hosts/Index,Sessions/New}.hs
+│                        └── app/{LeaderMain,NodeMain}.hs
 ├── nix/
 │   ├── module.nix       NixOS module: hnvr-leader service (HNVR_HOST env wired)
 │   ├── nats-server.nix  NixOS module: NATS + JetStream
@@ -218,6 +236,62 @@ hnvr/
 
 We own: schema migrations (`hnvr-web/Application/Schema.sql` — TBD), backups
 coordination. We do NOT own: PG ops, SeaweedFS ops, replication, vacuum.
+
+## Test infrastructure (Aug 11 2026 — S1–S5 complete)
+
+Test pyramid + framework rationale: `design_docs/09-testing.md`.
+Per-package inventory + sprint schedule: `design_docs/10-test-plan.md`.
+Both committed Aug 11 2026 (commit `fdf16e3`); S1–S5 delivered in 7 commits.
+
+**94 Haskell tests + 6 Playwright specs + 1 NixOS VM smoke test.**
+
+| Layer | Where | Status |
+|-------|-------|--------|
+| Unit + property (tasty + QuickCheck) | `hnvr-{core,nats,storage,capture}/test/` | 94 tests, all green via `cabal test` |
+| Integration (NATS, S3 MinIO) | `hnvr-nats/test/Hnvr/Nats/BusSpec.hs`, `hnvr-storage/test/Hnvr/Storage/S3Spec.hs` | env-gated on `HNVR_TEST_INTEGRATION=1`; verified green against devenv services |
+| Web UI (Playwright + chromium) | `tests/e2e/` | 6 specs, all green; chromium launches cleanly inside `nix develop` via `chromiumRuntimeDeps` in flake.nix |
+| NixOS VM smoke | `flake.nix` `#checks.x86_64-linux.hnvr-leader-smoke` | boots leader VM, asserts `/healthz` + `/NewSession`; runs in ~10 s; verified PASS |
+
+**Verified commands** (Aug 11 2026):
+
+```bash
+# All Haskell unit + property tests (fast; no services required)
+cabal test hnvr-core hnvr-nats hnvr-storage hnvr-capture
+
+# Same + integration tests against devenv MinIO/NATS
+HNVR_TEST_INTEGRATION=1 cabal test hnvr-nats hnvr-storage
+
+# Pre-commit hooks (ormolu, cabal-fmt, nixpkgs-fmt, hlint)
+nix build .#checks.x86_64-linux.pre-commit
+
+# NixOS leader smoke test (boots VM, curls /healthz)
+nix build .#checks.x86_64-linux.hnvr-leader-smoke
+
+# Playwright UI tests (start devenv up + ./result/bin/hnvr-leader first)
+cd tests/e2e && npm install && npx playwright install chromium
+nix develop --command bash -c 'cd tests/e2e && npm test'
+```
+
+**CI matrix** (`.github/workflows/ci.yml`):
+- `nix-flake-check` — `nix flake check` + `nix build .#hnvr-web` + `.#hnvr-nats`
+- `cabal-non-web` — `cabal build` of the 6 non-IHP packages
+- `cabal-test-non-web` — `cabal test hnvr-core hnvr-nats hnvr-storage hnvr-capture`
+- `playwright-e2e` — nightly + on master; boots devenv + leader, runs npm test
+
+**Env-gating pattern for integration tests**: tests look up
+`HNVR_TEST_INTEGRATION` and silently skip with `pure ()` unless it's
+`"1"`. Sergey's devenv-always-up workflow means integration tests are
+run with `HNVR_TEST_INTEGRATION=1 cabal test`; CI runs only the pure
+layer. See `Hnvr.Nats.BusSpec.integrationTest` for the canonical
+helper.
+
+**Pure-helper extraction pattern** (S3, when hnvr-web modules can't be
+cabal-tested per pitfall #14): extract the pure decision logic into a
+new `Hnvr.Core.<Name>` module, hnvr-web imports it and projects the
+IHP record into the pure-shape type at the call site. Established
+Aug 11 2026 with `Hnvr.Core.Whep` (from `WhepProxy`) and
+`Hnvr.Core.Assignment` (from `AssignmentCoordinator`). Pattern is
+generalisable to future leader-side testable extractions.
 
 ## Sergey's cameras (test fixtures — probed Aug 9 2026)
 
@@ -811,6 +885,78 @@ ffprobe notes:
        Verify via `curl -b cookie http://leader/ShowLive?... | grep script` —
        you should see actual JS, not `{preEscapedTextValue …}`.
 
+    64. **nixpkgs `xorg.*` attribute naming is inconsistent** (Aug 11 2026
+        S5 chromium runtime deps) — there is no rule, every attr has to be
+        tested. The cases that bit me:
+        - `xorg.libx11` ❌ → `xorg.libX11` ✓
+        - `xorg.libXscrnsaver` ❌ → `xorg.libXScrnSaver` ✓
+        - `xorg.libXshmfence` ❌ → `xorg.libxshmfence` ✓ (lowercase 's'!)
+        - `xorg.libxcb` ✓ (correct as lowercase, NOT `libXcb`)
+        Quick check before committing a list:
+        `nix eval --impure --raw --expr 'let pkgs = import <nixpkgs> {}; in if pkgs.xorg ? ATTR then "yes" else "no"'`.
+
+    65. **`libgbm` is a separate nixpkgs package, NOT in `pkgs.mesa`**
+        (Aug 11 2026 S5) — `mesa` ships libGL but `libgbm.so.1` lives in
+        `pkgs.mesa-libgbm`/`pkgs.libgbm`. Chromium and Playwright's
+        chrome-headless-shell both need it. The full chromium runtime
+        deps list (verified working Aug 11 2026) is the
+        `chromiumRuntimeDeps` binding in flake.nix — copy from there
+        rather than re-deriving.
+
+    66. **`pkgs.nixosTest` was renamed to `pkgs.testers.nixosTest`**
+        (renamed 2025-10-27, converted to throw) — using the old name
+        produces `error: 'nixosTest' has been renamed to/replaced by
+        'testers.nixosTest'`. Documented in `nixpkgs/pkgs/top-level/
+        aliases.nix`. Always use `pkgs.testers.nixosTest` for VM tests
+        now; same API.
+
+    67. **IHP AutoRoute maps `DeleteCameraAction` to HTTP DELETE, not POST**
+        (Aug 11 2026 S5) — verified via curl: POST returns 405, DELETE
+        returns 302 (success). The Cameras controller comment line 16
+        documents this (`@/DeleteCamera?cameraId=…@ (DELETE)`) — IHP's
+        convention is to use the HTTP method matching the action verb
+        prefix (Create→POST, Update→POST, Delete→DELETE). HTML forms
+        can't do DELETE natively, so v1 has no UI for delete — the
+        Playwright test calls it via `page.request.delete(...)` directly.
+
+        Companion: **Playwright's `page.request.delete()` follows 302
+        redirects with the SAME method (DELETE)**, which 405s on the
+        redirect target (`/Cameras` doesn't accept DELETE). Use
+        `{maxRedirects: 0}` + `expect(resp.status()).toBe(302)` to
+        short-circuit.
+
+    68. **Headless chromium reports `canPlayType('application/vnd.apple.
+        mpegurl')` as `'maybe'`** (truthy) — even in `chrome-headless-shell`
+        (no real Safari involved). This means the View/Archive/Player.hs
+        "Native HLS (Safari)" branch fires under headless chromium, so
+        the status pill text becomes `"Native HLS (Safari)"` rather
+        than `"Loading player…"`. Playwright tests on this page must
+        accept either branch; pinning to `"Loading player…"` is a
+        timing-sensitive flake.
+
+    69. **cabal test target syntax is `pkg:testsuite-name`, not
+        `pkg:test:testsuite-name`** (Aug 11 2026 S1) — the latter gives
+        "Unknown target". The full form: `cabal test hnvr-core:hnvr-core-test`
+        where `hnvr-core-test` is the value of the `test-suite` stanza's
+        `name` field. `cabal test hnvr-core` (no component) runs ALL
+        test-suites in that package; the explicit form lets you scope
+        to one when iterating.
+
+    70. **The `cabal test` exit code propagates** (Aug 11 2026 S1) —
+        `cabal test` returns non-zero on test failure AND on build
+        failure. CI jobs that gate merges on cabal-test should use
+        `cabal test` directly (not `cabal build && cabal test`) so a
+        compile failure isn't double-counted.
+
+    71. **`time-1.14` (GHC 9.12) hides the `UTCTime` constructor** (Aug
+        11 2026 S1) — `import Data.Time.Clock (UTCTime)` brings only the
+        TYPE; the constructor needs explicit `(..)`:
+        `import Data.Time.Clock (UTCTime (..))`. Without it, GHC errors
+        with `[GHC-01928] Illegal term-level use of the type constructor
+        'UTCTime'`. No `mkUTCTime` shim exists in this version; the
+        pattern `UTCTime day diffTime` still works once the constructor
+        is in scope.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -951,6 +1097,15 @@ ffprobe notes:
             Remaining: full Phase 2 demo (kill hnvr-1 → 15 s reassign)
             not yet exercised. AssignmentCoordinator load balancing
             still naive (lex-smallest host) — fine for 2 hosts.
+- [x] **Test infrastructure (S1–S5 done Aug 11 2026)** — 94 Haskell
+      tests + 6 Playwright specs + 1 NixOS VM smoke test. See
+      "Test infrastructure (Aug 11 2026)" section above. The 5-sprint
+      scope matches design_docs/10-test-plan.md v1.0 milestone exactly.
+      Real bug found + fixed during S3: `WhepProxy.translateBack` was
+      duplicating `/whep` in the middle of session URLs (latent
+      throughout Phase 2 because pitfall #63 meant the WHEP JS never
+      ran end-to-end). S6 (hnvr-cv tests) + S7 (hnvr-ptz tests) are
+      gated on Phase 3 / Phase 5 implementation landing.
 - [ ] Phase 3 — CV detection + tracking
 - [ ] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate
 - [ ] Phase 5 — PTZ manual + presets          ← v1.0 release
@@ -981,16 +1136,15 @@ See `design_docs/08-roadmap.md` for the full plan with demos and decision points
 2. Read this file.
 3. Skim `design_docs/00-overview.md` for the decisions table.
 4. Check `git log --oneline` for what's new since last session.
-5. `nix develop` to enter dev shell.
-6. **Phase 1 Slice 1 done** (Aug 9 2026): capture pipeline vertical
-   slice works end-to-end against all 3 cameras via the
-   `hnvr-record-frames` binary. Next slices in priority order:
-   - Slice 2: `Hnvr.Storage.S3` (amazonka-s3 path-style) + segment publish
-   - Slice 3: `CaptureWorker` state machine (Pending/Running/Backoff/
-     Stopped/FailedPermanent) wrapping ffmpeg + Fmp4 + S3 + NATS publish
-   - Slice 4: `Schema.sql` + IHP cameras CRUD + ffprobe button
-   - Slice 5: EventWriter on leader consuming `hnvr.events`
-   - Slice 6: Archive view + m3u8 + hls.js
-   - Slice 7: `Hnvr.Core.Crypto` AES-256-GCM + sops-nix wiring
-   The hnvr-nats `Bus` handle isn't shared yet — thread it through an
-   MVar when Slice 3 starts publishing on `hnvr.events`.
+5. `nix develop --no-pure-eval` (or direnv) to enter dev shell.
+6. **Phase 1 + Phase 2 + test infrastructure (S1–S5) all done**.
+   Next priorities (pick one):
+   - **Phase 3 CV pipeline** — implement `Hnvr.Cv.OnnxRuntime` (FFI
+     binding), `Preprocess`, `Decode`, `Tracker.Sort`. Then S6 test
+     slice lands alongside per design_docs/10-test-plan.md.
+   - **Two-node NixOS failover test** — reconfigure both VMs to peer
+     with a shared NATS cluster so `hnvr.health.>` crosses VM
+     boundaries (current worker VM uses its own localhost NATS per
+     Phase 0 demo wiring). Then write `nixosTests.hnvr-failover`.
+   - **Phase 6 operational hardening** — sops-nix secrets wiring,
+     mediamtx auth, retention sweep.
