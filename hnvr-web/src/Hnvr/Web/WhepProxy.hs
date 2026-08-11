@@ -28,8 +28,8 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Lazy.Char8 as BSLC
-import Data.List (isPrefixOf, stripPrefix)
 import Data.Maybe (fromMaybe)
+import Hnvr.Core.Whep (translateBack, translatePath)
 import qualified Network.HTTP.Client as HC
 import Network.HTTP.Types (status500)
 import qualified Network.HTTP.Types as HTTP
@@ -83,18 +83,6 @@ proxyOne mgr base request = do
     `catch` \(e :: SomeException) ->
       pure (Wai.responseLBS status500 [] ("WHEP proxy error: " <> BSLC.pack (show e)))
 
--- | Translate @/whep/<slug>[@/session/<id>]@ → @/<slug>/whep[@/session/<id>]@.
--- The naive @"/" <> rest <> "/whep"@ appended @/whep@ at the END, which
--- mangled session callbacks: @/whep/foo/session/123@ became
--- @/foo/session/123/whep@ (mediamtx 404). Split rest at the first @/@
--- so @/whep@ lands directly after the slug. Uses 'BSC.break' (Char-keyed)
--- since the file already standardises on the Char8 view of ByteStrings.
-translatePath :: BS.ByteString -> BS.ByteString
-translatePath p =
-  let rest = BSC.drop (BSC.length "/whep/") p -- "<slug>[/session/<id>]"
-      (slug, suffix) = BSC.break (== '/') rest
-   in "/" <> slug <> "/whep" <> suffix
-
 -- | Rewrite MediaMTX's @/<slug>/whep/session/<id>@ Location header back
 -- to our public @/whep/<slug>/session/<id>@ form so the browser's next
 -- PATCH/DELETE returns to us. Only rewrites Location / Content-Location.
@@ -102,37 +90,3 @@ rewriteLocation :: (HTTP.HeaderName, BS.ByteString) -> (HTTP.HeaderName, BS.Byte
 rewriteLocation (name, val)
   | name == "Location" || name == "Content-Location" = (name, translateBack val)
   | otherwise = (name, val)
-
--- | Inverse of 'translatePath': a MediaMTX-absolute URL like
--- @http://host:8889/<slug>/whep/session/<id>@ or a path-only
--- @/<slug>/whep/session/<id>@ both become
--- @/whep/<slug>/session/<id>@ (path-only, so the browser uses its own
--- origin).
-translateBack :: BS.ByteString -> BS.ByteString
-translateBack v =
-  let s = BSC.unpack v
-      -- Strip scheme://host:port if present, then rewrite the path.
-      pathOnly = case stripPrefix "http://" s of
-        Just rest -> dropWhile (/= '/') rest
-        Nothing -> case stripPrefix "https://" s of
-          Just rest -> dropWhile (/= '/') rest
-          Nothing -> s
-   in case findWhepSuffix pathOnly of
-        Just (before, after) -> BSC.pack ("/whep" <> before <> after)
-        Nothing -> v
-  where
-    -- Find the trailing "/whep" + remainder in the path.
-    findWhepSuffix :: String -> Maybe (String, String)
-    findWhepSuffix p =
-      case breakOn "/whep" p of
-        Just (before, rest) -> Just (before, rest)
-        Nothing -> Nothing
-    -- Returns (prefix before "/whep", "/whep" + rest).
-    breakOn :: String -> String -> Maybe (String, String)
-    breakOn needle hay
-      | needle `isPrefixOf` hay = Just ([], hay)
-      | otherwise = case hay of
-          [] -> Nothing
-          (c : t) -> case breakOn needle t of
-            Just (before, rest) -> Just (c : before, rest)
-            Nothing -> Nothing

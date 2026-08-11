@@ -7,6 +7,7 @@ build-type:    Simple
 
 library
   exposed-modules:
+    Hnvr.Core.Assignment
     Hnvr.Core.Crypto
     Hnvr.Core.Geometry
     Hnvr.Core.Id
@@ -14,12 +15,14 @@ library
     Hnvr.Core.Prelude
     Hnvr.Core.Segment
     Hnvr.Core.Time
+    Hnvr.Core.Whep
 
   build-depends:
     , aeson              >=2.0  && <2.3
     , base               >=4.18 && <5
     , base64-bytestring
     , bytestring         >=0.11 && <0.13
+    , containers
     , cryptonite
     , memory
     , text               >=1.2  && <2.2
@@ -45,16 +48,19 @@ test-suite hnvr-core-test
   main-is:          Main.hs
   hs-source-dirs:   test
   other-modules:
+    Hnvr.Core.AssignmentSpec
     Hnvr.Core.CryptoSpec
     Hnvr.Core.GeometrySpec
     Hnvr.Core.IdSpec
     Hnvr.Core.SegmentSpec
     Hnvr.Core.TimeSpec
+    Hnvr.Core.WhepSpec
 
   build-depends:
     , aeson
     , base              >=4.18 && <5
     , bytestring
+    , containers
     , hnvr-core
     , QuickCheck
     , tasty

@@ -404,7 +404,7 @@
                 pkgs.ormolu
                 devenvHpkgs.cabal-fmt
                 pkgs.nixpkgs-fmt
-                # CSS toolchain — tailwind standalone CLI (no npm)
+                # CSS toolchain — tailwind standalone cli (no npm)
                 pkgs.tailwindcss
                 # ---- Runtime deps for local testing --------------------
                 pkgs.ffmpeg_7-full

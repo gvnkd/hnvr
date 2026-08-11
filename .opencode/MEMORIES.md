@@ -320,9 +320,21 @@ ffprobe notes:
 
 14. **`cabal build` of hnvr-web is unsupported** — IHP's transitive deps
     (mime-mail-ses → memory/crypton) need version pins that IHP's nix
-    overlay applies but cabal doesn't see. Use `nix build .#hnvr-web`
-    for the canonical build. Cabal works for the 6 non-IHP packages
-    (core, nats, storage, capture, cv, ptz) for fast iteration.
+    overlay applies but cabal doesn't see. **Confirmed Aug 11 2026: even
+    with `pkgs.icu` + `pkgs.icu.dev` wired into devenv `packages` and
+    `PKG_CONFIG_PATH=${pkgs.icu.dev}/lib/pkgconfig` set, `cabal build
+    hnvr-web` still fails — `text-icu-0.7.1.0` itself has a GHC 9.12
+    source-level incompatibility (`Word8` vs `Word16` in
+    `Data.Text.ICU.Internal.hsc:58`); IHP's nix overlay patches
+    text-icu but cabal can't see the patch.** The 6 non-IHP packages
+    (core, nats, storage, capture, cv, ptz) are cabal-buildable; hnvr-web
+    is `nix build .#hnvr-web` only. **Workaround for testing**: extract
+    pure logic from hnvr-web modules into `Hnvr.Core.*` (testable via
+    cabal). Pattern established Aug 11 2026 with
+    `Hnvr.Core.Whep` (extracted from `Hnvr.Web.WhepProxy`) and
+    `Hnvr.Core.Assignment` (extracted from
+    `Hnvr.Web.AssignmentCoordinator`); hnvr-web imports these and
+    projects IHP records into the pure-shape types at the call site.
 
 15. **Cabal 3.16 `source-repository-package --patch-dir` is unreliable** —
     silently skips patches. Vendor patched source in-tree instead

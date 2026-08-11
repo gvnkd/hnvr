@@ -39,6 +39,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
 import Generated.Types
+import Hnvr.Core.Assignment (AssignmentDecision (..), CameraAssignment (..))
+import qualified Hnvr.Core.Assignment as Assign
 import Hnvr.Core.Logging (logError, logInfo)
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
@@ -97,23 +99,19 @@ reconcile bus = do
 -- Returns (camera, new host, slug) when a change is needed; Nothing
 -- otherwise.
 pickTarget :: Map.Map Text UTCTime -> Camera -> Maybe (Camera, Text, Text)
-pickTarget healthy cam
-  | cam.manualAssign = Nothing
-  | otherwise =
-      let current = cam.assignedHost
-          currentHealthy = maybe False (`Map.member` healthy) current
-       in if currentHealthy
-            then Nothing
-            else Just (cam, leastLoaded healthy, cam.slug)
-
--- | Pick the healthy host with the lex-smallest id. Slice 5b will
--- query per-host load; v1 with 2 hosts doesn't need real load
--- balancing (the "keep if healthy" rule prevents flapping).
-leastLoaded :: Map.Map Text a -> Text
-leastLoaded healthy =
-  case Map.keys healthy of
-    (h : _) -> h
-    [] -> "hnvr-2"
+pickTarget healthy cam =
+  case Assign.pickTarget healthy (toAssignment cam) of
+    Keep -> Nothing
+    Reassign newHost -> Just (cam, newHost, cam.slug)
+  where
+    -- Project the IHP record into the pure-shape from Hnvr.Core.Assignment.
+    -- Keeps the decision logic testable without IHP / ModelContext.
+    toAssignment c =
+      CameraAssignment
+        { caSlug = c.slug,
+          caManualAssign = c.manualAssign,
+          caAssignedHost = c.assignedHost
+        }
 
 -- | Write the new assignment to DB and publish the NATS command.
 --
