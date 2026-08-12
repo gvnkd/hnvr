@@ -136,6 +136,7 @@ In-repo, Nix-managed via `pkgs.nodePackages` + `playwright-driver`.
 | `cameras-crud.spec.ts` | Add camera via UI → probe → assign → edit → delete; admin gate kicks non-logged-in | P3 |
 | `archive-playback.spec.ts` | Open archive for a seeded camera; assert `<video>` element reaches `HAVE_METADATA`; hls.js triggers `MANIFEST_PARSED` | P3 |
 | `live-view.spec.ts` | Open `/ShowLive?cameraId=…`; assert WHEP POST returns 201; `<video>` reaches `readyState >= 2`; covers pitfall #63 (inline JS now splices correctly) | P3 |
+| `archive-browser.spec.ts` | `pageSize` hard cap, pagination badge + "Next →" link, filter-form round-trip, delete form action URL + hidden-input name-prefix contract, full delete round-trip preserves filter + page params | P3 (added Aug 12 2026) |
 | `failover.spec.ts` | Two-node setup via devenv; kill node process; assert AssignmentCoordinator reassigns within 15 s; live view for reassigned camera recovers | P3 |
 
 **Estimated effort:** 4 days. Includes Playwright project setup + Nix

@@ -14,7 +14,9 @@
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
   that have been resolved; `.opencode/PHASE_AUDIT_REPORT_2.md` for the
   round-2 re-audit at `57aac3b`). Phase 1 slice 8 (Cameras admin gate)
-  landed Aug 10 2026. Phase 2 commit history:
+  landed Aug 10 2026. Archive browser audit-fix landed Aug 12 2026
+  (`8bd8d1f`: pageSize=10, filter-preserving delete, async S3 purge,
+  LimitNOFILE bump). Phase 2 commit history:
   - `e08a1f7` docs: add initial HNVR design documentation
   - `ef3c743` scaffold: cabal multi-package project + flake.nix
   - `ece9519` phase 0: bootstrap IHP web + NATS bus + NixOS VMs
@@ -24,6 +26,8 @@
   - `57aac3b` phase 2 audit-fix: close 8 spec/CI/tooling gaps
   - phase 1 slice 8 (Cameras admin gate — IHP AuthSupport, users table,
     SessionsController, ensureIsUser beforeAction) — Aug 10 2026
+  - `8bd8d1f` archive audit-fix: pageSize=10 + filter-preserving delete +
+    async S3 purge + LimitNOFILE + 4 new pitfalls (#85–#88) — Aug 12 2026
 
 ## What this is
 
@@ -166,9 +170,11 @@ hnvr/
 ├── design_docs/         11 files (00–08 original + 09-testing.md +
 │                        10-test-plan.md added Aug 11 2026)
 ├── tests/
-│   └── e2e/             Playwright TypeScript suite (S4/S5 Aug 11 2026)
+│   └── e2e/             Playwright TypeScript suite (S4/S5 Aug 11 2026
+│                        + archive-browser slice Aug 12 2026)
 │                        — login.spec, cameras-crud.spec, archive-playback.spec,
-│                          live-view.spec, lib/auth.ts (loggedInPage fixture)
+│                          live-view.spec, archive-browser.spec (14 specs),
+│                          lib/auth.ts (loggedInPage fixture)
 ├── .github/workflows/   ci.yml (nix flake check + nix build .#hnvr-web/.#hnvr-nats
 │                        + cabal-non-web + cabal-test-non-web + nightly playwright-e2e)
 ├── cabal.project        packages + allow-newer + vendored/nats-queue
@@ -182,8 +188,9 @@ hnvr/
 ├── hnvr-core/           REAL types + S3-extracted pure logic
 │   ├── src/Hnvr/Core/   Id, Geometry, Logging, Prelude, Time, Segment,
 │   │                    Crypto, Whep (extracted from hnvr-web S3),
-│   │                    Assignment (extracted from hnvr-web S3)
-│   ├── test/            S1+S3 spec suite (28 + 20 tests)
+│   │                    Assignment (extracted from hnvr-web S3),
+│   │                    ArchiveBrowser (extracted from Web.Controller.Archive S3)
+│   ├── test/            S1+S3 spec suite + ArchiveBrowserSpec (97 tests total)
 │   └── app/CryptoTest.hs
 ├── hnvr-nats/           REAL Bus (nats-queue wrapper) + Subjects
 │   └── test/            S2 spec suite (16 tests; env-gated integration)
@@ -237,19 +244,20 @@ hnvr/
 We own: schema migrations (`hnvr-web/Application/Schema.sql` — TBD), backups
 coordination. We do NOT own: PG ops, SeaweedFS ops, replication, vacuum.
 
-## Test infrastructure (Aug 11 2026 — S1–S5 complete)
+## Test infrastructure (Aug 12 2026 — S1–S5 complete + archive-browser slice)
 
 Test pyramid + framework rationale: `design_docs/09-testing.md`.
 Per-package inventory + sprint schedule: `design_docs/10-test-plan.md`.
 Both committed Aug 11 2026 (commit `fdf16e3`); S1–S5 delivered in 7 commits.
+Archive-browser slice added Aug 12 2026 (commit `8bd8d1f`).
 
-**94 Haskell tests + 6 Playwright specs + 1 NixOS VM smoke test.**
+**143 Haskell tests + 20 Playwright specs + 1 NixOS VM smoke test.**
 
 | Layer | Where | Status |
 |-------|-------|--------|
-| Unit + property (tasty + QuickCheck) | `hnvr-{core,nats,storage,capture}/test/` | 94 tests, all green via `cabal test` |
+| Unit + property (tasty + QuickCheck) | `hnvr-{core,nats,storage,capture}/test/` | 143 tests (97 core + 16 nats + 5 storage + 25 capture), all green via `cabal test` |
 | Integration (NATS, S3 MinIO) | `hnvr-nats/test/Hnvr/Nats/BusSpec.hs`, `hnvr-storage/test/Hnvr/Storage/S3Spec.hs` | env-gated on `HNVR_TEST_INTEGRATION=1`; verified green against devenv services |
-| Web UI (Playwright + chromium) | `tests/e2e/` | 6 specs, all green; chromium launches cleanly inside `nix develop` via `chromiumRuntimeDeps` in flake.nix |
+| Web UI (Playwright + chromium) | `tests/e2e/` | 20 specs (14 archive-browser + 1 archive-playback + 1 cameras-crud + 1 live-view + 3 login), all green; chromium launches cleanly inside `nix develop` via `chromiumRuntimeDeps` in flake.nix |
 | NixOS VM smoke | `flake.nix` `#checks.x86_64-linux.hnvr-leader-smoke` | boots leader VM, asserts `/healthz` + `/NewSession`; runs in ~10 s; verified PASS |
 
 **Verified commands** (Aug 11 2026):
@@ -290,7 +298,10 @@ cabal-tested per pitfall #14): extract the pure decision logic into a
 new `Hnvr.Core.<Name>` module, hnvr-web imports it and projects the
 IHP record into the pure-shape type at the call site. Established
 Aug 11 2026 with `Hnvr.Core.Whep` (from `WhepProxy`) and
-`Hnvr.Core.Assignment` (from `AssignmentCoordinator`). Pattern is
+`Hnvr.Core.Assignment` (from `AssignmentCoordinator`). Extended
+Aug 12 2026 with `Hnvr.Core.ArchiveBrowser` (from
+`Web.Controller.Archive` — pagination math, window resolution,
+filter query-string round-trip, datetime-local parsing). Pattern is
 generalisable to future leader-side testable extractions.
 
 ## Sergey's cameras (test fixtures — probed Aug 9 2026)
@@ -1101,6 +1112,75 @@ ffprobe notes:
          unwritable outside NixOS, so the spool fallback had been
          silently failing in dev.
 
+    85. **IHP AutoRoute field names share the URL param namespace with
+        filters** (Aug 12 2026) — `PurgeRecordingAction {cameraId :: Id
+        Camera}` made IHP generate URLs like `/PurgeRecording?cameraId=…`.
+        The archive browser also round-trips a `cameraId` *filter* param
+        through the same URL (so the post-delete redirect can land back
+        on the same filtered view). With both names colliding we got
+        `?cameraId=X&cameraId=X` — Sergey caught it in DevTools.
+        Workaround: rename the AutoRoute field to a verb-prefixed name
+        (`purgeCameraId`) so the filter name has its own slot. Same trap
+        applies to any controller action that round-trips filter params
+        through its own URL — keep action-field names distinct from
+        filter param names. Same pattern was already used for
+        `from`/`to` (form body `purgeFrom`/`purgeTo` vs URL filter
+        `from`/`to`).
+
+    86. **systemd default `LimitNOFILE=1024` is too low for the leader**
+        (Aug 12 2026) — under Sergey's 3-camera 24/7 capture load the
+        leader holds many concurrent FDs: per-camera ffmpeg subprocess
+        pipes, MinIO upload sockets, WHEP/WebRTC session sockets, async
+        S3-purge workers (`PurgeRecordingAction` walks thousands of
+        segment keys). It peaked past 1024 and
+        `Network.Socket.accept: resource exhausted (Too many open files)`
+        started refusing new connections — `/NewSession` got `EAGAIN`,
+        Playwright's `page.goto` retried for 30 s, the cameras-crud
+        test looked "hung on login". Sergey's interactive shell has
+        `ulimit -n 524288` so he never hit it; the systemd unit
+        inherited the 1024 default. Fix: `nix/module.nix` sets
+        `serviceConfig.LimitNOFILE = 524288;`. Symptom signature: a
+        test that times out on `page.goto` while `curl localhost:port`
+        from the same shell works fine — check
+        `journalctl ... | grep "resource exhausted"`.
+
+    87. **`deleteRecords` issues N round-trips, not a bulk DELETE**
+        (Aug 12 2026) — IHP's `deleteRecords :: [record] -> IO ()`
+        loops one SQL DELETE per record. For Sergey's 2h+ recordings
+        (8k+ segment rows) that's 8k round-trips, each acquiring a
+        pooled connection. Under load this contended with concurrent
+        requests enough to slow the cameras-crud login lookup past its
+        Playwright timeout. Bulk form for windows of N>100 rows:
+        ```haskell
+        _ <- sqlExec
+          "DELETE FROM segments WHERE camera_id = ? AND end_ts > ? AND start_ts <= ?"
+          (cameraUuid, from, to)
+        ```
+        Plain DELETE is DML — `sqlExec` works fine (the pitfall #42
+        breakage is DDL-only). The trade-off: you lose IHP's
+        per-record `beforeDelete`/`afterDelete` hooks, which we don't
+        use anyway.
+
+    88. **`Async.async` for destructive actions: capture `?modelContext`
+        explicitly** (Aug 12 2026) — `PurgeRecordingAction` walks
+        thousands of S3 keys; doing it in the request thread made the
+        form POST "keep pending forever" (Sergey's words). Pattern for
+        spawning the work into a background thread while keeping DB
+        access:
+        ```haskell
+        let mc = ?modelContext
+        _ <- liftIO $ Async.async $
+          let ?modelContext = mc
+           in purgeRecordingInBackground camera cid from to
+        ```
+        `ModelContext` is a connection pool — safe to share across
+        threads. `?context` (ControllerContext) is request-scoped and
+        must NOT be captured into a long-lived thread (it carries the
+        current request's response handles). The async worker wraps
+        its body in `E.handle (\(e :: SomeException) -> …)` so a
+        transient S3 hiccup doesn't crash the leader; RetentionSweeper
+        is the canonical convergence path for any leftover S3 state.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -1110,22 +1190,52 @@ ffprobe notes:
 - Wants to design for horizontal scale even when v1 doesn't need it (hence
   NATS from day one).
 
-## Roadmap status (Aug 11 2026 — M1+M2 landed)
+## Roadmap status (Aug 12 2026 — archive-browser audit-fix landed)
 
-- [x] **Archive browser/manager** (Aug 11 2026) — `/Archive`: filter by
-      camera/time-window (24h cap)/min-duration/slug-search, segments
-      grouped into recordings (30s gap tolerance) via pure
-      `Hnvr.Core.Recording` + `Hnvr.Core.Playlist` (cabal-tested,
-      pitfall #14 extraction pattern); windowed playlist (from/to, ≤6h
-      per design 05, default = last 1h ending at latest segment) fixing
-      the oldest-3600-segments bug; player deep-links `?from&to&t` with
-      hls.js startPosition; admin-gated DeleteRecording (S3 best-effort
-      + rows). Prereq fix: `toSegmentWritten` now takes the ms-precision
-      upload key as a param — DB object_key no longer diverges from the
-      uploaded object (pitfall #25 class). Auth gate now covers
-      ArchiveController (was: presigned URLs served unauthenticated).
-      7 Playwright specs in tests/e2e/archive-browser.spec.ts (13 total
-      green). Not committed yet — pending Sergey review.
+- [x] **Archive browser/manager** (Aug 11 2026, audit-fixed Aug 12 2026) —
+      `/Archive`: filter by camera/time-window (24h cap)/min-duration/
+      slug-search, segments grouped into recordings (30s gap tolerance)
+      via pure `Hnvr.Core.Recording` + `Hnvr.Core.Playlist`
+      (cabal-tested, pitfall #14 extraction pattern); windowed playlist
+      (from/to, ≤6h per design 05, default = last 1h ending at latest
+      segment) fixing the oldest-3600-segments bug; player deep-links
+      `?from&to&t` with hls.js startPosition; admin-gated
+      DeleteRecording (S3 best-effort + rows). Prereq fix:
+      `toSegmentWritten` now takes the ms-precision upload key as a
+      param — DB object_key no longer diverges from the uploaded object
+      (pitfall #25 class). Auth gate now covers ArchiveController (was:
+      presigned URLs served unauthenticated).
+      **Aug 12 2026 audit-fix** (commit `8bd8d1f`): three Sergey-reported
+      bugs closed:
+        * pageSize 25 → 10 — single-camera 24h window previously fit on
+          one page, so the "1/1" pagination badge looked broken with 12
+          visible rows.
+        * Filter params (cameraId/from/to/q/minDuration/page) now
+          round-trip through `PurgeRecordingAction`'s redirect via
+          `browseQueryString` — was redirecting to bare `/Archive`,
+          landing the user on the default window which read as "the
+          deleted row is still there".
+        * S3 purge moved to `Async.async` — `purgeObjects` walks
+          thousands of keys sequentially; the synchronous request
+          "kept pending forever". Pattern documented in pitfall #88.
+      Two URL/payload name clashes surfaced + fixed (pitfall #85):
+      `PurgeRecordingAction {cameraId}` → `{purgeCameraId}` (collided
+      with the filter cameraId); form body `from`/`to` → `purgeFrom`/
+      `purgeTo` (collided with the filter from/to).
+      Performance + ops hardening: bulk `DELETE FROM segments WHERE …`
+      replaced `deleteRecords` (pitfall #87); `LimitNOFILE=524288`
+      added to `nix/module.nix` (pitfall #86 — systemd default 1024
+      was too low).
+      Pure extraction: `Hnvr.Core.ArchiveBrowser` (paginate,
+      resolveBrowseWindow, browseQueryString, parseWhen) — 21 unit +
+      3 property tests in `Hnvr.Core.ArchiveBrowserSpec`. Cabal tests
+      now 143 total (97 in hnvr-core).
+      Playwright `archive-browser.spec.ts` extended to 14 specs (was
+      7): pageSize hard cap, "Next →" link + badge text, filter
+      preserved in form action URL, hidden-input name-prefix contract,
+      full delete round-trip with filter preservation, page param
+      preserved on page >1. Total Playwright: 20 specs (19 active +
+      1 skip gated on >10 recordings).
 
 - [x] Design docs complete
 - [x] Cabal scaffold + flake.nix
