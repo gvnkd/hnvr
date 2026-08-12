@@ -55,6 +55,7 @@ library
     Hnvr.Web.CommandTypes
     Hnvr.Web.Config
     Hnvr.Web.ConfigBroadcaster
+    Hnvr.Web.DebugStream
     Hnvr.Web.EventWriter
     Hnvr.Web.FrontController
     Hnvr.Web.HealthCache
@@ -62,6 +63,7 @@ library
     Hnvr.Web.RetentionSweeper
     Hnvr.Web.SchemaMigration
     Hnvr.Web.SnapshotResponder
+    Hnvr.Web.SupervisorRegistry
     Hnvr.Web.View.Archive.Index
     Hnvr.Web.View.Archive.Player
     Hnvr.Web.View.Cameras.Edit
@@ -69,6 +71,7 @@ library
     Hnvr.Web.View.Cameras.New
     Hnvr.Web.View.Cameras.Show
     Hnvr.Web.View.Dashboard.Index
+    Hnvr.Web.View.Debug.Show
     Hnvr.Web.View.Hosts.Index
     Hnvr.Web.View.Layout
     Hnvr.Web.View.Live.Show
@@ -78,6 +81,7 @@ library
     Web.Controller.Cameras
     Web.Controller.Cameras.Probe
     Web.Controller.Dashboard
+    Web.Controller.Debug
     Web.Controller.Hosts
     Web.Controller.Live
     Web.Controller.Sessions
@@ -180,6 +184,7 @@ executable hnvr-node
     , base
     , hnvr-capture
     , hnvr-core
+    , hnvr-cv
     , hnvr-nats
     , hnvr-storage
     , hnvr-web

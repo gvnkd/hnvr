@@ -88,11 +88,11 @@ fetchAssignedCameras host = do
     rows <-
       PG.query
         conn
-        "SELECT id, slug, rtsp_url, rtsp_transport, record_audio FROM cameras WHERE assigned_host = ? AND enabled = TRUE"
+        "SELECT id, slug, rtsp_url, rtsp_transport, record_audio, rtsp_sub_url, use_substream_for_analysis, substream_width, substream_height, analysis_fps FROM cameras WHERE assigned_host = ? AND enabled = TRUE"
         (Only host)
     pure (foldMap mkSnapshot rows)
   where
-    mkSnapshot (cid, slug, url, transportTxt, recordAudio) =
+    mkSnapshot (cid, slug, url, transportTxt, recordAudio, subUrl, useSub, subW, subH, fps) =
       case transportFromText transportTxt of
         Just tr ->
           [ CameraSnapshot
@@ -100,7 +100,12 @@ fetchAssignedCameras host = do
                 csSlug = slug,
                 csRtspUrl = url,
                 csTransport = tr,
-                csRecordAudio = recordAudio
+                csRecordAudio = recordAudio,
+                csRtspSubUrl = subUrl,
+                csUseSubstream = useSub,
+                csSubWidth = fromIntegral <$> subW,
+                csSubHeight = fromIntegral <$> subH,
+                csAnalysisFps = fromIntegral fps
               }
           ]
         Nothing -> []

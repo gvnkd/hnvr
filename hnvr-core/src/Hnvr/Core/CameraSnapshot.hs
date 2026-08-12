@@ -78,12 +78,25 @@ instance FromJSON Transport where
 --
 -- @csRecordAudio@ gates the parallel audio ffmpeg (M5). Per
 -- @03-capture-and-storage.md@ §3.
+--
+-- Analysis fields (Phase 3): @csRtspSubUrl@/@csSubWidth@/@csSubHeight@
+-- come from the @rtsp_sub_url@/@substream_width@/@substream_height@
+-- columns (Probe populates them); @csUseSubstream@ mirrors
+-- @use_substream_for_analysis@ — when False (or dims/URL missing),
+-- the analyzer falls back to the main-stream relay with a
+-- @scale=640:360@ filter (design 03 §2b). @csAnalysisFps@ caps the
+-- decode rate via ffmpeg @fps=@.
 data CameraSnapshot = CameraSnapshot
   { csId :: !CameraId,
     csSlug :: !Text,
     csRtspUrl :: !Text,
     csTransport :: !Transport,
-    csRecordAudio :: !Bool
+    csRecordAudio :: !Bool,
+    csRtspSubUrl :: !(Maybe Text),
+    csUseSubstream :: !Bool,
+    csSubWidth :: !(Maybe Int),
+    csSubHeight :: !(Maybe Int),
+    csAnalysisFps :: !Int
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

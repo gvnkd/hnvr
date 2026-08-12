@@ -13,6 +13,7 @@ import IHP.RouterSupport (FrontController (..), parseRoute, startPage)
 import Web.Controller.Archive (ArchiveController (..))
 import Web.Controller.Cameras (CamerasController (..))
 import Web.Controller.Dashboard (DashboardController (..))
+import Web.Controller.Debug (DebugController (..))
 import Web.Controller.Hosts (HostsController (..))
 import Web.Controller.Live (LiveController (..))
 import Web.Controller.Sessions (SessionsController (..))
@@ -26,7 +27,8 @@ instance FrontController RootApplication where
       parseRoute @CamerasController,
       parseRoute @HostsController,
       parseRoute @ArchiveController,
-      parseRoute @LiveController
+      parseRoute @LiveController,
+      parseRoute @DebugController
     ]
 
 instance Worker RootApplication where

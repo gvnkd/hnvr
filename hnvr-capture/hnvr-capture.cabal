@@ -9,6 +9,7 @@ library
   exposed-modules:
     Hnvr.Capture.Ffmpeg
     Hnvr.Capture.Fmp4
+    Hnvr.Capture.FrameSource
     Hnvr.Capture.SpoolDrainer
     Hnvr.Capture.Worker
 
@@ -25,9 +26,11 @@ library
     , memory
     , minio-hs
     , process
+    , stm
     , text
     , time
     , typed-process
+    , vector
 
   hs-source-dirs:   src
   default-language: Haskell2010
@@ -71,6 +74,7 @@ test-suite hnvr-capture-test
   other-modules:
     Hnvr.Capture.FfmpegSpec
     Hnvr.Capture.Fmp4Spec
+    Hnvr.Capture.FrameSourceSpec
     Hnvr.Capture.WorkerSpec
 
   build-depends:
@@ -78,6 +82,7 @@ test-suite hnvr-capture-test
     , bytestring
     , hnvr-capture
     , QuickCheck
+    , stm
     , tasty
     , tasty-hunit
     , tasty-quickcheck

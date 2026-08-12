@@ -1,0 +1,137 @@
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+-- | Per-camera analysis pipeline glue (design_docs/04-cv-pipeline.md
+-- stages 1–4):
+--
+-- @
+-- Frame → preprocess (letterbox 320×320) → ONNX infer → decode+NMS
+--       → unletterbox to source pixels → SORT update → confirmed tracks
+-- @
+--
+-- One 'Analyzer' per camera (one ONNX session each — sessions are not
+-- shared across workers, per design §"Session lifecycle"). The frame
+-- source (analysis ffmpeg → TChan) and the debug-view sink are
+-- separate slices; this module is the per-frame kernel.
+--
+-- EP selection comes from @HNVR_EXEC_PROVIDERS@ (comma-separated,
+-- priority order; first provider whose session initializes wins).
+module Hnvr.Cv.Analyzer
+  ( AnalyzerConfig (..),
+    defaultAnalyzerConfig,
+    Analyzer (..),
+    withAnalyzer,
+    analyzeFrame,
+    parseExecProviders,
+    execProvidersFromEnv,
+  )
+where
+
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Vector as V
+import Hnvr.Core.Frame (Frame (..))
+import Hnvr.Cv.Decode
+  ( decode,
+    defaultConfThreshold,
+    defaultKeepClasses,
+    defaultMaxPerClass,
+    defaultNmsIou,
+    nms,
+    unletterboxDetection,
+  )
+import Hnvr.Cv.OnnxRuntime
+  ( ExecutionProvider (..),
+    Session,
+    Tensor (..),
+    infer,
+    withSession,
+  )
+import Hnvr.Cv.Preprocess (letterboxGeometry, preprocessTo, toTensor)
+import Hnvr.Cv.Tracker.Sort (Track, Tracker, confirmedTracks, newTracker)
+import qualified Hnvr.Cv.Tracker.Sort as Sort
+import System.Environment (lookupEnv)
+
+-- | Per-camera analysis knobs. Model input size is 320 for
+-- YOLOv8n-320 (YOLOv8s-640 override lands with per-camera
+-- @cameras.model_name@ wiring).
+data AnalyzerConfig = AnalyzerConfig
+  { acConfThreshold :: !Float,
+    acKeepClasses :: Int -> Bool,
+    acNmsIou :: !Float,
+    acMaxPerClass :: !Int,
+    acTargetSize :: !Int
+  }
+
+defaultAnalyzerConfig :: AnalyzerConfig
+defaultAnalyzerConfig =
+  AnalyzerConfig
+    { acConfThreshold = defaultConfThreshold,
+      acKeepClasses = defaultKeepClasses,
+      acNmsIou = defaultNmsIou,
+      acMaxPerClass = defaultMaxPerClass,
+      acTargetSize = 320
+    }
+
+-- | Live analyzer: session + tracker state. The tracker threads
+-- through 'analyzeFrame' purely; the session is fixed for the
+-- analyzer's lifetime.
+data Analyzer = Analyzer
+  { anSession :: Session,
+    anConfig :: AnalyzerConfig,
+    anTracker :: Tracker
+  }
+
+-- | Create an analyzer for @modelPath@, trying EPs in priority order.
+withAnalyzer :: AnalyzerConfig -> Text -> [ExecutionProvider] -> (Analyzer -> IO r) -> IO r
+withAnalyzer cfg modelPath eps k =
+  withSession modelPath eps $ \sess ->
+    k Analyzer {anSession = sess, anConfig = cfg, anTracker = newTracker}
+
+-- | One frame through the full pipeline. Returns the updated analyzer
+-- and this frame's confirmed tracks (boxes in source-frame pixels).
+analyzeFrame :: Analyzer -> Frame -> IO (Analyzer, [Track])
+analyzeFrame an frame = do
+  let cfg = anConfig an
+      target = acTargetSize cfg
+      lb = letterboxGeometry target target (frameWidth frame) (frameHeight frame)
+      tensor = toTensor (preprocessTo target frame)
+  out <- infer (anSession an) tensor
+  let dets = decode (acConfThreshold cfg) (acKeepClasses cfg) out
+      kept = nms (acNmsIou cfg) (acMaxPerClass cfg) dets
+      inSource = V.map (unletterboxDetection lb) kept
+      tracker' = Sort.update (anTracker an) inSource
+  pure (an {anTracker = tracker'}, confirmedTracks tracker')
+
+-- | Parse @HNVR_EXEC_PROVIDERS@ (comma-separated, priority order):
+-- @cpu@, @cuda@, @tensorrt@ (alias @trt@). Case-insensitive, blanks
+-- dropped. Unknown tokens are an error — a typo'd EP should fail loud
+-- at startup, not silently fall through.
+parseExecProviders :: Text -> Either Text [ExecutionProvider]
+parseExecProviders input =
+  let tokens = filter (not . T.null) (map T.strip (T.splitOn "," input))
+   in if null tokens
+        then Left "HNVR_EXEC_PROVIDERS: empty provider list"
+        else mapM parseOne tokens
+  where
+    parseOne t = case T.toLower t of
+      "cpu" -> Right CPU
+      "cuda" -> Right CUDA
+      "tensorrt" -> Right TensorRT
+      "trt" -> Right TensorRT
+      other -> Left ("HNVR_EXEC_PROVIDERS: unknown execution provider " <> other)
+
+-- | Read @HNVR_EXEC_PROVIDERS@; defaults to @[CPU]@ when unset (the
+-- NixOS module sets per-host defaults — @cuda,cpu@ on hnvr-1,
+-- @tensorrt,cuda,cpu@ on hnvr-2). Malformed values fall back to
+-- @[CPU]@ too; 'parseExecProviders' is exported for callers that want
+-- the strict variant.
+execProvidersFromEnv :: IO [ExecutionProvider]
+execProvidersFromEnv = do
+  m <- lookupEnv "HNVR_EXEC_PROVIDERS"
+  case m of
+    Nothing -> pure [CPU]
+    Just raw ->
+      case parseExecProviders (T.pack raw) of
+        Right eps -> pure eps
+        Left _ -> pure [CPU]

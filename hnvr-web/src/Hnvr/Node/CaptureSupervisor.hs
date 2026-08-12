@@ -40,6 +40,10 @@ module Hnvr.Node.CaptureSupervisor
     stopAllCameras,
     listCameras,
 
+    -- * Analysis (Phase 3)
+    latestAnalysis,
+    analysisTVar,
+
     -- * Re-exports
     CaptureConfig (..),
     CameraConfig (..),
@@ -62,7 +66,12 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Hnvr.Capture.Ffmpeg (Transport (..))
+import Hnvr.Capture.Ffmpeg (AnalysisConfig (..), Transport (..))
+import Hnvr.Capture.FrameSource
+  ( FrameSourceConfig (..),
+    frameSourceLoop,
+    newFrameQueue,
+  )
 import Hnvr.Capture.SpoolDrainer (startSpoolDrainer)
 import Hnvr.Capture.Worker
   ( CameraConfig (..),
@@ -71,15 +80,20 @@ import Hnvr.Capture.Worker
   )
 import Hnvr.Core.CameraSnapshot (CameraSnapshot (..))
 import qualified Hnvr.Core.CameraSnapshot as Snap
+import Hnvr.Core.Frame (Frame)
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Logging (logInfo, logWarn)
+import Hnvr.Cv.Analyzer (defaultAnalyzerConfig, execProvidersFromEnv)
+import Hnvr.Cv.AnalyzerRunner (runAnalyzer)
+import Hnvr.Cv.Tracker.Sort (Track)
 import System.Environment (lookupEnv)
 import System.Timeout (timeout)
 
 -- | Opaque handle. Construct via 'startCaptureSupervisor'.
 data CaptureSupervisor = CaptureSupervisor
   { csConfig :: !CaptureConfig,
-    csWorkers :: !(IORef (Map CameraId WorkerHandle))
+    csWorkers :: !(IORef (Map CameraId WorkerHandle)),
+    csAnalysis :: !(IORef (Map CameraId AnalysisHandle))
   }
 
 -- | One per running camera. The @stopTVar@ is polled by the worker's
@@ -91,18 +105,29 @@ data WorkerHandle = WorkerHandle
     whAsync :: !(Async ())
   }
 
+-- | The Phase 3 analysis pair for one camera: frame source (analysis
+-- ffmpeg → queue, self-restarting with backoff) + analyzer loop
+-- (queue → ONNX → SORT). @ahLatest@ holds the most recent
+-- (frame, confirmed tracks) for the /debug view.
+data AnalysisHandle = AnalysisHandle
+  { ahSource :: !(Async ()),
+    ahAnalyzer :: !(Async ()),
+    ahLatest :: !(TVar (Maybe (Frame, [Track])))
+  }
+
 -- | Construct a supervisor. The @CaptureConfig@ should carry the
 -- process-wide @capBus@ \/ @capS3@ \/ @capHostId@ etc.; per-camera
 -- config is supplied via 'startCamera'.
 startCaptureSupervisor :: CaptureConfig -> IO CaptureSupervisor
 startCaptureSupervisor cfg = do
   ref <- newIORef Map.empty
+  aRef <- newIORef Map.empty
   -- SpoolDrainer is process-wide (not per-camera) so it can clean up
   -- after camera reassignments too. Started here so it shares the
   -- supervisor's CaptureConfig (capS3, capBucket, capSpoolDir).
   startSpoolDrainer cfg
   logInfo "CaptureSupervisor: started"
-  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref})
+  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef})
 
 -- | Idempotent: starts a worker for the given camera. If a worker is
 -- already running for the same 'CameraId', it is stopped first (so
@@ -142,13 +167,82 @@ startCamera sup snap = do
   a <- async (captureWorkerWithStop sup.csConfig camCfg shouldStop)
   let handle = WorkerHandle {whStop = stopTVar, whAsync = a}
   modifyIORef' sup.csWorkers (Map.insert (csId snap) handle)
+  maybeStartAnalysis sup snap relayUrl
   logInfo ("CaptureSupervisor: started worker for " <> csSlug snap <> " via " <> relayUrl)
+
+-- | Spawn the analysis pair (frame source + analyzer) for a camera.
+--
+-- Enabled when @HNVR_MODEL_PATH@ points at an ONNX model and
+-- @HNVR_ANALYSIS_ENABLED@ is not @0@. Sub-stream decode is preferred
+-- (direct camera URL, native dims from Probe); when
+-- @use_substream_for_analysis@ is false or dims/URL are missing we
+-- fall back to the mediamtx relay main stream with @scale=640:360@
+-- (design 03 §2b). EPs come from @HNVR_EXEC_PROVIDERS@.
+maybeStartAnalysis :: CaptureSupervisor -> CameraSnapshot -> Text -> IO ()
+maybeStartAnalysis sup snap relayUrl = do
+  enabled <- (/= Just "0") <$> lookupEnv "HNVR_ANALYSIS_ENABLED"
+  mModel <- lookupEnv "HNVR_MODEL_PATH"
+  case (enabled, mModel) of
+    (False, _) -> pure ()
+    (_, Nothing) ->
+      logWarn ("CaptureSupervisor: HNVR_MODEL_PATH unset; analysis disabled for " <> csSlug snap)
+    (_, Just modelPath) -> do
+      eps <- execProvidersFromEnv
+      queue <- newFrameQueue
+      latest <- newTVarIO Nothing
+      let (analysisCfg, width, height) = analysisConfigFor snap relayUrl
+          fsCfg =
+            FrameSourceConfig
+              { fscAnalysis = analysisCfg,
+                fscWidth = width,
+                fscHeight = height,
+                fscTag = csSlug snap
+              }
+      src <- async (frameSourceLoop fsCfg queue)
+      ana <-
+        async $
+          runAnalyzer
+            defaultAnalyzerConfig
+            (T.pack modelPath)
+            eps
+            queue
+            (\frame tracks -> atomically (writeTVar latest (Just (frame, tracks))))
+      modifyIORef' sup.csAnalysis $
+        Map.insert (csId snap) AnalysisHandle {ahSource = src, ahAnalyzer = ana, ahLatest = latest}
+      logInfo ("CaptureSupervisor: analysis pair started for " <> csSlug snap)
+
+-- | Pick sub-stream decode vs main-stream-with-scale fallback per
+-- camera snapshot (design 03 §2b).
+analysisConfigFor :: CameraSnapshot -> Text -> (AnalysisConfig, Int, Int)
+analysisConfigFor snap relayUrl =
+  case (csUseSubstream snap, csRtspSubUrl snap, csSubWidth snap, csSubHeight snap) of
+    (True, Just subUrl, Just w, Just h) ->
+      ( AnalysisConfig
+          { ancUrl = subUrl,
+            ancTransport = TcpTransport,
+            ancScale = Nothing,
+            ancFps = csAnalysisFps snap
+          },
+        w,
+        h
+      )
+    _ ->
+      ( AnalysisConfig
+          { ancUrl = relayUrl,
+            ancTransport = TcpTransport,
+            ancScale = Just (640, 360),
+            ancFps = csAnalysisFps snap
+          },
+        640,
+        360
+      )
 
 -- | Signal stop for the worker owning this camera, wait up to 10 s for
 -- a clean exit, cancel the async if it takes too long. No-op if no
 -- worker is running for the supplied id.
 stopCamera :: CaptureSupervisor -> CameraId -> IO ()
 stopCamera sup camId = do
+  stopAnalysisPair
   mHandle <-
     atomicModifyIORef'
       sup.csWorkers
@@ -164,6 +258,15 @@ stopCamera sup camId = do
           logWarn "CaptureSupervisor: worker did not exit in 10s, cancelling"
           cancel handle.whAsync
       logInfo ("CaptureSupervisor: stopped worker for camera id " <> T.pack (show (unCameraId camId)))
+  where
+    stopAnalysisPair = do
+      mAna <-
+        atomicModifyIORef'
+          sup.csAnalysis
+          (\m -> (Map.delete camId m, Map.lookup camId m))
+      forM_ mAna $ \h -> do
+        cancel h.ahSource
+        cancel h.ahAnalyzer
 
 -- | Convenience: stop + start. Useful when only config has changed
 -- (e.g. RTSP URL rotation) and the caller already has the new
@@ -185,3 +288,20 @@ stopAllCameras sup = do
 -- 'HealthReporter' (Phase 3 fills in the camera list payload).
 listCameras :: CaptureSupervisor -> IO [CameraId]
 listCameras sup = Map.keys <$> readIORef sup.csWorkers
+
+-- | Latest (frame, confirmed tracks) for a camera's analysis pair,
+-- if analysis is enabled and at least one frame has been processed.
+-- The Phase 3 /debug view renders this.
+latestAnalysis :: CaptureSupervisor -> CameraId -> IO (Maybe (Frame, [Track]))
+latestAnalysis sup camId = do
+  m <- readIORef sup.csAnalysis
+  case Map.lookup camId m of
+    Nothing -> pure Nothing
+    Just h -> readTVarIO h.ahLatest
+
+-- | The raw 'TVar' behind 'latestAnalysis' — streaming consumers
+-- (the /debug-stream middleware) block on it via STM instead of
+-- polling.
+analysisTVar :: CaptureSupervisor -> CameraId -> IO (Maybe (TVar (Maybe (Frame, [Track]))))
+analysisTVar sup camId =
+  fmap (\h -> h.ahLatest) . Map.lookup camId <$> readIORef sup.csAnalysis

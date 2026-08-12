@@ -485,6 +485,22 @@
                 # ---- Runtime deps for local testing --------------------
                 pkgs.ffmpeg_7-full
                 pkgs.onnxruntime
+                # ultralytics CLI (`yolo`) — dev-only, used to export
+                # YOLOv8n-320/YOLOv8s-640 ONNX models for the CV
+                # pipeline (Phase 3). AGPL-3.0: export tool only, never
+                # linked into HNVR binaries or shipped in the NixOS
+                # closure. Pulls in torch — expect a multi-GB closure
+                # on first `nix develop`.
+                #
+                # The top-level `pkgs.ultralytics` wrapper omits the
+                # optional ONNX export deps (`import onnx` fails), so we
+                # build our own python env with onnx + onnxslim (the
+                # 8.4.x simplifier — the old `onnxsim` is gone).
+                (pkgs.python3.withPackages (ps: [
+                  ps.ultralytics
+                  ps.onnx
+                  ps.onnxslim
+                ]))
                 # NOTE: cabal build all needs pg_config for postgresql-libpq-configure.
                 # We currently can't pull postgresql/libpq here without enabling
                 # nix's experimental pipe-operators feature (nixpkgs at our pinned
@@ -646,6 +662,20 @@
                 # for the dev user — spool fallback silently failed in
                 # dev until this was set).
                 HNVR_SPOOL_DIR = "${config.env.DEVENV_STATE}/spool";
+                # ---- Phase 3 CV pipeline --------------------------------
+                # libonnxruntime for the internal FFI binding
+                # (Hnvr.Cv.OnnxRuntime.Internal, dlopen'd at session
+                # creation). CPU-only build — CUDA/TRT EPs fall through
+                # to CPU cleanly. Model: yolov8n-320 exported into the
+                # shared model cache (design 04; exported via the
+                # devShell's ultralytics env, see pitfall #97).
+                HNVR_ONNXRUNTIME_LIB = "${pkgs.onnxruntime}/lib/libonnxruntime.so";
+                HNVR_MODEL_PATH = "/home/pion/.local/share/hnvr/model_cache/yolov8/yolov8n-320.onnx";
+                # Per-host EP priority (design 04 §"Per-host EP
+                # selection"). Dev box is hnvr-2 (RTX 4090); CPU-only
+                # onnxruntime means TRT/CUDA fail append and the
+                # session lands on CPU.
+                HNVR_EXEC_PROVIDERS = "tensorrt,cuda,cpu";
               };
 
               enterShell = preCommit.shellHook + ''

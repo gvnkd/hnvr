@@ -16,6 +16,7 @@ module Hnvr.Web.CommandTypes
     ControlPayload (..),
     SnapshotRequest (..),
     projectCamera,
+    cameraIdOf,
   )
 where
 
@@ -128,7 +129,12 @@ projectCamera cam =
               csSlug = cam.slug,
               csRtspUrl = cam.rtspUrl,
               csTransport = tr,
-              csRecordAudio = cam.recordAudio
+              csRecordAudio = cam.recordAudio,
+              csRtspSubUrl = cam.rtspSubUrl,
+              csUseSubstream = cam.useSubstreamForAnalysis,
+              csSubWidth = fromIntegral <$> cam.substreamWidth,
+              csSubHeight = fromIntegral <$> cam.substreamHeight,
+              csAnalysisFps = fromIntegral cam.analysisFps
             }
 
 -- | Unwrap the IHP @Id' "cameras"@ newtype into the underlying 'UUID'

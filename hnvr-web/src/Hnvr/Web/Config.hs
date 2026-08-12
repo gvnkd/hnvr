@@ -24,6 +24,7 @@ where
 import qualified Control.Exception as E
 import Control.Monad (forM_, void, when)
 import Data.Aeson (object, (.=))
+import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, maybe)
 import qualified Data.Text as T
 import Generated.Types
@@ -40,11 +41,13 @@ import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
+import Hnvr.Web.DebugStream (debugStreamMiddleware)
 import Hnvr.Web.EventWriter (startEventWriter)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
 import Hnvr.Web.RetentionSweeper (startRetentionSweeper)
 import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
+import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
 import Hnvr.Web.WhepProxy (whepMiddleware)
 import IHP.AuthSupport.Authentication (hashPassword)
 import IHP.FrameworkConfig
@@ -80,7 +83,7 @@ config = do
   -- twice silently drops the second one. Compose all custom WAI
   -- middlewares here. Order: whep runs first (most-specific path prefix),
   -- falls through to healthz, falls through to IHP.
-  option $ CustomMiddleware (whepMiddleware . healthzMiddleware)
+  option $ CustomMiddleware (debugStreamMiddleware . whepMiddleware . healthzMiddleware)
   option $ AuthMiddleware (authMiddleware @User)
   addInitializer connectNatsAndStartEventWriter
   addInitializer seedAdminUser
@@ -176,6 +179,7 @@ startNodeRoles bus host = do
             capSpoolDir = spool
           }
   sup <- startCaptureSupervisor cfg
+  writeIORef supervisorRegistry (Just sup)
   startConfigWatcher bus host sup
   let subject = commandSnapshot host
       req = object ["host" .= host]
