@@ -115,6 +115,17 @@ in
         ProtectHome = true;
         ReadOnlyPaths = "/";
         ReadWritePaths = [ cfg.dataDir ];
+
+        # Raise the FD ceiling above systemd's 1024 default. The leader
+        # holds many concurrent sockets: per-camera ffmpeg subprocess
+        # pipes, MinIO upload connections, WHEP/WebRTC session sockets,
+        # async S3-purge workers (PurgeRecordingAction spawns a thread
+        # that walks thousands of segment keys). At Sergey's 3-camera
+        # 24/7 capture load the leader peaked past 1024 and
+        # `Network.Socket.accept: resource exhausted` started refusing
+        # /NewSession, which made it look like the cameras-crud test
+        # was hung on `page.goto` (reported 2026-08-12).
+        LimitNOFILE = 524288;
       };
 
       # Generate the IHP session secret on first start if missing.

@@ -1,5 +1,6 @@
 module Main (main) where
 
+import qualified Hnvr.Core.ArchiveBrowserSpec as ArchiveBrowserSpec
 import qualified Hnvr.Core.AssignmentSpec as AssignmentSpec
 import qualified Hnvr.Core.CryptoSpec as CryptoSpec
 import qualified Hnvr.Core.GeometrySpec as GeometrySpec
@@ -16,7 +17,8 @@ main =
   defaultMain $
     testGroup
       "hnvr-core"
-      [ AssignmentSpec.tests,
+      [ ArchiveBrowserSpec.tests,
+        AssignmentSpec.tests,
         CryptoSpec.tests,
         GeometrySpec.tests,
         IdSpec.tests,

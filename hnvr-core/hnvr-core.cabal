@@ -7,6 +7,7 @@ build-type:    Simple
 
 library
   exposed-modules:
+    Hnvr.Core.ArchiveBrowser
     Hnvr.Core.Assignment
     Hnvr.Core.CameraSnapshot
     Hnvr.Core.Crypto
@@ -51,6 +52,7 @@ test-suite hnvr-core-test
   main-is:          Main.hs
   hs-source-dirs:   test
   other-modules:
+    Hnvr.Core.ArchiveBrowserSpec
     Hnvr.Core.AssignmentSpec
     Hnvr.Core.CryptoSpec
     Hnvr.Core.GeometrySpec

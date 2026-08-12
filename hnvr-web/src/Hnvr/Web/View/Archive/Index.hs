@@ -179,13 +179,29 @@ instance View IndexView where
               then
                 [hsx|
                   <form method="POST" action={deleteUrl} style="display:inline">
-                    <input type="hidden" name="from" value={iso (r.rrStart)} />
-                    <input type="hidden" name="to" value={iso (r.rrEnd)} />
+                    <input type="hidden" name="purgeFrom" value={iso (r.rrStart)} />
+                    <input type="hidden" name="purgeTo" value={iso (r.rrEnd)} />
                     <button type="submit" class="btn btn-danger btn-sm">Delete</button>
                   </form>
                 |]
               else [hsx||]
-          deleteUrl = "/PurgeRecording?cameraId=" <> r.rrCameraId
+          -- The action URL carries @purgeCameraId@ (the renamed
+          -- AutoRoute field for 'PurgeRecordingAction' — the bare
+          -- @cameraId@ name clashed with the filter round-trip and
+          -- produced URLs like @?cameraId=X&cameraId=X@) plus any
+          -- active filter params via 'queryString' so the controller
+          -- can redirect back to the same filtered view. The form
+          -- body carries only purgeFrom/purgeTo (the recording
+          -- window) under prefixed names to avoid clashing with the
+          -- filter's from/to.
+          --
+          -- We also carry the current page (when > 1) so the redirect
+          -- doesn't dump the user back on page 1.
+          deleteUrl =
+            "/PurgeRecording?purgeCameraId="
+              <> r.rrCameraId
+              <> queryString
+              <> (if page > 1 then "&page=" <> tshow page else "")
 
       pagination =
         [hsx|

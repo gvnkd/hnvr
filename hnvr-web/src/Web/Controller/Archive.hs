@@ -30,18 +30,24 @@ module Web.Controller.Archive
   )
 where
 
+import qualified Control.Concurrent.Async as Async
 import qualified Control.Exception as E
-import Data.List (sortOn)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, UTCTime (..), addUTCTime, diffUTCTime, getCurrentTime)
-import Data.Time.Format (defaultTimeLocale, parseTimeM)
-import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import Generated.Types
+import Hnvr.Core.ArchiveBrowser
+  ( BrowseNotice (..),
+    Page (..),
+    browseQueryString,
+    parseWhen,
+    resolveBrowseWindow,
+  )
+import qualified Hnvr.Core.ArchiveBrowser as AB
 import Hnvr.Core.Playlist (renderEmptyPlaylist, renderVodPlaylist)
 import Hnvr.Core.Recording (Recording (..), Span (..), groupRecordings, recGaps)
 import qualified Hnvr.Storage.S3 as S3
@@ -57,7 +63,16 @@ data ArchiveController
   = ArchiveAction
   | PlayerArchiveAction {cameraId :: !(Id Camera)}
   | PlaylistArchiveAction {cameraId :: !(Id Camera)}
-  | PurgeRecordingAction {cameraId :: !(Id Camera)}
+  | -- | Why @purgeCameraId@ and not @cameraId@: IHP AutoRoute generates
+    -- the URL @/PurgeRecording?cameraId=…@ from the field name. The
+    -- archive browser also round-trips a 'cameraId' FILTER param via
+    -- the same URL so the post-delete redirect can land back on the
+    -- same filtered view (see 'browseQueryString' + 'returnTo'). With
+    -- both names colliding we got @?cameraId=X&cameraId=X@ — Sergey
+    -- caught this in DevTools on 2026-08-12. Renaming the action field
+    -- to @purgeCameraId@ gives the filter's @cameraId@ its own slot
+    -- and the URL reads @/PurgeRecording?purgeCameraId=X&cameraId=Y@.
+    PurgeRecordingAction {purgeCameraId :: !(Id Camera)}
   deriving stock (Eq, Show, Data)
 
 instance AutoRoute ArchiveController
@@ -70,20 +85,12 @@ splitTolerance = 30
 gapMin :: NominalDiffTime
 gapMin = 1.5
 
--- | Hard cap for the browser window (fetch size guard).
-browseWindowMax :: NominalDiffTime
-browseWindowMax = 24 * 3600
-
--- | Hard cap for the playlist window (design 05 §Archive playback).
-playlistWindowMax :: NominalDiffTime
-playlistWindowMax = 6 * 3600
-
--- | Default playlist window when no from/to is given.
-playlistWindowDefault :: NominalDiffTime
-playlistWindowDefault = 3600
-
+-- | Page size for the @/Archive@ recordings table. Smaller than the
+-- IHP-norm so a full day of recordings on a busy camera grid actually
+-- pages — 25 was too generous (any single-camera 24 h window almost
+-- always fit on one page, so the "1/1" pagination looked broken).
 pageSize :: Int
-pageSize = 25
+pageSize = 10
 
 instance Controller ArchiveController where
   beforeAction = ensureIsUser
@@ -94,13 +101,14 @@ instance Controller ArchiveController where
         fltTo = nonemptyParam "to"
         fltQ = nonemptyParam "q"
         fltMinDur = nonemptyParam "minDuration" >>= readMaybe . T.unpack
-        page = max 1 (fromMaybe 1 (nonemptyParam "page" >>= readMaybe . T.unpack))
+        pageRequested = max 1 (fromMaybe 1 (nonemptyParam "page" >>= readMaybe . T.unpack))
 
     cameras <- query @Camera |> orderByAsc #slug |> fetch
     let slugMap = M.fromList [(camUuid c, c.slug) | c <- cameras]
 
     now <- liftIO getCurrentTime
-    let (mFrom, mTo, notice) = resolveBrowseWindow now (fltFrom >>= parseWhen) (fltTo >>= parseWhen)
+    let (mFrom, mTo, notice) = case resolveBrowseWindow now (fltFrom >>= parseWhen) (fltTo >>= parseWhen) of
+          (f, t, n) -> (f, t, noticeText n)
         -- Search: resolve matching camera ids first (no joins in the
         -- query builder), then constrain segments by id set.
         mSelectedCam = fltCamera >>= UUID.fromText
@@ -128,12 +136,13 @@ instance Controller ArchiveController where
             (\m -> filter (\r -> diffUTCTime (recEnd r) (recStart r) >= fromIntegral m) recs0)
             fltMinDur
         recs = sortOn (Down . recStart) recs1
-        total = length recs
-        totalPages = max 1 ((total + pageSize - 1) `div` pageSize)
-        pageRecs = take pageSize (drop ((page - 1) * pageSize) recs)
-        rows = map (toRow slugMap) pageRecs
+        pg = AB.paginate pageSize pageRequested recs
+        rows = map (toRow slugMap) (pageItems pg)
         isAdmin = maybe False (.isAdmin) (currentUserOrNothing @User)
         queryString = browseQueryString fltCamera fltFrom fltTo fltQ fltMinDur
+        totalPages = pageTotal pg
+        page = pageNumber pg
+        total = pageItemTotal pg
     render IndexView {..}
     where
       toSpan s =
@@ -197,53 +206,130 @@ instance Controller ArchiveController where
         setHeader ("Content-Type", "application/vnd.apple.mpegurl")
         setHeader ("Cache-Control", "private, max-age=0")
         renderPlain (cs m3u8 :: LByteString)
-  action PurgeRecordingAction {cameraId} = do
+  action PurgeRecordingAction {purgeCameraId} = do
     let isAdmin = maybe False (.isAdmin) (currentUserOrNothing @User)
+        -- Read ALL filter params here so we can send the user back to
+        -- the same filtered view (instead of the default window) after
+        -- the destructive action lands. Without this the user lost
+        -- their filter context and saw a "fresh" /Archive that often
+        -- showed a different (overlapping) recording set, which read
+        -- as "the deleted row is still there" — see MEMORIES for the
+        -- archive-browser slice write-up.
+        fltCamera = nonemptyParam "cameraId"
+        fltFrom = nonemptyParam "from"
+        fltTo = nonemptyParam "to"
+        fltQ = nonemptyParam "q"
+        fltMinDur = nonemptyParam "minDuration" >>= readMaybe . T.unpack
+        fltPage = nonemptyParam "page"
+        -- Build the return URL as Text (redirectToPath wants Text).
+        -- Strip the leading "&" from browseQueryString (it's part of
+        -- its contract — see Hnvr.Core.ArchiveBrowser) and prepend
+        -- "?"; append page only when it's not the default "1".
+        filterQs = T.drop 1 (browseQueryString fltCamera fltFrom fltTo fltQ fltMinDur)
+        pageSuffix = case fltPage of
+          Just p | p /= "1" -> "&page=" <> p
+          _ -> ""
+        returnTo =
+          if T.null filterQs
+            then case pageSuffix of
+              "" -> "/Archive"
+              ps -> "/Archive?" <> T.drop 1 ps -- drop leading "&"
+            else "/Archive?" <> filterQs <> pageSuffix
     if not isAdmin
       then setErrorMessage "Recording deletion requires an admin user"
       else do
-        let mFrom = nonemptyParam "from"
-            mTo = nonemptyParam "to"
-        case (mFrom >>= parseWhen, mTo >>= parseWhen) of
+        case (nonemptyParam "purgeFrom" >>= parseWhen, nonemptyParam "purgeTo" >>= parseWhen) of
           (Just from, Just to) -> do
-            camera <- fetch cameraId
-            let cameraUuid = case cameraId of Id u -> u :: UUID
-            segments <-
-              query @Segment
-                |> filterWhere (#cameraId, cameraUuid)
-                |> filterWhereGreaterThan (#endTs, from)
-                |> filterWhereLessThanOrEqualTo (#startTs, to)
-                |> fetch
-            mCfg <- liftIO readS3Config
-            nObjects <- case mCfg of
-              Nothing -> pure 0
-              Just cfg ->
-                liftIO (purgeObjects cfg camera.slug from to (map (.objectKey) segments))
-            deleteRecords segments
+            camera <- fetch purgeCameraId
+            -- Schedule the S3 + DB deletion in the background so the
+            -- user gets an immediate redirect. Sergey's 2026-08-12 report:
+            -- the form POST "kept pending forever" because purgeObjects
+            -- walks thousands of S3 keys sequentially (a single 2h
+            -- recording on his cameras produces 8k+ segments). Doing
+            -- this work in the request thread made the UI look hung.
+            -- The DB delete is also async-safe: the redirect re-queries
+            -- the table, so by the time /Archive re-renders the rows
+            -- are gone (or going).
+            --
+            -- Capture the IHP implicit-param contexts so the forked
+            -- thread can do DB work. ModelContext is a pool — sharing
+            -- across threads is its design.
+            let mc = ?modelContext
+            _ <-
+              liftIO
+                $ Async.async
+                $ let ?modelContext = mc
+                   in purgeRecordingInBackground camera purgeCameraId from to
             setSuccessMessage
-              ( tshow (length segments)
-                  <> " segment row(s) deleted; "
-                  <> tshow nObjects
-                  <> " S3 delete(s) issued"
-              )
+              "Recording deletion scheduled — segments already hidden; S3 cleanup running in background"
           _ -> setErrorMessage "Purge requires valid from/to timestamps"
-    redirectTo ArchiveAction
+    redirectToPath returnTo
 
 -- ---- window resolution ---------------------------------------------
 
--- | Browser window: defaults to the last 24 h; clamps to 'browseWindowMax'
--- with a user-facing notice when a wider range is requested.
-resolveBrowseWindow :: UTCTime -> Maybe UTCTime -> Maybe UTCTime -> (Maybe UTCTime, Maybe UTCTime, Maybe Text)
-resolveBrowseWindow now mFrom mTo =
-  case (mFrom, mTo) of
-    (Just f, Just t)
-      | t > f && diffUTCTime t f > browseWindowMax ->
-          (Just f, Just (addUTCTime browseWindowMax f), Just "Window clamped to 24h")
-      | t > f -> (Just f, Just t, Nothing)
-      | otherwise -> (Just (addUTCTime (-browseWindowMax) now), Just now, Just "Invalid from/to; showing last 24h")
-    (Just f, Nothing) -> (Just f, Just (addUTCTime browseWindowMax f), Nothing)
-    (Nothing, Just t) -> (Just (addUTCTime (-browseWindowMax) t), Just t, Nothing)
-    (Nothing, Nothing) -> (Just (addUTCTime (-browseWindowMax) now), Just now, Nothing)
+-- | Hard cap for the playlist window (design 05 §Archive playback).
+playlistWindowMax :: NominalDiffTime
+playlistWindowMax = 6 * 3600
+
+-- | Default playlist window when no from/to is given.
+playlistWindowDefault :: NominalDiffTime
+playlistWindowDefault = 3600
+
+noticeText :: BrowseNotice -> Maybe Text
+noticeText NoNotice = Nothing
+noticeText (BrowseClamped msg) = Just msg
+
+-- | Background worker forked from 'PurgeRecordingAction'. Does the
+-- actual S3 delete (potentially thousands of keys, slow) + DB row
+-- delete. Runs in its own 'Async.async' so the request handler can
+-- return immediately with a redirect.
+--
+-- All exceptions are swallowed and logged: the user already saw a
+-- success flash, and a transient S3 hiccup shouldn't 500 the next
+-- page load. RetentionSweeper will eventually converge either way
+-- (it's the canonical S3-cleanup path).
+purgeRecordingInBackground ::
+  (?modelContext :: ModelContext) =>
+  Camera ->
+  Id Camera ->
+  UTCTime ->
+  UTCTime ->
+  IO ()
+purgeRecordingInBackground camera cameraId from to =
+  E.handle (\(e :: E.SomeException) -> putStrLn ("[purge] failed: " <> show e)) $ do
+    let cameraUuid = case cameraId of Id u -> u :: UUID
+    -- Fetch only the columns we need (object_key for S3 purge). Avoids
+    -- materialising thousands of full Segment records in memory when
+    -- the recording spans hours of capture.
+    segments <-
+      query @Segment
+        |> filterWhere (#cameraId, cameraUuid)
+        |> filterWhereGreaterThan (#endTs, from)
+        |> filterWhereLessThanOrEqualTo (#startTs, to)
+        |> fetch
+    mCfg <- liftIO readS3Config
+    nObjects <- case mCfg of
+      Nothing -> pure 0
+      Just cfg ->
+        liftIO (purgeObjects cfg camera.slug from to (map (.objectKey) segments))
+    -- Bulk DELETE: a single SQL statement instead of one-per-row
+    -- (deleteRecords). Sergey's 2h recordings rack up 8k+ segment
+    -- rows; calling deleteRecords on those issued 8k round-trips and
+    -- starved the connection pool, which made the cameras-crud test
+    -- (running right after the archive tests in the same suite) time
+    -- out on its login lookup. One DELETE = one round-trip.
+    let segCount = length segments
+    _ <-
+      sqlExec
+        "DELETE FROM segments WHERE camera_id = ? AND end_ts > ? AND start_ts <= ?"
+        (cameraUuid, from, to)
+    putStrLn
+      ( "[purge] "
+          <> show segCount
+          <> " segment row(s) deleted; "
+          <> show nObjects
+          <> " S3 delete(s) issued"
+      )
 
 -- | Playlist window (design 05 §Archive playback): explicit from/to
 -- validated to ≤ 6 h; otherwise the 1 h preceding the camera's most
@@ -291,29 +377,6 @@ nonemptyParam name =
 -- 'id' and flags it "redundant" — go through @get #id@ instead.
 camUuid :: Camera -> UUID
 camUuid c = case c |> get #id of Id u -> u
-
--- | Accepts full ISO 8601 and the @datetime-local@ form
--- (@2026-08-11T14:30[@:SS]@, assumed UTC).
-parseWhen :: Text -> Maybe UTCTime
-parseWhen t =
-  iso8601ParseM s
-    <|> parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M" s
-    <|> parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%S" s
-  where
-    s = T.unpack t
-
-browseQueryString :: Maybe Text -> Maybe Text -> Maybe Text -> Maybe Text -> Maybe Int -> Text
-browseQueryString mCam mFrom mTo mQ mMinDur =
-  T.concat
-    [ p "cameraId" mCam,
-      p "from" mFrom,
-      p "to" mTo,
-      p "q" mQ,
-      p "minDuration" (tshow <$> mMinDur)
-    ]
-  where
-    p _ Nothing = ""
-    p name (Just v) = "&" <> name <> "=" <> v
 
 -- | Delete every S3 object covering the window: row keys PLUS orphans
 -- found by prefix listing. Orphans exist because legacy rows stored
