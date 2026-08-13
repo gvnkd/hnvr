@@ -10,7 +10,10 @@
 - **Local path**: `/home/pion/work/dev/hnvr`
 - **Remote**: `gitea@192.168.0.254:omg/hnvr.git` (branch `master`)
 - **Current branch state**: Phase 0 + 1 + 2 done (code; live VM tests
-  pending). Phase 2 audit-and-fix pass landed Aug 10 2026 (see
+  pending). Phase 3 slices 1–9 done (CV pipeline + EKG metrics + CUDA
+  EP verified live on hnvr-2, Aug 13 2026 — staged, not yet committed).
+  Remaining Phase 3: TRT engine CI job, hnvr-1 CUDA 12.8 wiring,
+  longer bake. Phase 2 audit-and-fix pass landed Aug 10 2026 (see
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
   that have been resolved; `.opencode/PHASE_AUDIT_REPORT_2.md` for the
   round-2 re-audit at `57aac3b`). Phase 1 slice 8 (Cameras admin gate)
@@ -123,6 +126,8 @@ HNVR_NATS_URI="nats://nats:nats@localhost:4222" PORT=18001 \
   ./result/bin/hnvr-leader  # IHP app + NATS connect; /healthz on PORT
 HNVR_NATS_URI="nats://nats:nats@localhost:4222" HNVR_HOST=hnvr-2 \
   ./result/bin/hnvr-node    # Connects to NATS, HealthReporter + ConfigWatcher
+# Prometheus metrics (both binaries; own warp, not IHP):
+#   HNVR_METRICS_PORT=9102 curl localhost:9102/metrics   # devenv: MinIO owns :9100
 
 # Build & boot a NixOS VM (leader). QEMU hostfwd uses COMMA separator
 # for multiple ports — space-separated is silently dropped.
@@ -186,8 +191,8 @@ hnvr/
 ├── vendored/
 │   └── nats-queue/      2017 lib + sClose → close patch baked in
 ├── hnvr-core/           REAL types + S3-extracted pure logic
-│   ├── src/Hnvr/Core/   Id, Geometry, Logging, Prelude, Time, Segment,
-│   │                    Crypto, Whep (extracted from hnvr-web S3),
+│   ├── src/Hnvr/Core/   Id, Geometry, Logging, Metrics, Prelude, Time,
+│   │                    Segment, Crypto, Whep (extracted from hnvr-web S3),
 │   │                    Assignment (extracted from hnvr-web S3),
 │   │                    ArchiveBrowser (extracted from Web.Controller.Archive S3)
 │   ├── test/            S1+S3 spec suite + ArchiveBrowserSpec (97 tests total)
@@ -225,7 +230,8 @@ hnvr/
 │                        ├── src/Web/Controller/Support/Crypto.hs encryptPassword / decryptPassword / requireKey
 │                        ├── src/Web/Controller/{Archive,Live,Dashboard,Hosts,Sessions}.hs
 │                        ├── src/Hnvr/Web/{EventWriter,HealthCache,AssignmentCoordinator,
-│                        │                  ConfigBroadcaster,MediaMTXConfigSyncer,WhepProxy}.hs
+│                        │                  ConfigBroadcaster,MediaMTXConfigSyncer,WhepProxy,
+│                        │                  Metrics}.hs
 │                        │   (WhepProxy imports Hnvr.Core.Whep — S3 extraction)
 │                        ├── src/Hnvr/Node/{HealthReporter,ConfigWatcher}.hs
 │                        ├── src/Hnvr/Web/View/{Layout,Cameras/*,Archive/Player,Live/Show,
@@ -256,6 +262,9 @@ Both committed Aug 11 2026 (commit `fdf16e3`); S1–S5 delivered in 7 commits.
 Archive-browser slice added Aug 12 2026 (commit `8bd8d1f`).
 
 **143 Haskell tests + 20 Playwright specs + 1 NixOS VM smoke test.**
+
+> Aug 13 2026: now **217 Haskell tests** (103 core + 35 capture +
+> 58 cv + 16 nats + 5 storage) after the Phase 3 EKG slice.
 
 | Layer | Where | Status |
 |-------|-------|--------|
@@ -1324,7 +1333,13 @@ ffprobe notes:
     100. **Shell traps that ate hours of debugging** (Aug 12 2026):
         - `pkill -f "bin/hnvr-leader"` matches the INVOKING SHELL's
           own `zsh -c` command line → kills your own command chain
-          silently. Use `pkill -f "bin/hnvr-lead[e]r"`.
+          silently. Use `pkill -f "bin/hnvr-lead[e]r"`. Aug 13 2026
+          addendum: the `[e]` trick does NOT save you if the same
+          compound command ALSO contains the literal string
+          `bin/hnvr-leader` (e.g. `pkill …; setsid ./result-web/bin/
+          hnvr-leader …`) — the regex matches the restart half of
+          your own cmdline. Run pkill in its own tool call, start in
+          the next.
         - `grep -c pattern` exits 1 on zero matches → `cmd && grep -c
           x && next` silently skips `next`. Append `|| true` or use
           `if` guards.
@@ -1338,6 +1353,33 @@ ffprobe notes:
           ~90 s — for rapid leader restarts, export the env vars
           directly (see /tmp/opencode/leader-env.sh pattern) and skip
           nix develop entirely.
+
+    101. **ekg-core `Distribution` min/max are garbage under `-N`**
+         (Aug 13 2026, Phase 3 EKG slice) — the store is 8 striped
+         `Distrib`s keyed by capability; `read`/`sampleAll` folds them
+         via `combine`, which copies `minPos`/`maxPos` from the LAST
+         stripe unconditionally (untouched stripes stay 0.0). With
+         `-N`, `_max` renders as 0.0 while count/sum are correct.
+         `Hnvr.Core.Metrics.renderPrometheus` therefore emits only
+         `_count` + `_sum` for distributions (avg latency =
+         rate(sum)/rate(count) — the Prometheus-idiomatic shape).
+         Also: ekg metric names are arbitrary Text — we embed
+         Prometheus label sets directly in the name
+         (`hnvr_frames_decoded_total{camera="floor_2_5"}`) and the
+         renderer splits at the first `{` when adding suffixes.
+
+    102. **Metrics endpoint is its own warp, NOT IHP middleware**
+         (Aug 13 2026) — `Hnvr.Web.Metrics.startMetricsServer` runs on
+         `HNVR_METRICS_PORT` (default 9100) in BOTH hnvr-leader and
+         hnvr-node (node has no IHP chain to hang it on; also avoids
+         the pitfall-#60 first-write-wins `option` trap). Dev port is
+         9102 because devenv MinIO owns :9100 — devenv env block sets
+         it. `CaptureConfig.capMetrics :: Hnvr.Core.Metrics.Metrics`
+         (record of IO actions) is the seam: hnvr-capture/hnvr-cv
+         stay ekg-free, hnvr-web backs the actions with an ekg-core
+         `Store`. ekg-core errors on duplicate registration — the
+         per-camera/per-EP metric caches in `Hnvr.Web.Metrics.newMetrics`
+         are load-bearing, don't "simplify" them away.
 
 ## Sergey's working style
 
@@ -1677,6 +1719,39 @@ ffprobe notes:
       Pitfall #98: pinned-vs-channel onnxruntime (1.27.1 vs 1.24.4),
       indices verified identical, ortApiVersion now 27. Tests: 34
       capture + 97 core + 53 cv + 16 nats + 5 storage = 205 cabal.
+      **Slice 8 done (Aug 13 2026)**: EKG metrics. `Hnvr.Core.Metrics`
+      (Metrics record of IO actions + pure `renderPrometheus` —
+      hnvr-capture/hnvr-cv stay ekg-free), `Hnvr.Web.Metrics`
+      (ekg-core Store, per-camera/per-EP lazy metric caches, warp
+      /metrics on HNVR_METRICS_PORT default 9100, nvidia-smi GPU
+      gauge poller). `CaptureConfig.capMetrics` is the seam;
+      `FrameSource.writeDropOldest` now returns STM Bool for the drop
+      counter; `AnalyzerRunner` times `analyzeFrame` and records under
+      the session's ACTUAL EP (`sessionActiveEp`). Metrics live:
+      `hnvr_frames_decoded_total{camera}`, `hnvr_frames_dropped_total{camera}`,
+      `hnvr_inference_seconds_{count,sum}{ep}`,
+      `hnvr_substream_fallback_total{camera}`,
+      `hnvr_gpu_memory_used_bytes`. Verified live on all 3 cams (ep
+      label correctly reports cpu pre-CUDA-build). Pitfalls #101
+      (ekg-core min/max broken under -N — renderer emits count/sum
+      only) + #102 (metrics = own warp, not IHP middleware). hnvr-core
+      103 tests, capture 35 — total 217 cabal.
+      **Slice 9 done (Aug 13 2026)**: CUDA. flake.nix gains
+      `cudaPkgs` (separate nixpkgs import: `cudaSupport=true`,
+      `cudaCapabilities=["8.9"]`, `allowUnfree`) +
+      `packages.onnxruntime-cuda` (1.27.1, `pythonSupport=false`;
+      derivation verified: USE_CUDA=TRUE, CMAKE_CUDA_ARCHITECTURES=89).
+      devenv HNVR_ONNXRUNTIME_LIB flipped to the CUDA build;
+      enterShell prepends /run/opengl-driver/lib to LD_LIBRARY_PATH
+      (libcuda.so.1 discovery). Build: `nix build .#onnxruntime-cuda`
+      (~30 min on Sergey's box; pulls opencv into the dep chain).
+      **Verified live**: leader on the CUDA lib reports
+      `hnvr_inference_seconds{ep="cuda"}` — 3170 inferences in 3 min,
+      ~9.2 ms/frame full pipeline (vs ~13.2 ms CPU), no crashes.
+      Note: pinned nixpkgs builds no TensorRT EP — `tensorrt` in
+      HNVR_EXEC_PROVIDERS falls through to cuda; TRT engine CI job
+      still open. hnvr-1 (sm_61 Pascal) needs cudaPackages_12_8 —
+      CUDA 12.9 dropped Pascal; wire with the NixOS module GPU slice.
       **Slice 7 done (Aug 12 2026)**: /debug view + the great SIGSEGV
       hunt. `Hnvr.Cv.DebugRender` (pure: palette box overlay +
       JuicyPixels PNG — MJPEG→PNG-multipart deviation documented;

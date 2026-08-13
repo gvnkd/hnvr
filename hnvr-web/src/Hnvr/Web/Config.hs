@@ -45,6 +45,7 @@ import Hnvr.Web.DebugStream (debugStreamMiddleware)
 import Hnvr.Web.EventWriter (startEventWriter)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
+import Hnvr.Web.Metrics (ensureMetrics, startGpuPoller, startMetricsServer)
 import Hnvr.Web.RetentionSweeper (startRetentionSweeper)
 import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
 import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
@@ -87,6 +88,21 @@ config = do
   option $ AuthMiddleware (authMiddleware @User)
   addInitializer connectNatsAndStartEventWriter
   addInitializer seedAdminUser
+  -- Metrics store + Prometheus endpoint + GPU poller. Runs outside the
+  -- IHP middleware chain (own warp on HNVR_METRICS_PORT) so the node
+  -- binary can share the same code path. Best-effort: a port clash
+  -- (e.g. two dev leaders) must not take the leader down.
+  liftIO startMetricsStack
+
+-- | Bring up the metrics stack (store + /metrics warp + GPU poller).
+-- Failures are logged, never fatal.
+startMetricsStack :: IO ()
+startMetricsStack = do
+  (store, _) <- ensureMetrics
+  startMetricsServer store
+    `E.catch` \(e :: E.SomeException) ->
+      logError ("leader: metrics server start failed: " <> cs (show e))
+  startGpuPoller store
 
 -- | Idempotent INSERT of the bootstrap admin user from
 -- @INITIAL_ADMIN_EMAIL@ + @INITIAL_ADMIN_PASSWORD@ env. Runs at leader boot.
@@ -170,13 +186,15 @@ startNodeRoles :: Bus.Bus -> Text -> IO ()
 startNodeRoles bus host = do
   mS3 <- readS3Config
   spool <- fromMaybe "/var/lib/hnvr/spool" <$> Env.lookupEnv "HNVR_SPOOL_DIR"
+  (_, metrics) <- ensureMetrics
   let cfg =
         CaptureConfig
           { capBus = Just bus,
             capS3 = S3.connectInfo <$> mS3,
             capBucket = maybe "hnvr-recordings" S3.s3cBucket mS3,
             capHostId = HostId host,
-            capSpoolDir = spool
+            capSpoolDir = spool,
+            capMetrics = metrics
           }
   sup <- startCaptureSupervisor cfg
   writeIORef supervisorRegistry (Just sup)

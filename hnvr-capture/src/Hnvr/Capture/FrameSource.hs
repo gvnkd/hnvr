@@ -38,6 +38,7 @@ import qualified Data.Vector.Storable as VS
 import Hnvr.Capture.Ffmpeg (AnalysisConfig, analysisArgs)
 import Hnvr.Core.Frame (Frame (..))
 import Hnvr.Core.Logging (logWarn)
+import Hnvr.Core.Metrics (Metrics (..))
 import System.Exit (ExitCode (..))
 import System.IO (Handle)
 import System.Process
@@ -48,7 +49,10 @@ data FrameSourceConfig = FrameSourceConfig
     fscWidth :: !Int,
     fscHeight :: !Int,
     -- | Log-line tag, typically the camera slug.
-    fscTag :: !Text
+    fscTag :: !Text,
+    -- | Instrumentation hooks ('Hnvr.Core.Metrics.noOpMetrics' when
+    -- metrics are disabled).
+    fscMetrics :: !Metrics
   }
 
 -- | Bounded frame queue. 4 frames ≈ ~0.8 s of slack at 5 fps —
@@ -58,12 +62,15 @@ newFrameQueue :: IO (TBQueue Frame)
 newFrameQueue = newTBQueueIO 4
 
 -- | Drop-oldest write: when the queue is full, evict the head before
--- writing. STM-only so callers compose it into bigger transactions.
-writeDropOldest :: TBQueue a -> a -> STM ()
+-- writing. Returns 'True' when an eviction happened (callers bump a
+-- drop counter on it). STM-only so callers compose it into bigger
+-- transactions.
+writeDropOldest :: TBQueue a -> a -> STM Bool
 writeDropOldest q x = do
   full <- isFullTBQueue q
   when full (void (tryReadTBQueue q))
   writeTBQueue q x
+  pure full
 
 -- | Slice a byte buffer into complete @frameSize@-byte frames +
 -- trailing remainder. Pure; the property tests hang off this.
@@ -109,7 +116,9 @@ runFrameSource cfg q = do
                     frameTimestamp = now,
                     frameRgb = VS.generate (B.length bytes) (B.index bytes)
                   }
-          atomically (writeDropOldest q frame)
+          dropped <- atomically (writeDropOldest q frame)
+          mFrameDecoded (fscMetrics cfg) (fscTag cfg)
+          when dropped (mFrameDropped (fscMetrics cfg) (fscTag cfg))
         readLoop h frameSize rest
 
 -- | Supervised frame source: restart ffmpeg on exit with exponential

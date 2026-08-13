@@ -289,6 +289,7 @@
           inherit (hpkgs)
             hnvr-core hnvr-nats hnvr-capture hnvr-cv hnvr-ptz hnvr-storage hnvr-web;
           hnvr-static = hnvr-static;
+          onnxruntime-cuda = onnxruntimeCuda;
         };
 
         # -------------------------------------------------------------
@@ -344,6 +345,32 @@
           config.permittedInsecurePackages = [ minioVersion ];
         };
         devenvHpkgs = devenvPkgs.ghc912.extend (hnvrHaskellOverlay devenvPkgs.haskell.lib);
+
+        # -------------------------------------------------------------
+        # CUDA-enabled onnxruntime (Phase 3). Separate nixpkgs import
+        # because cudaSupport + cudaCapabilities are nixpkgs *config*
+        # knobs, not overlays. sm_89 = RTX 4090 (hnvr-2 / this dev box).
+        # hnvr-1 (GTX 1070, sm_61) needs cudaPackages_12_8 — CUDA 12.9
+        # dropped Pascal codegen — and gets its own wiring when the
+        # NixOS module grows the GPU slice.
+        #
+        # allowUnfree: the CUDA redist packages (cudart/cudnn/cublas)
+        # are unfree-licensed. pythonSupport=false trims the multi-GB
+        # python dist output — we only dlopen libonnxruntime.so.
+        #
+        # Build explicitly once (`nix build .#onnxruntime-cuda`) before
+        # entering a fresh dev shell: the source build takes ~1 h and
+        # needs ~15 GB of disk.
+        # -------------------------------------------------------------
+        cudaPkgs = import nixpkgs {
+          inherit system;
+          config = {
+            allowUnfree = true;
+            cudaSupport = true;
+            cudaCapabilities = [ "8.9" ];
+          };
+        };
+        onnxruntimeCuda = cudaPkgs.onnxruntime.override { pythonSupport = false; };
 
         # MediaMTX bootstrap config — leader pushes per-camera path
         # config via REST API (PUT /v2/config/paths/<slug>) once cameras
@@ -665,17 +692,25 @@
                 # ---- Phase 3 CV pipeline --------------------------------
                 # libonnxruntime for the internal FFI binding
                 # (Hnvr.Cv.OnnxRuntime.Internal, dlopen'd at session
-                # creation). CPU-only build — CUDA/TRT EPs fall through
-                # to CPU cleanly. Model: yolov8n-320 exported into the
-                # shared model cache (design 04; exported via the
-                # devShell's ultralytics env, see pitfall #97).
-                HNVR_ONNXRUNTIME_LIB = "${pkgs.onnxruntime}/lib/libonnxruntime.so";
+                # creation). CUDA build (sm_89) — TRT EP still falls
+                # through (nixpkgs onnxruntime builds no TensorRT EP);
+                # CPU is the last-resort fallback. Requires
+                # /run/opengl-driver/lib on LD_LIBRARY_PATH for
+                # libcuda.so.1 (wired in enterShell below). Model:
+                # yolov8n-320 exported into the shared model cache
+                # (design 04; exported via the devShell's ultralytics
+                # env, see pitfall #97).
+                HNVR_ONNXRUNTIME_LIB = "${onnxruntimeCuda}/lib/libonnxruntime.so";
                 HNVR_MODEL_PATH = "/home/pion/.local/share/hnvr/model_cache/yolov8/yolov8n-320.onnx";
                 # Per-host EP priority (design 04 §"Per-host EP
-                # selection"). Dev box is hnvr-2 (RTX 4090); CPU-only
-                # onnxruntime means TRT/CUDA fail append and the
-                # session lands on CPU.
+                # selection"). Dev box is hnvr-2 (RTX 4090): TRT append
+                # fails (no TRT EP in the build), CUDA wins, CPU is the
+                # safety net.
                 HNVR_EXEC_PROVIDERS = "tensorrt,cuda,cpu";
+                # Prometheus metrics endpoint (Hnvr.Web.Metrics, own
+                # warp — leader + node). 9102 because devenv MinIO owns
+                # :9100; production default stays 9100.
+                HNVR_METRICS_PORT = "9102";
               };
 
               enterShell = preCommit.shellHook + ''
@@ -687,6 +722,13 @@
                   export NIX_LD_LIBRARY_PATH="${chromiumLibPath}:$NIX_LD_LIBRARY_PATH"
                 else
                   export NIX_LD_LIBRARY_PATH="${chromiumLibPath}"
+                fi
+
+                # CUDA EP needs libcuda.so.1 (the kernel-driver shim),
+                # which lives outside the nix store. On NixOS the
+                # driver exposes it via /run/opengl-driver/lib.
+                if [ -d /run/opengl-driver/lib ]; then
+                  export LD_LIBRARY_PATH="/run/opengl-driver/lib:''${LD_LIBRARY_PATH:-}"
                 fi
 
                 echo ""

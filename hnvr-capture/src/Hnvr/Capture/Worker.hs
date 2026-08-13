@@ -61,6 +61,7 @@ import Hnvr.Capture.Ffmpeg (RecordingConfig (..), Transport (..), audioArgs, rec
 import Hnvr.Capture.Fmp4 (Fmp4State, Fragment (..), feed, finish, initial)
 import Hnvr.Core.Id (CameraId, HostId, Sha256 (..))
 import qualified Hnvr.Core.Logging as Log
+import Hnvr.Core.Metrics (Metrics)
 import Hnvr.Core.Segment
   ( Segment (..),
     SegmentKind (..),
@@ -109,7 +110,10 @@ data CaptureConfig = CaptureConfig
     capBucket :: !Bucket,
     capHostId :: !HostId,
     -- | Local spool when S3 is unreachable (or 'capS3' is 'Nothing').
-    capSpoolDir :: !FilePath
+    capSpoolDir :: !FilePath,
+    -- | Instrumentation hooks ('Hnvr.Core.Metrics.noOpMetrics' when
+    -- metrics are disabled).
+    capMetrics :: !Metrics
   }
 
 -- No auto-derived Show/Eq because @Bus@ (nats-queue Nats handle) has

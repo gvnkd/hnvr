@@ -83,6 +83,7 @@ import qualified Hnvr.Core.CameraSnapshot as Snap
 import Hnvr.Core.Frame (Frame)
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Logging (logInfo, logWarn)
+import Hnvr.Core.Metrics (Metrics (..))
 import Hnvr.Cv.Analyzer (defaultAnalyzerConfig, execProvidersFromEnv)
 import Hnvr.Cv.AnalyzerRunner (runAnalyzer)
 import Hnvr.Cv.Tracker.Sort (Track)
@@ -190,18 +191,24 @@ maybeStartAnalysis sup snap relayUrl = do
       eps <- execProvidersFromEnv
       queue <- newFrameQueue
       latest <- newTVarIO Nothing
-      let (analysisCfg, width, height) = analysisConfigFor snap relayUrl
+      let metrics = capMetrics sup.csConfig
+          (analysisCfg, width, height) = analysisConfigFor snap relayUrl
           fsCfg =
             FrameSourceConfig
               { fscAnalysis = analysisCfg,
                 fscWidth = width,
                 fscHeight = height,
-                fscTag = csSlug snap
+                fscTag = csSlug snap,
+                fscMetrics = metrics
               }
+      -- Relay+scale fallback (ancScale = Just …) means the sub-stream
+      -- was unavailable/disabled — count it (design 03 §2b alarm).
+      forM_ (ancScale analysisCfg) $ \_ -> mSubstreamFallback metrics (csSlug snap)
       src <- async (frameSourceLoop fsCfg queue)
       ana <-
         async $
           runAnalyzer
+            metrics
             defaultAnalyzerConfig
             (T.pack modelPath)
             eps

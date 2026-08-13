@@ -58,9 +58,14 @@ tests =
         atomically $ do
           mapM_ (writeTBQueue q) [1 .. 4 :: Int]
         -- queue full (bound 4); write a 5th → head evicted
-        atomically $ writeDropOldest q (5 :: Int)
+        dropped <- atomically $ writeDropOldest q (5 :: Int)
+        dropped @?= True
         contents <- atomically $ flushTBQueue q
-        contents @?= [2, 3, 4, 5]
+        contents @?= [2, 3, 4, 5],
+      testCase "writeDropOldest reports no eviction when not full" $ do
+        q <- newTBQueueIO 4
+        dropped <- atomically $ writeDropOldest q (1 :: Int)
+        dropped @?= False
     ]
   where
     vfOf args =

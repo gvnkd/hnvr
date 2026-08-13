@@ -32,6 +32,7 @@ import Hnvr.Capture.Worker
     captureWorker,
   )
 import Hnvr.Core.Id (CameraId (..), HostId (..))
+import Hnvr.Core.Metrics (noOpMetrics)
 import Hnvr.Nats.Bus (BusConfig (..), defaultConfig, withBus)
 import Hnvr.Storage.S3 (S3Config (..), connectInfo)
 import System.Environment (getArgs)
@@ -115,7 +116,8 @@ run slugS transport url opts = do
             capS3 = fmap connectInfo (optS3 opts),
             capBucket = maybe "hnvr-recordings" s3cBucket (optS3 opts),
             capHostId = HostId (optHostId opts),
-            capSpoolDir = optSpoolDir opts
+            capSpoolDir = optSpoolDir opts,
+            capMetrics = noOpMetrics
           }
   case optNatsUri opts of
     Nothing -> do

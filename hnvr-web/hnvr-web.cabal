@@ -60,6 +60,7 @@ library
     Hnvr.Web.FrontController
     Hnvr.Web.HealthCache
     Hnvr.Web.MediaMTXConfigSyncer
+    Hnvr.Web.Metrics
     Hnvr.Web.RetentionSweeper
     Hnvr.Web.SchemaMigration
     Hnvr.Web.SnapshotResponder
@@ -101,6 +102,7 @@ library
     , data-default
     , deepseq
     , directory
+    , ekg-core
     , file-embed
     , filepath
     , hasql

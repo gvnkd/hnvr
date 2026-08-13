@@ -31,6 +31,7 @@ import Hnvr.Capture.Worker (CaptureConfig (..))
 import Hnvr.Core.CameraSnapshot (CameraSnapshotBatch (..))
 import Hnvr.Core.Id (HostId (..))
 import Hnvr.Core.Logging (logError, logInfo)
+import Hnvr.Core.Metrics (Metrics)
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (commandSnapshot)
@@ -42,6 +43,7 @@ import Hnvr.Node.CaptureSupervisor
 import Hnvr.Node.ConfigWatcher (startConfigWatcher)
 import Hnvr.Node.HealthReporter (startHealthReporter)
 import qualified Hnvr.Storage.S3 as S3
+import Hnvr.Web.Metrics (ensureMetrics, startGpuPoller, startMetricsServer)
 import qualified System.Environment as Env
 
 -- | One-shot snapshot-request timeout (microseconds). Leader is
@@ -54,10 +56,13 @@ snapshotTimeoutMicros = 5_000_000
 main :: IO ()
 main = do
   let defaultUri = "nats://nats:nats@localhost:4222" :: Text
+  (metricsStore, metrics) <- ensureMetrics
+  startMetricsServer metricsStore
+  startGpuPoller metricsStore
   uri <- maybe defaultUri T.pack <$> Env.lookupEnv "HNVR_NATS_URI"
   Bus.withBus Bus.defaultConfig {Bus.busUri = T.unpack uri} $ \bus -> do
     host <- maybe "hnvr-1" T.pack <$> Env.lookupEnv "HNVR_HOST"
-    cfg <- buildCaptureConfig bus host
+    cfg <- buildCaptureConfig bus host metrics
     sup <- startCaptureSupervisor cfg
     startHealthReporter bus host
     startConfigWatcher bus host sup
@@ -70,8 +75,8 @@ main = do
 -- | Construct the process-wide 'CaptureConfig' from environment.
 -- Defaults match the devenv service wiring (MinIO on :9100,
 -- @hnvr-recordings@ bucket, spool dir @/var/lib/hnvr/spool@).
-buildCaptureConfig :: Bus -> Text -> IO CaptureConfig
-buildCaptureConfig bus host = do
+buildCaptureConfig :: Bus -> Text -> Metrics -> IO CaptureConfig
+buildCaptureConfig bus host metrics = do
   mS3 <- readS3Config
   spool <- fromMaybe "/var/lib/hnvr/spool" <$> Env.lookupEnv "HNVR_SPOOL_DIR"
   pure
@@ -80,7 +85,8 @@ buildCaptureConfig bus host = do
         capS3 = S3.connectInfo <$> mS3,
         capBucket = maybe "hnvr-recordings" S3.s3cBucket mS3,
         capHostId = HostId host,
-        capSpoolDir = spool
+        capSpoolDir = spool,
+        capMetrics = metrics
       }
 
 -- | One-shot snapshot request to the leader. If we get a reply, spawn
