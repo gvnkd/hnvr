@@ -104,18 +104,23 @@ One ONNX session per AnalyzerWorker (one per camera). Sessions are not shared ac
 
 Memory: YOLOv8n session ≈ 12 MB on CPU, ≈ 30 MB on CUDA, ≈ 80 MB on TensorRT (engine workspace). 10 cameras × 80 MB = 800 MB GPU memory on RTX 4090 — trivial. On GTX 1070 with 8 GB and CUDA EP only, 10 × 30 MB = 300 MB, also trivial.
 
-## TensorRT engine pre-build
+## TensorRT engine cache (Aug 13 2026 — supersedes "trtexec pre-build")
 
-For TensorRT EP to be fast on first request, pre-build the engine offline:
+The original plan was to pre-build engines offline with `trtexec` in CI.
+In practice: CI runners have no GPU, so sm_89 engines can't be built
+there. Instead the analyzer enables ORT TRT EP's own engine cache
+(`trt_engine_cache_enable` + `trt_engine_cache_path` via
+`HNVR_TRT_CACHE_DIR`): the first analyzer start on a host builds the
+engine (~1 min for yolov8n-320 / ~2 min for yolov8s-640) and every
+later session cache-hits (~1 s). Cache is keyed by model content + TRT
+version + GPU arch, so all cameras sharing one model share one engine.
 
-```bash
-trtexec --onnx=yolov8n-320.onnx --saveEngine=yolov8n-320.sm_89.engine \
-        --fp16 --workspace=2048
-```
+The nixpkgs onnxruntime build needed `onnxruntime_USE_TENSORRT=ON` +
+`onnxruntime_USE_TENSORRT_BUILTIN_PARSER=ON` (see MEMORIES pitfall #104).
 
-`sm_89` matches Ada (RTX 4090). Ship the `.engine` in the Nix package alongside the `.onnx`. ONNX Runtime's TensorRT EP loads it directly if `trt_engine_cache_enabled=1` and the cache path contains a matching `.engine`.
-
-For GTX 1070 (Pascal, `sm_61`), TensorRT 10 support is dropped — use CUDA EP there, no engine needed.
+For GTX 1070 (Pascal, `sm_61`), TensorRT 10 support is dropped — AND
+cuDNN ≥ 9.12 dropped Pascal too, so the CUDA EP is also unavailable
+(pitfall #103). hnvr-1 runs the CPU EP in v1.
 
 ## Model: YOLOv8n
 

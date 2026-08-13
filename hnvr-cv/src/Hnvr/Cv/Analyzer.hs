@@ -27,6 +27,7 @@ module Hnvr.Cv.Analyzer
   )
 where
 
+import Control.Exception (evaluate)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -45,6 +46,7 @@ import Hnvr.Cv.OnnxRuntime
     Session,
     Tensor (..),
     infer,
+    sessionInputShape,
     withSession,
   )
 import Hnvr.Cv.Preprocess (letterboxGeometry, preprocessTo, toTensor)
@@ -83,10 +85,19 @@ data Analyzer = Analyzer
   }
 
 -- | Create an analyzer for @modelPath@, trying EPs in priority order.
+--
+-- The letterbox target follows the SESSION's input shape (e.g. 320
+-- for yolov8n-320, 640 for yolov8s-640) so swapping
+-- @HNVR_MODEL_PATH@ between square YOLO models needs no matching
+-- config change. 'acTargetSize' is the fallback when the shape
+-- doesn't look like @[1, 3, h, w]@.
 withAnalyzer :: AnalyzerConfig -> Text -> [ExecutionProvider] -> (Analyzer -> IO r) -> IO r
 withAnalyzer cfg modelPath eps k =
   withSession modelPath eps $ \sess ->
-    k Analyzer {anSession = sess, anConfig = cfg, anTracker = newTracker}
+    let cfg' = case sessionInputShape sess of
+          [1, 3, h, _w] | h > 0 -> cfg {acTargetSize = fromIntegral h}
+          _ -> cfg
+     in k Analyzer {anSession = sess, anConfig = cfg', anTracker = newTracker}
 
 -- | One frame through the full pipeline. Returns the updated analyzer
 -- and this frame's confirmed tracks (boxes in source-frame pixels).
@@ -101,6 +112,17 @@ analyzeFrame an frame = do
       kept = nms (acNmsIou cfg) (acMaxPerClass cfg) dets
       inSource = V.map (unletterboxDetection lb) kept
       tracker' = Sort.update (anTracker an) inSource
+  -- Run the SORT update NOW. 'update' is a pure lazy function; left
+  -- unforced it becomes a thunk chain (one application per frame)
+  -- rooted at whatever holds the tracker — and each link retains the
+  -- per-frame detection pipeline (inSource → letterbox → the input
+  -- 'Frame'). On zero-detection stretches nothing else forces the
+  -- chain, so the analyzer leaks ~one full frame per frame (Aug 13
+  -- 2026 leader OOM, ~80 MB/s at 2×15 fps 1280×720; slice-7's bake
+  -- only passed because open debug streams happened to force the
+  -- tracks every frame). Forcing to WHNF triggers update's internal
+  -- deep force (see Sort.forceTracks), collapsing chains ≤ 1 frame.
+  _ <- evaluate tracker'
   pure (an {anTracker = tracker'}, confirmedTracks tracker')
 
 -- | Parse @HNVR_EXEC_PROVIDERS@ (comma-separated, priority order):

@@ -89,6 +89,7 @@ import Hnvr.Cv.AnalyzerRunner (runAnalyzer)
 import Hnvr.Cv.Tracker.Sort (Track)
 import System.Environment (lookupEnv)
 import System.Timeout (timeout)
+import Text.Read (readMaybe)
 
 -- | Opaque handle. Construct via 'startCaptureSupervisor'.
 data CaptureSupervisor = CaptureSupervisor
@@ -191,8 +192,9 @@ maybeStartAnalysis sup snap relayUrl = do
       eps <- execProvidersFromEnv
       queue <- newFrameQueue
       latest <- newTVarIO Nothing
+      fallbackScale <- readFallbackScale
       let metrics = capMetrics sup.csConfig
-          (analysisCfg, width, height) = analysisConfigFor snap relayUrl
+          (analysisCfg, width, height) = analysisConfigFor fallbackScale snap relayUrl
           fsCfg =
             FrameSourceConfig
               { fscAnalysis = analysisCfg,
@@ -219,9 +221,12 @@ maybeStartAnalysis sup snap relayUrl = do
       logInfo ("CaptureSupervisor: analysis pair started for " <> csSlug snap)
 
 -- | Pick sub-stream decode vs main-stream-with-scale fallback per
--- camera snapshot (design 03 §2b).
-analysisConfigFor :: CameraSnapshot -> Text -> (AnalysisConfig, Int, Int)
-analysisConfigFor snap relayUrl =
+-- camera snapshot (design 03 §2b). The fallback scale comes from
+-- @HNVR_ANALYSIS_SCALE@ (@1280x720@, default @640x360@) — bigger
+-- frames cost decode+preprocess CPU but give the detector more
+-- source pixels for small/distant objects.
+analysisConfigFor :: (Int, Int) -> CameraSnapshot -> Text -> (AnalysisConfig, Int, Int)
+analysisConfigFor (fbW, fbH) snap relayUrl =
   case (csUseSubstream snap, csRtspSubUrl snap, csSubWidth snap, csSubHeight snap) of
     (True, Just subUrl, Just w, Just h) ->
       ( AnalysisConfig
@@ -237,12 +242,26 @@ analysisConfigFor snap relayUrl =
       ( AnalysisConfig
           { ancUrl = relayUrl,
             ancTransport = TcpTransport,
-            ancScale = Just (640, 360),
+            ancScale = Just (fbW, fbH),
             ancFps = csAnalysisFps snap
           },
-        640,
-        360
+        fbW,
+        fbH
       )
+
+-- | Read @HNVR_ANALYSIS_SCALE@ as @WxH@ (e.g. @1280x720@). Default
+-- 640×360 (design 03 §2b). Malformed values fall back to the default
+-- — a typo'd scale must not kill camera start.
+readFallbackScale :: IO (Int, Int)
+readFallbackScale = do
+  m <- lookupEnv "HNVR_ANALYSIS_SCALE"
+  pure $ case m of
+    Just raw
+      | (w, 'x' : hrest) <- span (/= 'x') raw,
+        Just w' <- readMaybe w,
+        Just h' <- readMaybe hrest ->
+          (w', h')
+    _ -> (640, 360)
 
 -- | Signal stop for the worker owning this camera, wait up to 10 s for
 -- a clean exit, cancel the async if it takes too long. No-op if no

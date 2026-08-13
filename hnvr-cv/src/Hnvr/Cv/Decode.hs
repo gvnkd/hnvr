@@ -1,4 +1,5 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | YOLOv8 anchor decode + per-class NMS.
@@ -21,11 +22,14 @@ module Hnvr.Cv.Decode
     defaultConfThreshold,
     defaultNmsIou,
     defaultMaxPerClass,
+    cocoClassName,
   )
 where
 
 import Data.List (groupBy, sortBy)
 import Data.Ord (Down (..), comparing)
+import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import Hnvr.Core.Geometry (Box (..))
@@ -57,6 +61,97 @@ defaultNmsIou = 0.45
 -- | Max kept detections per class (design §"NMS in Haskell").
 defaultMaxPerClass :: Int
 defaultMaxPerClass = 100
+
+-- | COCO-80 class names (YOLOv8 label space). Out-of-range ids render
+-- as @"class N"@ so an unexpected model output is still legible.
+cocoClassName :: Int -> Text
+cocoClassName i
+  | i >= 0 && i < V.length names = names V.! i
+  | otherwise = "class " <> T.pack (show i)
+  where
+    names =
+      V.fromList
+        [ "person",
+          "bicycle",
+          "car",
+          "motorcycle",
+          "airplane",
+          "bus",
+          "train",
+          "truck",
+          "boat",
+          "traffic light",
+          "fire hydrant",
+          "stop sign",
+          "parking meter",
+          "bench",
+          "bird",
+          "cat",
+          "dog",
+          "horse",
+          "sheep",
+          "cow",
+          "elephant",
+          "bear",
+          "zebra",
+          "giraffe",
+          "backpack",
+          "umbrella",
+          "handbag",
+          "tie",
+          "suitcase",
+          "frisbee",
+          "skis",
+          "snowboard",
+          "sports ball",
+          "kite",
+          "baseball bat",
+          "baseball glove",
+          "skateboard",
+          "surfboard",
+          "tennis racket",
+          "bottle",
+          "wine glass",
+          "cup",
+          "fork",
+          "knife",
+          "spoon",
+          "bowl",
+          "banana",
+          "apple",
+          "sandwich",
+          "orange",
+          "broccoli",
+          "carrot",
+          "hot dog",
+          "pizza",
+          "donut",
+          "cake",
+          "chair",
+          "couch",
+          "potted plant",
+          "bed",
+          "dining table",
+          "toilet",
+          "tv",
+          "laptop",
+          "mouse",
+          "remote",
+          "keyboard",
+          "cell phone",
+          "microwave",
+          "oven",
+          "toaster",
+          "sink",
+          "refrigerator",
+          "book",
+          "clock",
+          "vase",
+          "scissors",
+          "teddy bear",
+          "hair drier",
+          "toothbrush"
+        ]
 
 -- | Decode a @[1, 84, anchors]@ float32 tensor into detections at or
 -- above the confidence threshold whose class passes the filter.

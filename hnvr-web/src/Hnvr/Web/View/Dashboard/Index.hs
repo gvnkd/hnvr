@@ -82,6 +82,7 @@ instance View IndexView where
           liveUrl = "/ShowLive?cameraId=" <> cid
           showUrl = "/ShowCamera?cameraId=" <> cid
           archiveUrl = "/PlayerArchive?cameraId=" <> cid
+          debugUrl = "/DebugCamera?cameraId=" <> cid
           hostLabel = fromMaybe "unassigned" cam.assignedHost
           card =
             [hsx|
@@ -99,6 +100,8 @@ instance View IndexView where
                     <a href={showUrl}>config</a>
                     <span class="text-zinc-700">·</span>
                     <a href={archiveUrl}>archive</a>
+                    <span class="text-zinc-700">·</span>
+                    <a href={debugUrl}>debug</a>
                   </span>
                 </div>
               </div>

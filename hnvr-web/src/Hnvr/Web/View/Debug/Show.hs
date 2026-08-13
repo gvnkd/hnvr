@@ -11,6 +11,7 @@ module Hnvr.Web.View.Debug.Show (ShowView (..)) where
 import qualified Data.UUID as UUID
 import Generated.Types
 import Hnvr.Cv.DebugRender (trackColorCss)
+import Hnvr.Cv.Decode (cocoClassName)
 import Hnvr.Cv.Tracker.Sort (Track (..), TrackId (..))
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ModelSupport (Id' (Id))
@@ -60,11 +61,13 @@ instance View ShowView where
         <tr>
           <td><span class="badge" style={swatchStyle t}>&nbsp;&nbsp;</span></td>
           <td class="font-mono">{trackIdText t}</td>
-          <td>{tClassId t}</td>
-          <td>{tScore t}</td>
+          <td>{cocoClassName (tClassId t)}</td>
+          <td>{percentText (tScore t)}</td>
         </tr>
       |]
 
       swatchStyle t = "background-color: " <> trackColorCss (tId t)
 
       trackIdText t = case tId t of TrackId n -> tshow n
+
+      percentText s = tshow (round (s * 100) :: Int) <> "%"

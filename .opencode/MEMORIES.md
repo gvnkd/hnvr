@@ -10,10 +10,11 @@
 - **Local path**: `/home/pion/work/dev/hnvr`
 - **Remote**: `gitea@192.168.0.254:omg/hnvr.git` (branch `master`)
 - **Current branch state**: Phase 0 + 1 + 2 done (code; live VM tests
-  pending). Phase 3 slices 1–11 done (CV pipeline + EKG + CUDA + TRT
-  with engine cache, verified live on hnvr-2 — Aug 13 2026). Remaining
-  Phase 3: longer bake; YOLOv8n-320 accuracy decision (roadmap §"open
-  decisions"); hnvr-1 stays CPU EP (pitfall #103). Phase 2 audit-and-fix pass landed Aug 10 2026 (see
+  pending). Phase 3 slices 1–12 done (CV pipeline + EKG + CUDA + TRT
+  with engine cache + yolov8s-640 resolution bump + the lazy-SORT
+  leak fix — Aug 13 2026). Remaining Phase 3: longer bake; YOLOv8n/s
+  accuracy decision per camera. hnvr-1 stays CPU EP (pitfall #103).
+  Phase 2 audit-and-fix pass landed Aug 10 2026 (see
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
   that have been resolved; `.opencode/PHASE_AUDIT_REPORT_2.md` for the
   round-2 re-audit at `57aac3b`). Phase 1 slice 8 (Cameras admin gate)
@@ -211,6 +212,8 @@ hnvr/
 │   │                    loader, smoke-tested vs libonnxruntime 1.24.4),
 │   │                    Preprocess, Decode, Rules, AutoTrack,
 │   │                    Tracker/Sort (stubs — land with Phase 3 slices)
+│   ├── app/LeakProbe.hs hnvr-leak-probe: per-stage heap-leak bisect
+│   │                    tool (pitfall #105)
 │   └── test/            S6 started: OnnxRuntimeSpec (2 smoke tests,
 │                        env-gated on HNVR_ONNXRUNTIME_LIB, pitfall #91)
 ├── hnvr-ptz/            Driver (REAL typeclass), Onvif (stub), Controller (stub)
@@ -1418,6 +1421,38 @@ ffprobe notes:
          `cuda12.9-tensorrt-10.14.1.48` breaks on the next nixpkgs
          bump).
 
+    105. **Lazy pure-state threading in a forever-loop = linear heap
+         leak** (Aug 13 2026, the leader OOM) — `Sort.update` is a
+         pure lazy function; `analyzeFrame` stored its result in the
+         analyzer record UNFORCED. Nothing ever forced it in
+         production (the leader's TVar sink stores `tracks` lazily),
+         so one unevaluated `update` application accumulated per
+         frame, each closure retaining the frame's detection pipeline
+         (inSource → letterbox geometry → the input Frame) —
+         ~one full frame per frame (~80 MB/s at 2×15 fps 1280×720;
+         kernel OOM at ~64 GB swapped in 45 min). **Slice-7's bake
+         passed only because open debug streams forced `tracks` every
+         frame.** Diagnosis path that worked: `+RTS -M4G` (dies fast
+         ⇒ GHC heap, not native), then bisect via
+         `hnvr-cv/app/LeakProbe.hs` stages
+         (preprocess|infer|decode|full|fulllazy|notracks), then
+         profiling build (`--enable-profiling` works for hnvr-cv —
+         no IHP in its dep cone) with `-hT` (ARR_WORDS dominance ⇒
+         retained vectors, not thunk metadata) and `-hc`. Fix is
+         two-part: (1) `Sort.update` internally forceTracks
+         (IM.foldl' + per-track field seqs — IntMap is spine-strict
+         but VALUE-lazy), (2) `analyzeFrame` `evaluate tracker'` —
+         seq inside update only runs once the application is forced;
+         the loop head must pull the trigger. Companion gotcha:
+         `pgrep -f` matched my own wrapper shell when the command
+         line contained the plain binary name inside a `find -name`
+         argument — RSS "measurements" of a dead process looked
+         alive. And `Heap exhausted` under `-M` does NOT necessarily
+         kill a multi-threaded GHC process — the zombie kept serving
+         :18001/:9102 with analysis threads dead; later leaders then
+         die on `bind: Address already in use`. Check `lstart` of the
+         port owner before trusting restart logs.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -1827,6 +1862,19 @@ ffprobe notes:
       avg (vs 9.2 CUDA / 13.2 CPU). Frame drops during the cold-start
       engine build are expected (analyzer blocks in CreateSession).
       cv suite: 59 tests.
+      **Slice 12 done (Aug 13 2026)**: resolution bump + leak fix.
+      `withAnalyzer` derives the letterbox target from the session's
+      input shape (yolov8s-640 drop-in); `HNVR_ANALYSIS_SCALE` (WxH)
+      drives the fallback-path scale (1280x720 for backyard — its
+      sub-stream stopped answering ffprobe, still on relay fallback);
+      low_ent sub dims filled (704×576, direct sub now). Debug view:
+      camera Show page + dashboard cards link `/DebugCamera?cameraId=…`;
+      legend renders COCO names (`cocoClassName`) + percent scores.
+      **Leader OOM fixed** (pitfall #105): lazy `Sort.update` chain
+      leaked ~one frame per frame; now forced per frame. Verified:
+      LeakProbe fulllazy 5000 frames clean, leader flat ~2.6 GB RSS
+      over 15 min at yolov8s-640/TRT/3 cams (was ~80 MB/s growth).
+      cv suite: 61 tests. New dev tool: `hnvr-cv:hnvr-leak-probe`.
       **Slice 7 done (Aug 12 2026)**: /debug view + the great SIGSEGV
       hunt. `Hnvr.Cv.DebugRender` (pure: palette box overlay +
       JuicyPixels PNG — MJPEG→PNG-multipart deviation documented;

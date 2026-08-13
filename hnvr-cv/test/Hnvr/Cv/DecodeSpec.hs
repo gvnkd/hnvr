@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Tests for "Hnvr.Cv.Decode".
@@ -14,6 +15,7 @@ import qualified Data.Vector.Storable as VS
 import Hnvr.Core.Geometry (Box (..))
 import Hnvr.Cv.Decode
   ( Detection (..),
+    cocoClassName,
     decode,
     defaultConfThreshold,
     defaultKeepClasses,
@@ -35,6 +37,16 @@ tests =
   testGroup
     "Hnvr.Cv.Decode"
     [ testGroup
+        "cocoClassName"
+        [ testCase "person/car/toothbrush" $ do
+            cocoClassName 0 @?= "person"
+            cocoClassName 2 @?= "car"
+            cocoClassName 79 @?= "toothbrush",
+          testCase "out of range falls back to class N" $ do
+            cocoClassName 80 @?= "class 80"
+            cocoClassName (-1) @?= "class -1"
+        ],
+      testGroup
         "decode (golden)"
         [ testCase "decodes anchors above threshold in kept classes" $ do
             let dets = decode defaultConfThreshold defaultKeepClasses goldenTensor

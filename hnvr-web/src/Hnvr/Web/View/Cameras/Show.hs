@@ -27,6 +27,7 @@ instance View ShowView where
         </div>
         <div class="actions">
           <a class="btn" href={editUrl}>Edit</a>
+          <a class="btn" href={debugUrl}>Debug stream</a>
           <a class="btn btn-primary" href={archiveUrl}>Watch archive</a>
         </div>
       </div>
@@ -87,6 +88,7 @@ instance View ShowView where
     where
       cid = tshow (camera |> get #id)
       editUrl = "/EditCamera?cameraId=" <> cid
+      debugUrl = "/DebugCamera?cameraId=" <> cid
       archiveUrl = "/PlayerArchive?cameraId=" <> cid
       assignUrl = "/AssignCamera?cameraId=" <> cid
       testCryptoUrl = "/TestCryptoCamera?cameraId=" <> cid

@@ -123,11 +123,29 @@ update tr dets =
         length [() | (j', _) <- zip [0 ..] detList, j' < j, IM.notMember j' matchedDets]
       afterBirths = foldl (\m t -> IM.insert (unTrackId (tId t)) t m) afterMatch births
       afterPrune = IM.filter (\t -> tTimeSinceUpdate t <= trMaxAge tr) afterBirths
-   in tr
-        { trNextId = trNextId tr + length births,
-          trTracks = afterPrune
-        }
+   in forceTracks afterPrune `seq`
+        tr
+          { trNextId = trNextId tr + length births,
+            trTracks = afterPrune
+          }
   where
+    -- Force every track value to WHNF on every update. The IntMap is
+    -- spine-strict but value-lazy, and Sort.update itself is only
+    -- forced lazily by the next frame — without this, each frame adds
+    -- one unforced predict/applyMatch layer per track, and those
+    -- thunks retain the whole per-frame detection pipeline
+    -- (detList → cost matrix → inSource → letterbox geometry → the
+    -- input 'Frame'). On zero-detection stretches NOTHING else forces
+    -- them, so the analyzer leaks ≈ one full frame per frame
+    -- (Aug 13 2026 leader OOM: ~80 MB/s on 2×15 fps 1280×720
+    -- cameras; fulllazy LeakProbe exhausts a 6 GB heap in minutes).
+    -- Forcing here collapses every chain ≤ 1 frame old; track counts
+    -- are small so the cost is negligible.
+    forceTracks = IM.foldl' (\acc t -> forceTrack t `seq` acc) ()
+    -- tId: evaluates the applyMatch application (→ matchedKeys spine →
+    -- matches → hungarian → cost → detection pipeline). tBox: forces
+    -- the kalmanBox/predict chain via kX.
+    forceTrack t = tId t `seq` tBox t `seq` tHits t `seq` ()
     predictTrack t =
       let k' = predict (tKalman t)
        in t {tKalman = k', tBox = kalmanBox k', tAge = tAge t + 1, tTimeSinceUpdate = tTimeSinceUpdate t + 1}

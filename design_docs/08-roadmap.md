@@ -70,21 +70,23 @@ Goal: low-latency live view in browser; second host carries half the cameras.
 
 Goal: YOLOv8n detections with persistent track IDs, visible in a debug overlay, on **both** hosts with appropriate EPs.
 
-- [ ] `hnvr-cv/OnnxRuntime.hs`: minimal internal C API binding (~150 LOC) — no Hackage dep
-- [ ] `Hnvr.Cv.Preprocess`: `massiv` letterbox (any input → 320×320) + normalize
-- [ ] `Hnvr.Cv.Decode`: YOLOv8 anchor decode + NMS
-- [ ] `Hnvr.Cv.Tracker.Sort`: Kalman + Hungarian
-- [ ] `AnalyzerWorker` glue (consumes sub-stream Frame TChan from CaptureWorker)
-- [ ] EP selection from `HNVR_EXEC_PROVIDERS`:
-  - [ ] hnvr-1: CUDA EP (Pascal)
-  - [ ] hnvr-2: TensorRT EP with pre-built `sm_89` engine (Ada)
-- [ ] CI job to pre-build TensorRT engines via `trtexec`
-- [ ] Debug view `/debug/<slug>` showing live frame with bbox overlay + track IDs (MJPEG over WebSocket, dev-only)
-- [ ] EKG metrics: `hnvr_frames_decoded_total`, `hnvr_inference_seconds{ep}`, `hnvr_gpu_memory_used_bytes`, `hnvr_substream_fallback_total`
+- [x] `hnvr-cv/OnnxRuntime.hs`: minimal internal C API binding (~150 LOC) — no Hackage dep
+- [x] `Hnvr.Cv.Preprocess`: `massiv` letterbox (any input → 320×320) + normalize
+- [x] `Hnvr.Cv.Decode`: YOLOv8 anchor decode + NMS
+- [x] `Hnvr.Cv.Tracker.Sort`: Kalman + Hungarian (Kuhn–Munkres in-tree — `hungarian-algorithm` doesn't exist on Hackage)
+- [x] `AnalyzerWorker` glue (consumes sub-stream Frame TChan from CaptureWorker)
+- [x] EP selection from `HNVR_EXEC_PROVIDERS`:
+  - [ ] hnvr-1: CUDA EP (Pascal) — **won't do in v1**: cuDNN ≥ 9.12 dropped Pascal; hnvr-1 runs CPU EP (~12.5 fps capacity, fine for 5 fps sub-streams)
+  - [x] hnvr-2: TensorRT EP — via on-host ORT engine cache (`HNVR_TRT_CACHE_DIR`); **the trtexec CI job below is superseded** (GPU-less CI runners can't build sm_89 engines)
+- [ ] ~~CI job to pre-build TensorRT engines via `trtexec`~~ (superseded — see above)
+- [x] Debug view `/DebugCamera?cameraId=…` showing live frame with bbox overlay + track IDs (PNG multipart at `/debug-stream/<uuid>`, dev-only)
+- [x] EKG metrics: `hnvr_frames_decoded_total`, `hnvr_frames_dropped_total`, `hnvr_inference_seconds_{count,sum}{ep}`, `hnvr_substream_fallback_total`, `hnvr_gpu_memory_used_bytes` (Prometheus text on `HNVR_METRICS_PORT`, default 9100)
+- [x] Resolution bump: `withAnalyzer` follows the session's input shape (yolov8n-320 ↔ yolov8s-640 drop-in); `HNVR_ANALYSIS_SCALE` for the fallback path
+- [x] Lazy-SORT heap leak fix (`.opencode/MEMORIES.md` pitfall #105)
 
-**Demo**: open `/debug/cam-196`, see bounding boxes following people; EKG shows ~1 ms inference on hnvr-2, ~5 ms on hnvr-1. Disable sub-stream on the camera → analyzer auto-falls-back to main-stream-with-scale; alarm counter increments; recording unaffected.
+**Demo**: open `/DebugCamera?cameraId=…`, see bounding boxes following people; EKG shows EP labels per camera. Disable sub-stream on the camera → analyzer auto-falls-back to main-stream-with-scale; `hnvr_substream_fallback_total` increments; recording unaffected.
 
-**No events yet** — just proves the pipeline end-to-end.
+**No events yet** — just proves the pipeline end-to-end. Remaining: longer bake + per-camera YOLOv8n-320 vs YOLOv8s-640 accuracy call (open decision below).
 
 ## Phase 4 — Events: line crossing + zone intrusion (weeks 7–8)
 

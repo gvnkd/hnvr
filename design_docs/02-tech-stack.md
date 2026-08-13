@@ -15,7 +15,7 @@ Versions are the latest known-good as of Aug 2026. Pinned in `flake.lock`.
 | `unliftio` / `safe-exceptions` | 0.2.x | Bracketed resource handling. |
 | `resource-t` | 1.3.x | Bracket ffmpeg + NATS connections through worker lifetime. |
 | `monad-logger` / `fast-logger` | 0.8 / 3.2 | Structured logs, one file per worker. |
-| `ekg` + `ekg-core` | 0.4 / 0.2 | Prometheus-format metrics on `:9100`. |
+| `ekg-core` | 0.1.2 | Metric store only; Prometheus text rendered in-tree (`Hnvr.Core.Metrics`), own warp on `:9100` (`HNVR_METRICS_PORT`). |
 | `aeson`, `aeson-pretty` | 2.2+ | JSON for events, NATS payloads, frontend. |
 | `time` | 1.12+ | ISO8601 timestamps. |
 | `optparse-applicative` | 0.18+ | CLI flags for binaries. |

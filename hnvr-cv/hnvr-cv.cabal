@@ -39,6 +39,22 @@ library
   hs-source-dirs:   src
   default-language: Haskell2010
 
+executable hnvr-leak-probe
+  main-is:          LeakProbe.hs
+  hs-source-dirs:   app
+  build-depends:
+    , base
+    , deepseq
+    , hnvr-core
+    , hnvr-cv
+    , random
+    , text
+    , time
+    , vector
+
+  default-language: Haskell2010
+  ghc-options:      -threaded -rtsopts -with-rtsopts=-N
+
 test-suite hnvr-cv-test
   type:             exitcode-stdio-1.0
   main-is:          Main.hs
