@@ -66,6 +66,49 @@ in
       default = { };
       description = "Extra environment variables. sops-nix secrets land here.";
     };
+
+    onnxruntimePackage = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.onnxruntime;
+      defaultText = "pkgs.onnxruntime";
+      description = ''
+        onnxruntime build whose libonnxruntime.so the CV analyzer
+        dlopens (HNVR_ONNXRUNTIME_LIB). Default is the CPU-only nixpkgs
+        build (hnvr-1: Pascal is unsupported by cuDNN ≥ 9.12, so CPU EP
+        is its v1 ceiling). hnvr-2 overrides with the flake's
+        CUDA build: packages.onnxruntime-cuda (sm_89).
+      '';
+    };
+
+    execProviders = lib.mkOption {
+      type = lib.types.str;
+      default = "cpu";
+      description = ''
+        HNVR_EXEC_PROVIDERS: comma-separated EP priority list
+        (cpu|cuda|tensorrt). First provider whose session initializes
+        wins. hnvr-2 (RTX 4090): "tensorrt,cuda,cpu".
+      '';
+    };
+
+    modelPath = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        HNVR_MODEL_PATH: absolute path to the YOLO ONNX model. Null
+        disables the analysis pipeline (CaptureSupervisor skips the
+        frame-source/analyzer pair per camera).
+      '';
+    };
+
+    metricsPort = lib.mkOption {
+      type = lib.types.port;
+      default = 9100;
+      description = ''
+        HNVR_METRICS_PORT: Prometheus text endpoint (own warp, leader +
+        node). Not opened in the firewall by default — scrape over
+        localhost or allow explicitly.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -97,6 +140,16 @@ in
         # hashPassword(INITIAL_ADMIN_PASSWORD). Real deployments source
         # these from sops-nix (services.hnvr.secrets.enable = true).
         INITIAL_ADMIN_EMAIL = lib.mkDefault "admin@hnvr.local";
+        # ---- Phase 3 CV pipeline -----------------------------------
+        HNVR_ONNXRUNTIME_LIB = "${cfg.onnxruntimePackage}/lib/libonnxruntime.so";
+        HNVR_EXEC_PROVIDERS = cfg.execProviders;
+        HNVR_METRICS_PORT = toString cfg.metricsPort;
+        # libcuda.so.1 (kernel-driver shim) lives outside the nix store;
+        # NixOS exposes it here when hardware.nvidia is enabled. A
+        # nonexistent dir on CPU-only hosts is harmless.
+        LD_LIBRARY_PATH = "/run/opengl-driver/lib";
+      } // lib.optionalAttrs (cfg.modelPath != null) {
+        HNVR_MODEL_PATH = cfg.modelPath;
       } // cfg.environment;
 
       serviceConfig = {
@@ -148,7 +201,7 @@ in
           head -c 32 /dev/urandom > ${cfg.dataDir}/client_session_key.aes
           chmod 0600 ${cfg.dataDir}/client_session_key.aes
         fi
-      '' + lib.optionalString config.services.hnvr.secrets.enable ''
+      '' + lib.optionalString (config.services.hnvr.secrets.enable or false) ''
         # Rebuild per-secret EnvironmentFile fragments every boot —
         # sops-nix may have rotated the underlying /run/secrets/* value
         # between activations.
@@ -177,7 +230,7 @@ in
     # assignment so lib.optionals reads config.services.hnvr.secrets.enable
     # correctly under mkIf (config merging rules).
     systemd.services.hnvr-leader.serviceConfig.EnvironmentFile =
-      lib.optionals config.services.hnvr.secrets.enable (
+      lib.optionals (config.services.hnvr.secrets.enable or false) (
         map (k: "${cfg.dataDir}/env/${k}")
           [
             "HNVR_DATA_KEY"

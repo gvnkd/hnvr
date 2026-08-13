@@ -367,10 +367,16 @@
           config = {
             allowUnfree = true;
             cudaSupport = true;
+            # 8.9 = RTX 4090 (hnvr-2 / this dev box). hnvr-1's GTX 1070
+            # (Pascal, sm_61) is deliberately absent: cuDNN ≥ 9.12
+            # dropped Maxwell/Pascal and ORT 1.27's CUDA EP hard-links
+            # cuDNN, so hnvr-1 runs the CPU EP in v1 (decision Aug 13
+            # 2026 — ~80 ms/frame CPU is fine for 5 fps sub-streams).
             cudaCapabilities = [ "8.9" ];
           };
         };
         onnxruntimeCuda = cudaPkgs.onnxruntime.override { pythonSupport = false; };
+
 
         # MediaMTX bootstrap config — leader pushes per-camera path
         # config via REST API (PUT /v2/config/paths/<slug>) once cameras

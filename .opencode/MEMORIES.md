@@ -1381,6 +1381,25 @@ ffprobe notes:
          per-camera/per-EP metric caches in `Hnvr.Web.Metrics.newMetrics`
          are load-bearing, don't "simplify" them away.
 
+    103. **cuDNN ≥ 9.12 dropped Maxwell/Pascal — Pascal GPUs can't run
+         nixpkgs' ORT CUDA EP** (Aug 13 2026) — two separate support
+         windows: nvcc 12.9 still emits sm_61 SASS (nixpkgs _cuda db
+         `maxCudaMajorMinorVersion = "12.9"`; 13.x drops it), BUT
+         cuDNN 9.12+ requires CC ≥ 7.5 (nixpkgs marks cudnn 9.22
+         `badPlatforms x86_64-linux` when `cudaCapabilities` contains
+         6.1 — an EVAL-time error, and it's a real runtime removal,
+         not just metadata). ORT 1.27's CUDA EP links cuDNN
+         unconditionally (`onnxruntime_providers_cuda.cmake` —
+         `include(cudnn_frontend)` + `CUDNN::cudnn_all`); the old
+         `onnxruntime_USE_CUDNN` option is gone. Only cudnn-less knob
+         is `onnxruntime_CUDA_MINIMAL` (cudart only, guts kernels).
+         Decision: hnvr-1 (GTX 1070) runs CPU EP in v1. Also:
+         overriding away a `badPlatforms` dep via
+         `overrideAttrs (old: { buildInputs = filter … })` does NOT
+         work when the expression interpolates `${cudaPackages.cudnn}`
+         into cmakeFlags — touching old.cmakeFlags forces the string
+         → instantiates cudnn → badPlatforms throws anyway.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -1750,8 +1769,25 @@ ffprobe notes:
       ~9.2 ms/frame full pipeline (vs ~13.2 ms CPU), no crashes.
       Note: pinned nixpkgs builds no TensorRT EP — `tensorrt` in
       HNVR_EXEC_PROVIDERS falls through to cuda; TRT engine CI job
-      still open. hnvr-1 (sm_61 Pascal) needs cudaPackages_12_8 —
-      CUDA 12.9 dropped Pascal; wire with the NixOS module GPU slice.
+      still open.
+      **Slice 10 done (Aug 13 2026)**: NixOS module CV wiring +
+      hnvr-1 EP decision. `nix/module.nix` gains
+      `onnxruntimePackage` (default CPU `pkgs.onnxruntime`; hnvr-2
+      overrides with `packages.onnxruntime-cuda`), `execProviders`
+      (default "cpu"; hnvr-2 "tensorrt,cuda,cpu"), `modelPath`
+      (null = analysis off), `metricsPort` (9100), plus
+      LD_LIBRARY_PATH=/run/opengl-driver/lib. **hnvr-1 runs CPU EP in
+      v1** (Sergey's call): nvcc 12.9 still emits sm_61 SASS, but
+      cuDNN ≥ 9.12 dropped Maxwell/Pascal entirely (eval-level
+      `badPlatforms` in nixpkgs) and ORT 1.27's CUDA EP hard-links
+      cuDNN (no USE_CUDNN switch anymore; only CUDA_MINIMAL, which
+      guts kernel coverage). CPU ~80 ms/frame ≈ 12.5 fps capacity —
+      fine for 5 fps sub-streams, drop-oldest absorbs 15 fps cams.
+      Revisit if hnvr-1 gets a Turing+ card. Also fixed a latent
+      smoke-test breakage: module referenced
+      `config.services.hnvr.secrets.enable` without the hnvr-secrets
+      module imported (broken since M4) — now `… or false`.
+      `checks.hnvr-leader-smoke` green again with the new env.
       **Slice 7 done (Aug 12 2026)**: /debug view + the great SIGSEGV
       hunt. `Hnvr.Cv.DebugRender` (pure: palette box overlay +
       JuicyPixels PNG — MJPEG→PNG-multipart deviation documented;
