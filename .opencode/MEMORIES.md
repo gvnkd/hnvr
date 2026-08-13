@@ -10,10 +10,10 @@
 - **Local path**: `/home/pion/work/dev/hnvr`
 - **Remote**: `gitea@192.168.0.254:omg/hnvr.git` (branch `master`)
 - **Current branch state**: Phase 0 + 1 + 2 done (code; live VM tests
-  pending). Phase 3 slices 1–9 done (CV pipeline + EKG metrics + CUDA
-  EP verified live on hnvr-2, Aug 13 2026 — staged, not yet committed).
-  Remaining Phase 3: TRT engine CI job, hnvr-1 CUDA 12.8 wiring,
-  longer bake. Phase 2 audit-and-fix pass landed Aug 10 2026 (see
+  pending). Phase 3 slices 1–11 done (CV pipeline + EKG + CUDA + TRT
+  with engine cache, verified live on hnvr-2 — Aug 13 2026). Remaining
+  Phase 3: longer bake; YOLOv8n-320 accuracy decision (roadmap §"open
+  decisions"); hnvr-1 stays CPU EP (pitfall #103). Phase 2 audit-and-fix pass landed Aug 10 2026 (see
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
   that have been resolved; `.opencode/PHASE_AUDIT_REPORT_2.md` for the
   round-2 re-audit at `57aac3b`). Phase 1 slice 8 (Cameras admin gate)
@@ -1400,6 +1400,24 @@ ffprobe notes:
          into cmakeFlags — touching old.cmakeFlags forces the string
          → instantiates cudnn → badPlatforms throws anyway.
 
+    104. **ORT's TRT EP + nixpkgs `FETCHCONTENT_FULLY_DISCONNECTED`**
+         (Aug 13 2026) — with `onnxruntime_USE_TENSORRT=ON` and the
+         default parser path, ORT FetchContent's the `onnx-tensorrt`
+         repo to build `nvonnxparser_static` from source. nixpkgs sets
+         FULLY_DISCONNECTED and wires no
+         `FETCHCONTENT_SOURCE_DIR_ONNX_TENSORRT`, so the target is
+         silently missing and the link dies with
+         `cannot find -lnvonnxparser_static`. Fix:
+         `-Donnxruntime_USE_TENSORRT_BUILTIN_PARSER=ON` — links TRT's
+         own `libnvonnxparser.so` from the redist instead of building
+         anything. Also: nixpkgs splits tensorrt into
+         out/include/lib/static — ORT's cmake wants one TENSORRT_ROOT
+         prefix; symlinkJoin the outputs. TRT redist is
+         `meta.insecure` → `permittedInsecurePackages` (compute the
+         name dynamically like minioVersion — hardcoding
+         `cuda12.9-tensorrt-10.14.1.48` breaks on the next nixpkgs
+         bump).
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.
@@ -1788,6 +1806,27 @@ ffprobe notes:
       `config.services.hnvr.secrets.enable` without the hnvr-secrets
       module imported (broken since M4) — now `… or false`.
       `checks.hnvr-leader-smoke` green again with the new env.
+      **Slice 11 done (Aug 13 2026)**: TensorRT EP. flake's
+      `onnxruntime-cuda` now builds ORT's TRT EP:
+      `onnxruntime_USE_TENSORRT=ON` + `TENSORRT_HOME` =
+      symlinkJoin of tensorrt 10.14.1.48 outputs (incl. `static` —
+      but see pitfall #104: builtin-parser flag sidesteps
+      onnx-tensorrt entirely) + `permittedInsecurePackages` for the
+      TRT redist (computed dynamically, minioVersion pattern).
+      FFI: `UpdateTensorRTProviderOptions` (vtable idx 172,
+      re-derived from the pinned 1.27.1 -dev header) sets
+      `trt_engine_cache_enable/path` + `trt_timing_cache_enable`
+      from `HNVR_TRT_CACHE_DIR` (default: system temp dir; devenv
+      wires DEVENV_STATE/trt-cache; module wires ${dataDir}/trt-cache).
+      **Engine cache supersedes the roadmap's trtexec CI job** —
+      GPU-less CI runners can't build sm_89 engines; ORT builds the
+      engine once per host (~60 s first analyzer start) and cache-hits
+      afterwards (0.6 s). Verified: gated test HNVR_TEST_TRT=1 (60.75 s
+      cold / 0.61 s warm), live leader reports
+      `hnvr_inference_seconds{ep="tensorrt"}` ~7.8 ms/frame pipeline
+      avg (vs 9.2 CUDA / 13.2 CPU). Frame drops during the cold-start
+      engine build are expected (analyzer blocks in CreateSession).
+      cv suite: 59 tests.
       **Slice 7 done (Aug 12 2026)**: /debug view + the great SIGSEGV
       hunt. `Hnvr.Cv.DebugRender` (pure: palette box overlay +
       JuicyPixels PNG — MJPEG→PNG-multipart deviation documented;

@@ -148,6 +148,10 @@ in
         # NixOS exposes it here when hardware.nvidia is enabled. A
         # nonexistent dir on CPU-only hosts is harmless.
         LD_LIBRARY_PATH = "/run/opengl-driver/lib";
+        # TRT engine cache — first analyzer start builds the engine
+        # (minutes), later starts load from here. Under dataDir so
+        # ProtectSystem=strict allows the write.
+        HNVR_TRT_CACHE_DIR = "${cfg.dataDir}/trt-cache";
       } // lib.optionalAttrs (cfg.modelPath != null) {
         HNVR_MODEL_PATH = cfg.modelPath;
       } // cfg.environment;

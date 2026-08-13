@@ -44,9 +44,10 @@ import qualified Data.Text as T
 import qualified Data.Text.Foreign as TF
 import qualified Data.Vector.Storable as VS
 import Foreign
-import Foreign.C.String (CString, newCString, peekCString)
+import Foreign.C.String (CString, newCString, peekCString, withCString)
 import Foreign.C.Types (CInt (..), CSize (..))
 import Hnvr.Cv.OnnxRuntime.Internal
+import System.Directory (getTemporaryDirectory)
 import System.Environment (lookupEnv)
 import System.IO (hFlush, hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
@@ -254,9 +255,41 @@ withSession modelPath eps k = do
             peek out
         )
         (apiReleaseTensorRTProviderOptions api)
-        ( checked api "SessionOptionsAppendExecutionProvider_TensorRT_V2"
-            . apiAppendTensorRTV2 api opts
-        )
+        $ \trtOpts -> do
+          -- Engine cache: without it EVERY session re-builds the TRT
+          -- engine from the ONNX graph (minutes per camera boot). The
+          -- cache is keyed by model content + TRT version + GPU arch,
+          -- so all cameras sharing yolov8n-320.onnx build ONE engine
+          -- on first analyzer start and cache-hit afterwards. This
+          -- supersedes the roadmap's trtexec CI job (GPU-less CI
+          -- runners can't build sm_89 engines anyway). Cache dir:
+          -- HNVR_TRT_CACHE_DIR, falling back to the system temp dir
+          -- (persists across restarts until reboot).
+          cacheDir <-
+            fromMaybeM
+              (fmap (<> "/hnvr-trt-cache") getTemporaryDirectory)
+              (lookupEnv "HNVR_TRT_CACHE_DIR")
+          withCStringArray
+            [ "trt_engine_cache_enable",
+              "trt_engine_cache_path",
+              "trt_timing_cache_enable"
+            ]
+            ( \ks ->
+                withCStringArray ["1", cacheDir, "1"] $ \vs ->
+                  checked api "UpdateTensorRTProviderOptions" $
+                    apiUpdateTensorRTProviderOptions api trtOpts ks vs 3
+            )
+          checked api "SessionOptionsAppendExecutionProvider_TensorRT_V2" $
+            apiAppendTensorRTV2 api opts trtOpts
+
+    withCStringArray :: [String] -> (Ptr CString -> IO a) -> IO a
+    withCStringArray strs k = go strs []
+      where
+        go [] acc = withArray (reverse acc) k
+        go (s : rest) acc = withCString s (\c -> go rest (c : acc))
+
+    fromMaybeM :: IO FilePath -> IO (Maybe FilePath) -> IO FilePath
+    fromMaybeM fallback act = maybe fallback pure =<< act
 
 -- | Run one inference. The input tensor is wrapped in-place (no copy);
 -- the output is copied out into a fresh 'Tensor'.

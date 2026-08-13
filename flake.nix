@@ -373,9 +373,46 @@
             # cuDNN, so hnvr-1 runs the CPU EP in v1 (decision Aug 13
             # 2026 — ~80 ms/frame CPU is fine for 5 fps sub-streams).
             cudaCapabilities = [ "8.9" ];
+            # TensorRT redist is marked insecure in nixpkgs (CVE
+            # history, same class as MinIO — pitfall #30). Name
+            # computed dynamically so nixpkgs bumps don't break eval.
+            permittedInsecurePackages = [
+              (import nixpkgs {
+                inherit system;
+                config = {
+                  allowUnfree = true;
+                  cudaSupport = true;
+                  cudaCapabilities = [ "8.9" ];
+                };
+              }).cudaPackages.tensorrt.name
+            ];
           };
         };
-        onnxruntimeCuda = cudaPkgs.onnxruntime.override { pythonSupport = false; };
+        onnxruntimeCuda =
+          let
+            trt = cudaPkgs.cudaPackages.tensorrt;
+            # ORT's cmake expects TENSORRT_ROOT to hold BOTH include/ and
+            # lib/ under one prefix; nixpkgs splits them across outputs.
+            # `static` is required: the TRT EP links nvonnxparser_static.a.
+            tensorrtHome = cudaPkgs.symlinkJoin {
+              name = "tensorrt-home-${trt.version}";
+              paths = [ trt.out trt.include trt.lib trt.static ];
+            };
+          in
+          (cudaPkgs.onnxruntime.override { pythonSupport = false; }).overrideAttrs (old: {
+            buildInputs = old.buildInputs ++ [ trt.lib ];
+            cmakeFlags = old.cmakeFlags ++ [
+              (nixpkgs.lib.cmakeBool "onnxruntime_USE_TENSORRT" true)
+              (nixpkgs.lib.cmakeFeature "onnxruntime_TENSORRT_HOME" "${tensorrtHome}")
+              # Use TRT's shipped nvonnxparser (in the redist) instead
+              # of building onnx-tensorrt from source — ORT's default
+              # path FetchContent's onnx-tensorrt, which conflicts with
+              # nixpkgs' FETCHCONTENT_FULLY_DISCONNECTED (no
+              # FETCHCONTENT_SOURCE_DIR_ONNX_TENSORRT is wired) and
+              # dies at link with `-lnvonnxparser_static not found`.
+              (nixpkgs.lib.cmakeBool "onnxruntime_USE_TENSORRT_BUILTIN_PARSER" true)
+            ];
+          });
 
 
         # MediaMTX bootstrap config — leader pushes per-camera path
@@ -698,21 +735,23 @@
                 # ---- Phase 3 CV pipeline --------------------------------
                 # libonnxruntime for the internal FFI binding
                 # (Hnvr.Cv.OnnxRuntime.Internal, dlopen'd at session
-                # creation). CUDA build (sm_89) — TRT EP still falls
-                # through (nixpkgs onnxruntime builds no TensorRT EP);
-                # CPU is the last-resort fallback. Requires
-                # /run/opengl-driver/lib on LD_LIBRARY_PATH for
-                # libcuda.so.1 (wired in enterShell below). Model:
-                # yolov8n-320 exported into the shared model cache
-                # (design 04; exported via the devShell's ultralytics
-                # env, see pitfall #97).
+                # creation). CUDA+TensorRT build (sm_89): TRT EP wins,
+                # CUDA is the fallback, CPU the safety net. TRT engines
+                # are cached in HNVR_TRT_CACHE_DIR (first analyzer start
+                # builds, ~1 min). Requires /run/opengl-driver/lib on
+                # LD_LIBRARY_PATH for libcuda.so.1 (wired in enterShell
+                # below). Model: yolov8n-320 exported into the shared
+                # model cache (design 04; exported via the devShell's
+                # ultralytics env, see pitfall #97).
                 HNVR_ONNXRUNTIME_LIB = "${onnxruntimeCuda}/lib/libonnxruntime.so";
                 HNVR_MODEL_PATH = "/home/pion/.local/share/hnvr/model_cache/yolov8/yolov8n-320.onnx";
                 # Per-host EP priority (design 04 §"Per-host EP
-                # selection"). Dev box is hnvr-2 (RTX 4090): TRT append
-                # fails (no TRT EP in the build), CUDA wins, CPU is the
-                # safety net.
+                # selection"). Dev box is hnvr-2 (RTX 4090): TRT wins,
+                # CUDA falls back, CPU is the safety net.
                 HNVR_EXEC_PROVIDERS = "tensorrt,cuda,cpu";
+                # TRT engine cache (first analyzer start builds the
+                # engine, ~1 min; later starts load from cache).
+                HNVR_TRT_CACHE_DIR = "${config.env.DEVENV_STATE}/trt-cache";
                 # Prometheus metrics endpoint (Hnvr.Web.Metrics, own
                 # warp — leader + node). 9102 because devenv MinIO owns
                 # :9100; production default stays 9100.

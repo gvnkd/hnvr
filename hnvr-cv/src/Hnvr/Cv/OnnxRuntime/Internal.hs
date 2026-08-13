@@ -116,6 +116,7 @@ idxGetErrorMessage,
   idxGetAllocatorWithDefaultOptions,
   idxSessionOptionsAppendExecutionProviderTensorRTV2,
   idxCreateTensorRTProviderOptions,
+  idxUpdateTensorRTProviderOptions,
   idxReleaseTensorRTProviderOptions,
   idxSessionOptionsAppendExecutionProviderCUDAV2,
   idxCreateCUDAProviderOptions,
@@ -155,6 +156,7 @@ idxAllocatorFree = 76
 idxGetAllocatorWithDefaultOptions = 78
 idxSessionOptionsAppendExecutionProviderTensorRTV2 = 170
 idxCreateTensorRTProviderOptions = 171
+idxUpdateTensorRTProviderOptions = 172
 idxReleaseTensorRTProviderOptions = 174
 idxSessionOptionsAppendExecutionProviderCUDAV2 = 204
 idxCreateCUDAProviderOptions = 205
@@ -219,6 +221,8 @@ foreign import ccall "dynamic" mkAppendCUDAV2 :: FunPtr (Ptr OrtSessionOptions -
 
 foreign import ccall "dynamic" mkCreateTensorRTProviderOptions :: FunPtr (Ptr (Ptr OrtTensorRTProviderOptionsV2) -> IO (Ptr OrtStatus)) -> Ptr (Ptr OrtTensorRTProviderOptionsV2) -> IO (Ptr OrtStatus)
 
+foreign import ccall "dynamic" mkUpdateTensorRTProviderOptions :: FunPtr (Ptr OrtTensorRTProviderOptionsV2 -> Ptr CString -> Ptr CString -> CSize -> IO (Ptr OrtStatus)) -> Ptr OrtTensorRTProviderOptionsV2 -> Ptr CString -> Ptr CString -> CSize -> IO (Ptr OrtStatus)
+
 foreign import ccall "dynamic" mkAppendTensorRTV2 :: FunPtr (Ptr OrtSessionOptions -> Ptr OrtTensorRTProviderOptionsV2 -> IO (Ptr OrtStatus)) -> Ptr OrtSessionOptions -> Ptr OrtTensorRTProviderOptionsV2 -> IO (Ptr OrtStatus)
 
 foreign import ccall "dynamic" mkRelease :: FunPtr (Ptr a -> IO ()) -> Ptr a -> IO ()
@@ -254,6 +258,7 @@ data Api = Api
     apiCreateCUDAProviderOptions :: Ptr (Ptr OrtCUDAProviderOptionsV2) -> IO (Ptr OrtStatus),
     apiAppendCUDAV2 :: Ptr OrtSessionOptions -> Ptr OrtCUDAProviderOptionsV2 -> IO (Ptr OrtStatus),
     apiCreateTensorRTProviderOptions :: Ptr (Ptr OrtTensorRTProviderOptionsV2) -> IO (Ptr OrtStatus),
+    apiUpdateTensorRTProviderOptions :: Ptr OrtTensorRTProviderOptionsV2 -> Ptr CString -> Ptr CString -> CSize -> IO (Ptr OrtStatus),
     apiAppendTensorRTV2 :: Ptr OrtSessionOptions -> Ptr OrtTensorRTProviderOptionsV2 -> IO (Ptr OrtStatus),
     apiReleaseEnv :: Ptr OrtEnv -> IO (),
     apiReleaseStatus :: Ptr OrtStatus -> IO (),
@@ -309,6 +314,7 @@ loadApi libPath = do
   fpCreateCUDAProviderOptions <- vf idxCreateCUDAProviderOptions
   fpAppendCUDAV2 <- vf idxSessionOptionsAppendExecutionProviderCUDAV2
   fpCreateTensorRTProviderOptions <- vf idxCreateTensorRTProviderOptions
+  fpUpdateTensorRTProviderOptions <- vf idxUpdateTensorRTProviderOptions
   fpAppendTensorRTV2 <- vf idxSessionOptionsAppendExecutionProviderTensorRTV2
   fpReleaseEnv <- vf idxReleaseEnv
   fpReleaseStatus <- vf idxReleaseStatus
@@ -350,6 +356,7 @@ loadApi libPath = do
         apiCreateCUDAProviderOptions = mkCreateCUDAProviderOptions fpCreateCUDAProviderOptions,
         apiAppendCUDAV2 = mkAppendCUDAV2 fpAppendCUDAV2,
         apiCreateTensorRTProviderOptions = mkCreateTensorRTProviderOptions fpCreateTensorRTProviderOptions,
+        apiUpdateTensorRTProviderOptions = mkUpdateTensorRTProviderOptions fpUpdateTensorRTProviderOptions,
         apiAppendTensorRTV2 = mkAppendTensorRTV2 fpAppendTensorRTV2,
         apiReleaseEnv = mkRelease fpReleaseEnv,
         apiReleaseStatus = mkRelease fpReleaseStatus,

@@ -25,10 +25,13 @@ import Hnvr.Cv.OnnxRuntime
   ( ExecutionProvider (..),
     OrtError (..),
     Tensor (..),
+    sessionActiveEp,
     versionString,
     withSession,
   )
+import System.Directory (doesDirectoryExist, getTemporaryDirectory)
 import System.Environment (lookupEnv, setEnv)
+import System.FilePath ((</>))
 import System.Random (randomIO)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase)
@@ -51,6 +54,24 @@ tests =
               (\ep -> assertBool ("message mentions " <> ep) (T.pack ep `T.isInfixOf` msg))
               ["CUDA", "TensorRT", "CPU"]
           Right () -> assertFailure "session creation unexpectedly succeeded",
+      testCase "tensorrt session + engine cache (gated HNVR_TEST_TRT=1)" $ withLib $ do
+        mTrt <- lookupEnv "HNVR_TEST_TRT"
+        mModel <- (<|>) <$> lookupEnv "HNVR_TEST_MODEL" <*> lookupEnv "HNVR_MODEL_PATH"
+        case (mTrt, mModel) of
+          (Just "1", Just modelPath) -> do
+            -- Exercises UpdateTensorRTProviderOptions (engine-cache
+            -- keys) + SessionOptionsAppendExecutionProvider_TensorRT_V2
+            -- + CreateSession against a TRT-enabled libonnxruntime.
+            -- First run builds the engine (slow); assert the cache
+            -- dir got populated so later runs are fast.
+            cacheDir <- (</>) <$> getTemporaryDirectory <*> pure "hnvr-trt-cache-test"
+            setEnv "HNVR_TRT_CACHE_DIR" cacheDir
+            ep <- withSession (T.pack modelPath) [TensorRT] (pure . sessionActiveEp)
+            unless (ep == TensorRT) $
+              assertFailure ("expected TensorRT session, landed on " <> show ep)
+            cached <- doesDirectoryExist cacheDir
+            assertBool ("engine cache dir missing: " <> cacheDir) cached
+          _ -> pure (),
       testCase "concurrent sessions stress (gated HNVR_STRESS=1)" $ withLib $ do
         mStress <- lookupEnv "HNVR_STRESS"
         mModel <- (<|>) <$> lookupEnv "HNVR_TEST_MODEL" <*> lookupEnv "HNVR_MODEL_PATH"
