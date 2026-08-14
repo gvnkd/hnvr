@@ -68,8 +68,11 @@ import Hnvr.Cv.Tracker.Sort (Track (..), TrackId (..))
 data Direction = DirPositive | DirNegative | DirAny
   deriving stock (Eq, Show)
 
--- | Zone trigger mode (design @rule_kind@ enum).
-data ZoneMode = ZoneEnter | ZoneExit | ZoneInside
+-- | Zone trigger mode (design @rule_kind@ enum). 'ZoneMotion' carries
+-- the minimum displacement (normalized 0..1 units) a track must
+-- accumulate inside the zone before the rule fires — stationary
+-- objects never trigger it.
+data ZoneMode = ZoneEnter | ZoneExit | ZoneInside | ZoneMotion !Double
   deriving stock (Eq, Show)
 
 -- | One rule on one camera. @rId@ is the DB primary key rendered as
@@ -106,7 +109,9 @@ ruleCooldownMs ZoneRule {rCooldownMs = c} = c
 -- into a typed 'Rule'. Returns 'Nothing' on malformed geometry or an
 -- unknown kind — a bad rule row must not kill the analyzer; the caller
 -- logs the drop. Line: @{ "a": [x,y], "b": [x,y], "direction":
--- "positive"|"negative"|"any" }@. Zone: @{ "polygon": [[x,y], ...] }@.
+-- "positive"|"negative"|"any" }@. Zone: @{ "polygon": [[x,y], ...] }@;
+-- @zone_motion@ takes an optional @"min_displacement"@ (normalized,
+-- default 3% of the frame).
 projectRule :: RuleSnapshot -> Maybe Rule
 projectRule snap =
   let classes = (`elem` rsClasses snap)
@@ -128,12 +133,13 @@ projectRule snap =
                 rClasses = classes,
                 rCooldownMs = cooldown
               }
-        kind | kind `elem` ["zone_enter", "zone_exit", "zone_inside"] -> do
+        kind | kind `elem` ["zone_enter", "zone_exit", "zone_inside", "zone_motion"] -> do
           poly <- pointsField "polygon" (rsGeometry snap)
           mode <- case kind of
             "zone_enter" -> Just ZoneEnter
             "zone_exit" -> Just ZoneExit
             "zone_inside" -> Just ZoneInside
+            "zone_motion" -> Just (ZoneMotion (motionThreshold (rsGeometry snap)))
             _ -> Nothing
           if length poly < 3
             then Nothing
@@ -165,22 +171,38 @@ projectRule snap =
       Just (String t) -> Just t
       _ -> Nothing
     textField _ _ = Nothing
+    -- \| @min_displacement@ in normalized units; missing or out of
+    -- range falls back to 3% of the frame.
+    motionThreshold g = case numberField "min_displacement" g of
+      Just d | d > 0 && d < 1 -> d
+      _ -> defaultMotionThreshold
+    numberField k (Object o) = case KM.lookup (K.fromText k) o of
+      Just (Number n) -> Just (toRealFloat n)
+      _ -> Nothing
+    numberField _ _ = Nothing
+
+-- | Default 'ZoneMotion' displacement: 3% of the frame (normalized).
+defaultMotionThreshold :: Double
+defaultMotionThreshold = 0.03
 
 -- | Per-(track, rule) evaluation state. @rsInside@ is the zone
 -- inside/outside edge detector ('Nothing' = no observation yet — the
 -- first inside-observation fires Enter, matching the design's
--- transition-only semantics).
+-- transition-only semantics). @rsAnchor@ is the 'ZoneMotion' reference
+-- point: the position from which displacement is measured ('Nothing' =
+-- track outside the zone or not yet observed inside).
 data RuleState = RuleState
   { rsLastEmit :: !(Maybe UTCTime),
-    rsInside :: !(Maybe Bool)
+    rsInside :: !(Maybe Bool),
+    rsAnchor :: !(Maybe (V2 Double))
   }
   deriving stock (Eq, Show)
 
 emptyRuleState :: RuleState
-emptyRuleState = RuleState {rsLastEmit = Nothing, rsInside = Nothing}
+emptyRuleState = RuleState {rsLastEmit = Nothing, rsInside = Nothing, rsAnchor = Nothing}
 
 -- | Event kind emitted by the engine (design @event_kind@ CV subset).
-data RuleEventKind = LineCrossed | ZoneEntered | ZoneExited | ZoneInsideEvent
+data RuleEventKind = LineCrossed | ZoneEntered | ZoneExited | ZoneInsideEvent | ZoneMotionEvent
   deriving stock (Eq, Show)
 
 data RuleEvent = RuleEvent
@@ -202,6 +224,21 @@ evalRule rule classId now p0 p1 st
         let crossed = segIntersect p0 p1 a b && dirMatches dir a b p0 p1
             kind = LineCrossed
          in fire rule kind now crossed st
+      ZoneRule {rZone = poly, rMode = ZoneMotion thr} ->
+        let insideNow = pointInPoly p1 poly
+            st0 = st {rsInside = Just insideNow}
+         in if not insideNow
+              then (Nothing, st0 {rsAnchor = Nothing})
+              else case rsAnchor st of
+                Nothing -> (Nothing, st0 {rsAnchor = Just p1})
+                Just anchor ->
+                  let moved = dist anchor p1 >= thr
+                      (mEv, st1) = fire rule ZoneMotionEvent now moved st0
+                      -- On emit, re-anchor so the next event needs a
+                      -- fresh threshold displacement; while the
+                      -- cooldown suppresses, keep accumulating.
+                      st2 = maybe st1 (const (st1 {rsAnchor = Just p1})) mEv
+                   in (mEv, st2)
       ZoneRule {rZone = poly, rMode = mode} ->
         let insideNow = pointInPoly p1 poly
             transition = case (rsInside st, insideNow, mode) of
@@ -296,6 +333,11 @@ dirMatches dir a b p0 p1 = case compare (crossSign a b p0 p1) 0 of
 boxCenter :: (Fractional a) => Box a -> V2 a
 boxCenter Box {bxX = x, bxY = y, bxW = w, bxH = h} =
   V2 (x + w / 2, y + h / 2)
+
+-- | Euclidean distance between two points (normalized coords).
+dist :: (Floating a) => V2 a -> V2 a -> a
+dist (V2 (x1, y1)) (V2 (x2, y2)) =
+  sqrt ((x2 - x1) ^ (2 :: Int) + (y2 - y1) ^ (2 :: Int))
 
 -- | Segment-segment intersection test (proper + endpoint touching).
 segIntersect :: (Ord a, Fractional a) => V2 a -> V2 a -> V2 a -> V2 a -> Bool

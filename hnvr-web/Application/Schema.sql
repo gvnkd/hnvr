@@ -102,7 +102,9 @@ CREATE TABLE users (
 -- Phase 4: CV rules (line crossing + zone intrusion). Geometry JSONB:
 -- line_cross: { "a": [x,y], "b": [x,y], "direction": "positive"|"negative"|"any" }
 -- zone_*:     { "polygon": [[x,y], ...] }   (normalized 0..1 coords)
-CREATE TYPE rule_kind AS ENUM ('line_cross', 'zone_enter', 'zone_exit', 'zone_inside');
+-- zone_motion adds "min_displacement" (normalized, default 0.03): the
+-- track must move at least that far inside the zone to fire.
+CREATE TYPE rule_kind AS ENUM ('line_cross', 'zone_enter', 'zone_exit', 'zone_inside', 'zone_motion');
 
 CREATE TABLE rules (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -122,7 +124,7 @@ CREATE INDEX rules_camera_idx ON rules (camera_id) WHERE enabled;
 
 CREATE TYPE event_kind AS ENUM
     ('line_crossed', 'zone_enter', 'zone_exit', 'zone_inside',
-     'track_start', 'track_end', 'segment_written', 'system');
+     'zone_motion', 'track_start', 'track_end', 'segment_written', 'system');
 
 CREATE TABLE events (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

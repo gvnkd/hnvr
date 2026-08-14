@@ -17,6 +17,7 @@ import Data.Aeson (Value (..), encode)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BL
 import Data.Maybe (fromMaybe)
+import Data.Scientific (toRealFloat)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -66,7 +67,13 @@ ruleForm camera mRule actionUrl =
             <option value="zone_enter" selected={kindIs "zone_enter"}>zone enter</option>
             <option value="zone_exit" selected={kindIs "zone_exit"}>zone exit</option>
             <option value="zone_inside" selected={kindIs "zone_inside"}>zone inside</option>
+            <option value="zone_motion" selected={kindIs "zone_motion"}>zone motion (moving only)</option>
           </select>
+        </div>
+        <div class="field" id="motion-field">
+          <label for="rule-motion-threshold">Min movement (% of frame)</label>
+          <input class="input" id="rule-motion-threshold" type="number" min="0.5" max="50" step="0.5" value={motionVal} />
+          <div class="hint">zone motion only: a track must accumulate at least this much movement inside the zone to fire; stationary objects are ignored</div>
         </div>
         <div class="field" id="direction-field">
           <label for="rule-direction">Direction (line only)</label>
@@ -92,7 +99,7 @@ ruleForm camera mRule actionUrl =
           <div>
             <canvas id="rule-canvas" width="960" height="540" style="max-width:100%; border:1px solid #3f3f46; cursor:crosshair;"></canvas>
           </div>
-          <div class="hint">line: 2 clicks · zone: N clicks then "finish polygon" · direction arrow = line a→b</div>
+          <div class="hint">line: 2 clicks · zone: N clicks then "finish polygon" · drag vertices to adjust · direction arrow = line a→b</div>
           <button class="btn" type="button" id="rule-finish">finish polygon</button>
           <button class="btn" type="button" id="rule-clear">clear</button>
         </div>
@@ -133,6 +140,18 @@ ruleForm camera mRule actionUrl =
     kindText RuleKindZoneEnter = "zone_enter"
     kindText RuleKindZoneExit = "zone_exit"
     kindText RuleKindZoneInside = "zone_inside"
+    kindText RuleKindZoneMotion = "zone_motion"
+
+    -- Threshold as a percent for the form; stored normalized (0..1)
+    -- in the geometry JSON as min_displacement.
+    motionVal :: Text
+    motionVal = maybe "3" (tshow . (round :: Double -> Int) . (* 100) . existingMotion) mRule
+
+    existingMotion :: Rule -> Double
+    existingMotion r = case r.geometry of
+      Object o
+        | Just (Number n) <- KM.lookup "min_displacement" o -> toRealFloat n
+      _ -> 0.03
 
     -- Direction for an existing line rule comes from its geometry JSON.
     existingDirection r = case r.geometry of
@@ -153,6 +172,8 @@ ruleForm camera mRule actionUrl =
           "var ctx = canvas.getContext('2d');",
           "var kindEl = document.getElementById('rule-kind');",
           "var dirField = document.getElementById('direction-field');",
+          "var motionField = document.getElementById('motion-field');",
+          "var motionEl = document.getElementById('rule-motion-threshold');",
           "var geoEl = document.getElementById('rule-geometry');",
           "var classesEl = document.getElementById('rule-classes');",
           "var img = new Image();",
@@ -168,13 +189,16 @@ ruleForm camera mRule actionUrl =
           "} catch(e) {}",
           "function kind(){ return kindEl.value; }",
           "function isLine(){ return kind() === 'line_cross'; }",
-          "function syncVisibility(){ dirField.style.display = isLine() ? '' : 'none'; }",
+          "function isMotion(){ return kind() === 'zone_motion'; }",
+          "function syncVisibility(){ dirField.style.display = isLine() ? '' : 'none'; motionField.style.display = isMotion() ? '' : 'none'; }",
           "function writeGeometry(){",
           "  var dir = document.getElementById('rule-direction').value;",
           "  if (isLine()) {",
           "    geoEl.value = points.length === 2 ? JSON.stringify({a: points[0], b: points[1], direction: dir}) : '';",
           "  } else {",
-          "    geoEl.value = points.length >= 3 ? JSON.stringify({polygon: points}) : '';",
+          "    var g = {polygon: points};",
+          "    if (isMotion()) { var thr = parseFloat(motionEl.value) / 100; if (thr > 0) g.min_displacement = thr; }",
+          "    geoEl.value = points.length >= 3 ? JSON.stringify(g) : '';",
           "  }",
           "}",
           "function redraw(){",
@@ -203,8 +227,36 @@ ruleForm camera mRule actionUrl =
           "  }",
           "  writeGeometry();",
           "}",
+          "function normPos(e){",
+          "  var r = canvas.getBoundingClientRect();",
+          "  var x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;",
+          "  return {x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)), w: r.width, h: r.height};",
+          "}",
+          "function hitIndex(e){",
+          "  var p = normPos(e);",
+          "  for (var i = points.length - 1; i >= 0; i--) {",
+          "    var dx = (points[i][0] - p.x) * p.w, dy = (points[i][1] - p.y) * p.h;",
+          "    if (dx*dx + dy*dy < 100) return i;",
+          "  }",
+          "  return -1;",
+          "}",
+          "var dragIdx = -1, skipClick = false;",
+          "canvas.addEventListener('mousedown', function(e){",
+          "  var i = hitIndex(e);",
+          "  if (i >= 0) { dragIdx = i; e.preventDefault(); }",
+          "});",
+          "window.addEventListener('mousemove', function(e){",
+          "  if (dragIdx < 0) return;",
+          "  var p = normPos(e);",
+          "  points[dragIdx] = [p.x, p.y];",
+          "  skipClick = true;",
+          "  redraw();",
+          "});",
+          "window.addEventListener('mouseup', function(){ dragIdx = -1; });",
           "canvas.addEventListener('click', function(e){",
-          "  var x = e.offsetX / canvas.width, y = e.offsetY / canvas.height;",
+          "  if (skipClick) { skipClick = false; return; }",
+          "  if (hitIndex(e) >= 0) return;",
+          "  var p = normPos(e), x = p.x, y = p.y;",
           "  if (isLine()) { points = points.length >= 2 ? [[x,y]] : points.concat([[x,y]]); }",
           "  else { points.push([x,y]); }",
           "  redraw();",
@@ -213,6 +265,7 @@ ruleForm camera mRule actionUrl =
           "document.getElementById('rule-finish').addEventListener('click', function(){ writeGeometry(); redraw(); });",
           "kindEl.addEventListener('change', function(){ points = []; syncVisibility(); redraw(); });",
           "document.getElementById('rule-direction').addEventListener('change', writeGeometry);",
+          "motionEl.addEventListener('change', writeGeometry);",
           "document.querySelectorAll('.rule-class').forEach(function(cb){",
           "  cb.addEventListener('change', function(){",
           "    var vals = Array.prototype.slice.call(document.querySelectorAll('.rule-class'))",

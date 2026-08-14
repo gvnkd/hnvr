@@ -617,7 +617,9 @@
               # and the hnvr-s3-upload integration binary examples.
               services.minio = {
                 enable = true;
-                listenAddress = "127.0.0.1:9100";
+                # 0.0.0.0 so browsers on other hosts can fetch presigned
+                # URLs via HNVR_S3_PUBLIC_ENDPOINT (LAN dev box).
+                listenAddress = "0.0.0.0:9100";
                 consoleAddress = "127.0.0.1:9101";
                 accessKey = "minioadmin";
                 secretKey = "minioadmin";
@@ -705,6 +707,9 @@
                 # browser-reachable S3 address; presigned URLs are signed
                 # against that host (falling back to this endpoint).
                 HNVR_S3_ENDPOINT = "http://localhost:9100";
+                # Browser-facing presign host (this dev box's LAN IP);
+                # thumbnails/archive URLs signed against it.
+                HNVR_S3_PUBLIC_ENDPOINT = "http://192.168.0.156:9100";
                 HNVR_S3_ACCESS_KEY = "minioadmin";
                 HNVR_S3_SECRET_KEY = "minioadmin";
                 HNVR_S3_BUCKET = "hnvr-recordings";

@@ -26,8 +26,8 @@ data CvEvent = CvEvent
   { ceCamera :: !CameraId,
     ceRuleId :: !(Maybe Text),
     ceTs :: !UTCTime,
-    -- | @line_crossed@ | @zone_enter@ | @zone_exit@ | @zone_inside@ —
-    -- matches the @event_kind@ PG enum text.
+    -- | @line_crossed@ | @zone_enter@ | @zone_exit@ | @zone_inside@ |
+    -- @zone_motion@ — matches the @event_kind@ PG enum text.
     ceKind :: !Text,
     ceClassId :: !(Maybe Int),
     ceTrackId :: !(Maybe Int),

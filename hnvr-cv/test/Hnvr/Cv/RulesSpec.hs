@@ -4,9 +4,11 @@
 -- semantics (direction, class filter, cooldown, zone transitions).
 module Hnvr.Cv.RulesSpec (tests) where
 
+import Data.Aeson (Value, object, (.=))
 import Data.Maybe (isJust, isNothing)
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), addUTCTime, secondsToDiffTime)
+import Hnvr.Core.CameraSnapshot (RuleSnapshot (..))
 import Hnvr.Core.Geometry (Box (..), V2 (..))
 import Hnvr.Cv.Rules
   ( Direction (..),
@@ -19,6 +21,7 @@ import Hnvr.Cv.Rules
     emptyRuleState,
     evalRule,
     pointInPoly,
+    projectRule,
     segIntersect,
   )
 import Test.QuickCheck (Property, choose, forAll, (===))
@@ -143,6 +146,56 @@ tests =
             assertBool "cooldown blocks" (isNothing mEv2)
             assertBool "elapsed fires" (isJust mEv3)
         ],
+      testGroup
+        "zone motion rule"
+        [ testCase "first inside observation anchors, no fire" $ do
+            let (mEv, st) = evalRule motionRule 0 t0 (V2 (0.1, 0.5)) (V2 (0.5, 0.5)) emptyRuleState
+            mEv @?= Nothing
+            rsAnchor st @?= Just (V2 (0.5, 0.5)),
+          testCase "stationary jitter below threshold never fires" $ do
+            let (_, st1) = evalRule motionRule 0 t0 (V2 (0.5, 0.5)) (V2 (0.5, 0.5)) emptyRuleState
+                (mEv2, st2) = evalRule motionRule 0 (plus 10 t0) (V2 (0.5, 0.5)) (V2 (0.52, 0.5)) st1
+                (mEv3, _) = evalRule motionRule 0 (plus 20 t0) (V2 (0.52, 0.5)) (V2 (0.49, 0.5)) st2
+            mEv2 @?= Nothing
+            mEv3 @?= Nothing,
+          testCase "displacement beyond threshold fires" $ do
+            let (_, st1) = evalRule motionRule 0 t0 (V2 (0.5, 0.5)) (V2 (0.5, 0.5)) emptyRuleState
+                (mEv, _) = evalRule motionRule 0 (plus 1 t0) (V2 (0.5, 0.5)) (V2 (0.56, 0.5)) st1
+            fmap reKind mEv @?= Just ZoneMotionEvent,
+          testCase "slow drift accumulates across frames" $ do
+            let (_, st1) = evalRule motionRule 0 t0 (V2 (0.5, 0.5)) (V2 (0.5, 0.5)) emptyRuleState
+                (mEv2, st2) = evalRule motionRule 0 (plus 1 t0) (V2 (0.5, 0.5)) (V2 (0.53, 0.5)) st1
+                (mEv3, _) = evalRule motionRule 0 (plus 2 t0) (V2 (0.53, 0.5)) (V2 (0.56, 0.5)) st2
+            mEv2 @?= Nothing
+            fmap reKind mEv3 @?= Just ZoneMotionEvent,
+          testCase "re-anchors after firing: no refire while stationary" $ do
+            let (_, st1) = evalRule motionRule 0 t0 (V2 (0.5, 0.5)) (V2 (0.5, 0.5)) emptyRuleState
+                (mEv2, st2) = evalRule motionRule 0 (plus 1 t0) (V2 (0.5, 0.5)) (V2 (0.56, 0.5)) st1
+                (mEv3, _) = evalRule motionRule 0 (plus 10 t0) (V2 (0.56, 0.5)) (V2 (0.56, 0.5)) st2
+            assertBool "fires" (isJust mEv2)
+            mEv3 @?= Nothing,
+          testCase "leaving the zone resets the anchor" $ do
+            let (_, st1) = evalRule motionRule 0 t0 (V2 (0.5, 0.5)) (V2 (0.5, 0.5)) emptyRuleState
+                (_, st2) = evalRule motionRule 0 (plus 1 t0) (V2 (0.5, 0.5)) (V2 (0.9, 0.5)) st1
+                (mEv, st3) = evalRule motionRule 0 (plus 2 t0) (V2 (0.9, 0.5)) (V2 (0.5, 0.5)) st2
+            rsAnchor st2 @?= Nothing
+            mEv @?= Nothing
+            rsAnchor st3 @?= Just (V2 (0.5, 0.5)),
+          testCase "movement outside the zone never fires" $ do
+            let (mEv, _) = evalRule motionRule 0 t0 (V2 (0.85, 0.5)) (V2 (0.95, 0.5)) emptyRuleState
+            mEv @?= Nothing
+        ],
+      testGroup
+        "projectRule zone_motion"
+        [ testCase "parses min_displacement" $
+            motionSnap (Just 0.1) @?= Just (ZoneMotion 0.1),
+          testCase "missing min_displacement defaults to 0.03" $
+            motionSnap Nothing @?= Just (ZoneMotion 0.03),
+          testCase "out-of-range min_displacement defaults" $
+            motionSnap (Just 1.5) @?= Just (ZoneMotion 0.03),
+          testCase "bad polygon rejected" $
+            assertBool "rejected" (isNothing (projectRule (motionSnapRaw (object ["polygon" .= [[0.1, 0.1 :: Double]]]))))
+        ],
       testProperty "segIntersect is symmetric" prop_segSym,
       testProperty "pointInPoly agrees with bounds check on square" prop_squareSanity
     ]
@@ -151,6 +204,26 @@ tests =
     -- arrow shape: dent at (0.5, 0.5)
     concave = [V2 (0, 0), V2 (1, 0), V2 (1, 1), V2 (0.5, 0.5), V2 (0, 1)]
     plus = addUTCTime
+    motionRule = squareZone (ZoneMotion 0.05)
+    motionSnap :: Maybe Double -> Maybe ZoneMode
+    motionSnap mThr =
+      case projectRule (motionSnapRaw (motionGeo mThr)) of
+        Just ZoneRule {rMode = m} -> Just m
+        _ -> Nothing
+    motionSnapRaw geo =
+      RuleSnapshot
+        { rsId = "z1",
+          rsKind = "zone_motion",
+          rsGeometry = geo,
+          rsClasses = [0],
+          rsCooldownMs = 5000
+        }
+    motionGeo :: Maybe Double -> Value
+    motionGeo mThr =
+      object
+        ( ("polygon" .= ([[0.2, 0.2], [0.8, 0.2], [0.8, 0.8], [0.2, 0.8]] :: [[Double]]))
+            : maybe [] (\d -> ["min_displacement" .= d]) mThr
+        )
 
 prop_segSym :: Property
 prop_segSym =

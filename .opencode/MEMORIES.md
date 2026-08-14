@@ -19,6 +19,12 @@
   largely landed Aug 13–14 (rules engine, CvEvent pipeline,
   thumbnails, /Events UI, rules CRUD + live propagation, live feed,
   audit log). hnvr-1 stays CPU EP (pitfall #103).
+  Aug 14 2026 additions: `zone_motion` rule kind (migration 0005 —
+  apply manually to dev DBs: `psql $DATABASE_URL -f
+  hnvr-web/migrations/0005-zone-motion.sql`); rule canvas click-coord
+  fix (getBoundingClientRect) + draggable vertices; devenv MinIO now
+  binds 0.0.0.0:9100 + `HNVR_S3_PUBLIC_ENDPOINT=http://192.168.0.156:9100`
+  so remote browsers can fetch presigned thumbnails.
   Phase 2 audit-and-fix pass landed Aug 10 2026 (see
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
   that have been resolved; `.opencode/PHASE_AUDIT_REPORT_2.md` for the

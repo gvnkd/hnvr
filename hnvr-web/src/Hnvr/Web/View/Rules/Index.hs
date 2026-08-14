@@ -92,6 +92,7 @@ instance View IndexView where
       kindBadge RuleKindZoneEnter = [hsx|<span class="badge badge-info">zone enter</span>|]
       kindBadge RuleKindZoneExit = [hsx|<span class="badge badge-info">zone exit</span>|]
       kindBadge RuleKindZoneInside = [hsx|<span class="badge badge-mute">zone inside</span>|]
+      kindBadge RuleKindZoneMotion = [hsx|<span class="badge badge-warn">zone motion</span>|]
 
       enabledBadge True = [hsx|<span class="badge badge-info">on</span>|]
       enabledBadge False = [hsx|<span class="badge badge-mute">off</span>|]

@@ -336,6 +336,7 @@ toCvEvent sup snap track ev frame mThumb =
         ZoneEntered -> "zone_enter"
         ZoneExited -> "zone_exit"
         ZoneInsideEvent -> "zone_inside"
+        ZoneMotionEvent -> "zone_motion"
    in CvEvent
         { ceCamera = csId snap,
           ceRuleId = Just (reRuleId ev),

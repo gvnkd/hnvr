@@ -120,6 +120,7 @@ buildRuleFromParams rule =
       "zone_enter" -> RuleKindZoneEnter
       "zone_exit" -> RuleKindZoneExit
       "zone_inside" -> RuleKindZoneInside
+      "zone_motion" -> RuleKindZoneMotion
       _ -> LineCross
     geometryValue =
       fromMaybe (object []) (decode (BL.fromStrict (TE.encodeUtf8 (param @Text "geometry"))))
@@ -163,6 +164,7 @@ toSnapshot rule =
     kindText RuleKindZoneEnter = "zone_enter"
     kindText RuleKindZoneExit = "zone_exit"
     kindText RuleKindZoneInside = "zone_inside"
+    kindText RuleKindZoneMotion = "zone_motion"
 
 -- | Raw UUID of a camera row (Rule.cameraId is a bare UUID, not an
 -- IHP 'Id').

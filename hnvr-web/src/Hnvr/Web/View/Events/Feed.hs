@@ -52,4 +52,5 @@ instance View FeedView where
         | k == "zone_enter" = [hsx|<span class="badge badge-info">enter</span>|]
         | k == "zone_exit" = [hsx|<span class="badge badge-info">exit</span>|]
         | k == "zone_inside" = [hsx|<span class="badge badge-mute">inside</span>|]
+        | k == "zone_motion" = [hsx|<span class="badge badge-warn">motion</span>|]
         | otherwise = [hsx|<span class="badge badge-mute">{k}</span>|]

@@ -115,7 +115,7 @@ data CameraSnapshot = CameraSnapshot
 -- geometry is dropped there, not here.
 data RuleSnapshot = RuleSnapshot
   { rsId :: !Text,
-    -- | @line_cross@ | @zone_enter@ | @zone_exit@ | @zone_inside@.
+    -- | @line_cross@ | @zone_enter@ | @zone_exit@ | @zone_inside@ | @zone_motion@.
     rsKind :: !Text,
     rsGeometry :: !Value,
     rsClasses :: ![Int],

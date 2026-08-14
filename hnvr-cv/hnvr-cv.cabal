@@ -110,6 +110,7 @@ test-suite hnvr-cv-test
     Hnvr.Cv.TrackerSpec
 
   build-depends:
+    , aeson
     , async
     , base              >=4.18 && <5
     , bytestring

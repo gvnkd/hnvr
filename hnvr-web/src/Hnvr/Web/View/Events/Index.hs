@@ -118,7 +118,8 @@ instance View IndexView where
           ("line_crossed", "line crossed"),
           ("zone_enter", "zone enter"),
           ("zone_exit", "zone exit"),
-          ("zone_inside", "zone inside")
+          ("zone_inside", "zone inside"),
+          ("zone_motion", "zone motion")
         ]
 
       cameraOption cam =
@@ -157,6 +158,7 @@ instance View IndexView where
         | k == "zone_enter" = [hsx|<span class="badge badge-info">zone enter</span>|]
         | k == "zone_exit" = [hsx|<span class="badge badge-info">zone exit</span>|]
         | k == "zone_inside" = [hsx|<span class="badge badge-mute">zone inside</span>|]
+        | k == "zone_motion" = [hsx|<span class="badge badge-warn">zone motion</span>|]
         | otherwise = [hsx|<span class="badge badge-mute">{k}</span>|]
 
       -- Deep-link into the archive player: 30 s window either side of
