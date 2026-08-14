@@ -34,6 +34,10 @@ data CvEvent = CvEvent
     ceConfidence :: !(Maybe Double),
     -- | Normalized bbox {x,y,w,h} as raw JSON (matches events.bbox).
     ceBbox :: !(Maybe Value),
+    -- | S3 key of the bbox-overlaid frame PNG
+    -- (@<slug>/events/<YYYY-MM-DD/HH-MM-SS.mmm>.png@); 'Nothing' when
+    -- S3 was unreachable at event time.
+    ceThumbnailKey :: !(Maybe Text),
     ceHost :: !HostId
   }
   deriving stock (Eq, Show, Generic)

@@ -1930,9 +1930,21 @@ ffprobe notes:
       AssignPayload path does NOT carry rules (csRules=[]) — rules
       propagate via snapshot only; Phase 4 follow-up. Verified live:
       full-frame test zone on backyard → 18 zone_enter events persisted,
-      zero insert errors. **Remaining**: /events UI + thumbnails +
-      archive deep-links + rules CRUD UI (line drawing on still) +
-      live event feed + audit log.
+      zero insert errors. **Thumbnails + /Events UI done (Aug 14
+      2026)**: sink draws the offending track's bbox on the frame
+      (renderDebugPng) and uploads to S3 `<slug>/events/<ts>.png`
+      (failure → NULL thumbnail_key, event still persists); CvEvent +
+      EventWriter carry thumbnail_key. `/Events` (nav link added):
+      filter by camera/kind/window, 20/page (LIMIT+1 next-page probe),
+      presigned 1h thumbnail GETs, deep-links into the archive player
+      (`/PlayerArchive?cameraId&from&to&t`, ±30s window). Pitfalls
+      hit: IHP hasql sqlQuery has no FromRow for 10-tuples →
+      fetchEventRows uses a one-shot postgresql-simple connection
+      (SnapshotResponder pattern); float4 `confidence` needs an
+      explicit `Maybe Float` annotation (GHC defaults to Integer →
+      IHP's "Database looks outdated" page); NoFieldSelectors again
+      (record-dot in the view). **Remaining**: rules CRUD UI (line
+      drawing on still frame), live event feed on /live, audit log.
 - [ ] Phase 5 — PTZ manual + presets          ← v1.0 release
 - [ ] Phase 6 — Operational hardening
 - [ ] Phase 7 — Auto-track milestone           ← v1.1

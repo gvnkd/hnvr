@@ -14,6 +14,7 @@ import Web.Controller.Archive (ArchiveController (..))
 import Web.Controller.Cameras (CamerasController (..))
 import Web.Controller.Dashboard (DashboardController (..))
 import Web.Controller.Debug (DebugController (..))
+import Web.Controller.Events (EventsController (..))
 import Web.Controller.Hosts (HostsController (..))
 import Web.Controller.Live (LiveController (..))
 import Web.Controller.Sessions (SessionsController (..))
@@ -28,7 +29,8 @@ instance FrontController RootApplication where
       parseRoute @HostsController,
       parseRoute @ArchiveController,
       parseRoute @LiveController,
-      parseRoute @DebugController
+      parseRoute @DebugController,
+      parseRoute @EventsController
     ]
 
 instance Worker RootApplication where

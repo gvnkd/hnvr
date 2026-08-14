@@ -59,8 +59,10 @@ import Control.Concurrent.STM
     readTVarIO,
     writeTVar,
   )
+import Control.Exception (SomeException, try)
 import Control.Monad (forM_, void)
 import Data.Aeson (object, (.=))
+import qualified Data.ByteString.Lazy as BL
 import Data.IORef
   ( IORef,
     atomicModifyIORef',
@@ -94,8 +96,10 @@ import Hnvr.Core.Geometry (Box (..))
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Logging (logInfo, logWarn)
 import Hnvr.Core.Metrics (Metrics (..))
+import Hnvr.Core.Time (formatYmdHmsMs)
 import Hnvr.Cv.Analyzer (defaultAnalyzerConfig, execProvidersFromEnv)
 import Hnvr.Cv.AnalyzerRunner (runAnalyzer)
+import Hnvr.Cv.DebugRender (renderDebugPng)
 import Hnvr.Cv.Rules
   ( Rule,
     RuleEvent (..),
@@ -109,6 +113,8 @@ import Hnvr.Cv.Tracker.Sort (Track (..), TrackId (..))
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
 import qualified Hnvr.Nats.Subjects as Subjects
+import Hnvr.Storage.S3 (putObjectBytes)
+import Network.Minio (defaultPutObjectOptions, pooContentType)
 import System.Environment (lookupEnv)
 import System.Timeout (timeout)
 import Text.Read (readMaybe)
@@ -265,13 +271,35 @@ analysisSink sup snap rules rulesRef latest frame tracks = do
   case capBus sup.csConfig of
     Nothing -> pure ()
     Just bus ->
-      forM_ evs $ \(rule, track, ev) ->
-        Bus.publishJson bus Subjects.events (toCvEvent sup snap rule track ev frame)
+      forM_ evs $ \(rule, track, ev) -> do
+        mThumb <- uploadThumbnail sup snap frame track ev
+        Bus.publishJson bus Subjects.events (toCvEvent sup snap track ev frame mThumb)
+
+-- | Draw the offending track's bbox on the frame and upload as PNG to
+-- S3 (@<slug>/events/<ts>.png@). Failures degrade to 'Nothing' — the
+-- event row must persist even when storage hiccups.
+uploadThumbnail :: CaptureSupervisor -> CameraSnapshot -> Frame -> Track -> RuleEvent -> IO (Maybe Text)
+uploadThumbnail sup snap frame track ev =
+  case capS3 sup.csConfig of
+    Nothing -> pure Nothing
+    Just ci -> do
+      let key = csSlug snap <> "/events/" <> formatYmdHmsMs (reTs ev) <> ".png"
+          png = renderDebugPng frame [track]
+          opts = defaultPutObjectOptions {pooContentType = Just "image/png"}
+      r <-
+        try
+          (putObjectBytes ci (capBucket sup.csConfig) key (BL.toStrict png) opts) ::
+          IO (Either SomeException ())
+      case r of
+        Right () -> pure (Just key)
+        Left e -> do
+          logWarn ("thumbnail upload failed for " <> csSlug snap <> ": " <> T.pack (show e))
+          pure Nothing
 
 -- | Project an emitted rule event + its track into the wire
 -- 'CvEvent' (bbox normalized 0..1, design 06).
-toCvEvent :: CaptureSupervisor -> CameraSnapshot -> Rule -> Track -> RuleEvent -> Frame -> CvEvent
-toCvEvent sup snap _rule track ev frame =
+toCvEvent :: CaptureSupervisor -> CameraSnapshot -> Track -> RuleEvent -> Frame -> Maybe Text -> CvEvent
+toCvEvent sup snap track ev frame mThumb =
   let nb = normalizeBox (frameWidth frame) (frameHeight frame) (tBox track)
       kindTxt = case reKind ev of
         LineCrossed -> "line_crossed"
@@ -295,6 +323,7 @@ toCvEvent sup snap _rule track ev frame =
                     "h" .= bxH nb
                   ]
               ),
+          ceThumbnailKey = mThumb,
           ceHost = capHostId sup.csConfig
         }
 

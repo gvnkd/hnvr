@@ -76,16 +76,15 @@ drainLoop sub = forever $ do
           pure ()
 
 -- | Insert a CV event (line_crossed / zone_*) into the @events@ table.
--- @thumbnail_key@ and @segment_ts@ are left NULL in this slice —
--- thumbnails land with the /events UI slice.
+-- @segment_ts@ is left NULL in this slice.
 insertCvEvent :: (?modelContext :: ModelContext) => CvEvent -> IO ()
 insertCvEvent ev =
   void $
     sqlExec
       "INSERT INTO events \
       \  (camera_id, rule_id, ts, kind, class_id, track_id, confidence, \
-      \   bbox, host_id, created_at) \
-      \ VALUES (?, ?::uuid, ?, ?::event_kind, ?, ?, ?, ?::jsonb, ?, NOW())"
+      \   bbox, thumbnail_key, host_id, created_at) \
+      \ VALUES (?, ?::uuid, ?, ?::event_kind, ?, ?, ?, ?::jsonb, ?, ?, NOW())"
       ( unCameraId (ceCamera ev) :: UUID,
         ceRuleId ev,
         ceTs ev,
@@ -94,6 +93,7 @@ insertCvEvent ev =
         ceTrackId ev,
         ceConfidence ev,
         ceBbox ev,
+        ceThumbnailKey ev,
         unHostId (ceHost ev) :: Text
       )
 

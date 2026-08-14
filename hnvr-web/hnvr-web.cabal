@@ -89,6 +89,7 @@ library
     Hnvr.Web.View.Cameras.Show
     Hnvr.Web.View.Dashboard.Index
     Hnvr.Web.View.Debug.Show
+    Hnvr.Web.View.Events.Index
     Hnvr.Web.View.Hosts.Index
     Hnvr.Web.View.Layout
     Hnvr.Web.View.Live.Show
@@ -99,6 +100,7 @@ library
     Web.Controller.Cameras.Probe
     Web.Controller.Dashboard
     Web.Controller.Debug
+    Web.Controller.Events
     Web.Controller.Hosts
     Web.Controller.Live
     Web.Controller.Sessions
@@ -134,6 +136,7 @@ library
     , http-client
     , http-types
     , ihp
+    , minio-hs
     , postgresql-simple
     , postgresql-simple-migration
     , postgresql-types
