@@ -22,17 +22,23 @@ where
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException, bracket, catch)
 import Control.Monad (forever)
-import Data.Aeson (encode)
+import Data.Aeson (Value, encode)
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BL
+import Data.List (foldl')
+import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.UUID (UUID)
+import qualified Data.UUID as UUID
 import Database.PostgreSQL.Simple (Only (..))
 import qualified Database.PostgreSQL.Simple as PG
+import Database.PostgreSQL.Simple.Types (PGArray (..))
 import Hnvr.Core.CameraSnapshot
   ( CameraSnapshot (..),
     CameraSnapshotBatch (..),
+    RuleSnapshot (..),
     transportFromText,
   )
 import Hnvr.Core.Id (CameraId (..))
@@ -90,9 +96,22 @@ fetchAssignedCameras host = do
         conn
         "SELECT id, slug, rtsp_url, rtsp_transport, record_audio, rtsp_sub_url, use_substream_for_analysis, substream_width, substream_height, analysis_fps FROM cameras WHERE assigned_host = ? AND enabled = TRUE"
         (Only host)
-    pure (foldMap mkSnapshot rows)
+    ruleRows <-
+      PG.query_
+        conn
+        "SELECT id, camera_id, kind::text, geometry, classes, cooldown_ms FROM rules WHERE enabled = TRUE"
+    let rulesByCam = foldl' (\m r@(_rid, cid, _, _, _, _) -> M.insertWith (++) (cid :: UUID) [mkRuleSnap r] m) M.empty ruleRows
+    pure (foldMap (mkSnapshot rulesByCam) rows)
   where
-    mkSnapshot (cid, slug, url, transportTxt, recordAudio, subUrl, useSub, subW, subH, fps) =
+    mkRuleSnap (rid, _cid, kind, geometry, PGArray classes, cooldown) =
+      RuleSnapshot
+        { rsId = UUID.toText rid,
+          rsKind = kind,
+          rsGeometry = geometry,
+          rsClasses = map fromIntegral classes,
+          rsCooldownMs = fromIntegral cooldown
+        }
+    mkSnapshot rulesByCam (cid, slug, url, transportTxt, recordAudio, subUrl, useSub, subW, subH, fps) =
       case transportFromText transportTxt of
         Just tr ->
           [ CameraSnapshot
@@ -105,7 +124,8 @@ fetchAssignedCameras host = do
                 csUseSubstream = useSub,
                 csSubWidth = fromIntegral <$> subW,
                 csSubHeight = fromIntegral <$> subH,
-                csAnalysisFps = fromIntegral fps
+                csAnalysisFps = fromIntegral fps,
+                csRules = M.findWithDefault [] cid rulesByCam
               }
           ]
         Nothing -> []

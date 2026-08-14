@@ -1,7 +1,7 @@
 -- This file is auto generated and will be overriden regulary. Please edit `Application/Schema.sql` to change the Types\n"
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, InstanceSigs, MultiParamTypeClasses, TypeFamilies, DataKinds, TypeOperators, UndecidableInstances, ConstraintKinds, StandaloneDeriving  #-}
-{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches #-}
-module Generated.ActualTypes.PrimaryKeys where
+{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches -Wno-ambiguous-fields #-}
+module Generated.ActualTypes.Event where
 import IHP.HaskellSupport
 import IHP.ModelSupport
 import CorePrelude hiding (id)
@@ -42,15 +42,18 @@ import Hasql.PostgresqlTypes ()
 import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
-type instance PrimaryKey "hosts" = Text
-instance Default (Id' "hosts") where def = Id def
-type instance PrimaryKey "cameras" = UUID
-instance Default (Id' "cameras") where def = Id def
-type instance PrimaryKey "segments" = UUID
-instance Default (Id' "segments") where def = Id def
-type instance PrimaryKey "users" = UUID
-instance Default (Id' "users") where def = Id def
-type instance PrimaryKey "rules" = UUID
-instance Default (Id' "rules") where def = Id def
-type instance PrimaryKey "events" = UUID
-instance Default (Id' "events") where def = Id def
+import Generated.ActualTypes.PrimaryKeys
+data Event' = Event {id :: (Id' "events"), cameraId :: UUID, ruleId :: (Maybe UUID), ts :: UTCTime, kind :: EventKind, classId :: (Maybe Int), trackId :: (Maybe Int), confidence :: (Maybe Float), bbox :: (Maybe Data.Aeson.Value), thumbnailKey :: (Maybe Text), segmentTs :: (Maybe UTCTime), hostId :: (Maybe Text), payload :: (Maybe Data.Aeson.Value), createdAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+
+type Event = Event'
+
+type instance GetTableName (Event') = "events"
+type instance GetModelByTableName "events" = Event
+
+
+instance IHP.ModelSupport.Table (Event') where
+    tableName = "events"
+    columnNames = ["id","camera_id","rule_id","ts","kind","class_id","track_id","confidence","bbox","thumbnail_key","segment_ts","host_id","payload","created_at"]
+    primaryKeyColumnNames = ["id"]
+
+

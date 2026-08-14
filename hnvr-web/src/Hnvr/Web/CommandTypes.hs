@@ -134,7 +134,13 @@ projectCamera cam =
               csUseSubstream = cam.useSubstreamForAnalysis,
               csSubWidth = fromIntegral <$> cam.substreamWidth,
               csSubHeight = fromIntegral <$> cam.substreamHeight,
-              csAnalysisFps = fromIntegral cam.analysisFps
+              csAnalysisFps = fromIntegral cam.analysisFps,
+              -- Rules travel via the snapshot path (SnapshotResponder
+              -- joins the rules table); assign payloads don't carry
+              -- them — a camera (re)assigned by command starts without
+              -- rules until the next snapshot refresh. Phase 4
+              -- follow-up: include rules here too.
+              csRules = []
             }
 
 -- | Unwrap the IHP @Id' "cameras"@ newtype into the underlying 'UUID'

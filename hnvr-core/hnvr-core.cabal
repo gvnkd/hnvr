@@ -11,6 +11,7 @@ library
     Hnvr.Core.Assignment
     Hnvr.Core.CameraSnapshot
     Hnvr.Core.Crypto
+    Hnvr.Core.Event
     Hnvr.Core.Frame
     Hnvr.Core.Geometry
     Hnvr.Core.Id

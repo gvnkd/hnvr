@@ -67,6 +67,7 @@ mkTrack tid box =
   Track
     { tId = TrackId tid,
       tBox = box,
+      tPrevBox = box,
       tClassId = 0,
       tScore = 0.9,
       tHits = 5,

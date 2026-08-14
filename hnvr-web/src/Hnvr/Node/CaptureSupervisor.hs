@@ -60,10 +60,18 @@ import Control.Concurrent.STM
     writeTVar,
   )
 import Control.Monad (forM_, void)
-import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
+import Data.Aeson (object, (.=))
+import Data.IORef
+  ( IORef,
+    atomicModifyIORef',
+    modifyIORef',
+    newIORef,
+    readIORef,
+  )
 import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as M
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Hnvr.Capture.Ffmpeg (AnalysisConfig (..), Transport (..))
@@ -80,13 +88,27 @@ import Hnvr.Capture.Worker
   )
 import Hnvr.Core.CameraSnapshot (CameraSnapshot (..))
 import qualified Hnvr.Core.CameraSnapshot as Snap
-import Hnvr.Core.Frame (Frame)
+import Hnvr.Core.Event (CvEvent (..))
+import Hnvr.Core.Frame (Frame (..))
+import Hnvr.Core.Geometry (Box (..))
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Logging (logInfo, logWarn)
 import Hnvr.Core.Metrics (Metrics (..))
 import Hnvr.Cv.Analyzer (defaultAnalyzerConfig, execProvidersFromEnv)
 import Hnvr.Cv.AnalyzerRunner (runAnalyzer)
-import Hnvr.Cv.Tracker.Sort (Track)
+import Hnvr.Cv.Rules
+  ( Rule,
+    RuleEvent (..),
+    RuleEventKind (..),
+    RuleState,
+    evalTracks,
+    normalizeBox,
+    projectRule,
+  )
+import Hnvr.Cv.Tracker.Sort (Track (..), TrackId (..))
+import Hnvr.Nats.Bus (Bus)
+import qualified Hnvr.Nats.Bus as Bus
+import qualified Hnvr.Nats.Subjects as Subjects
 import System.Environment (lookupEnv)
 import System.Timeout (timeout)
 import Text.Read (readMaybe)
@@ -193,8 +215,10 @@ maybeStartAnalysis sup snap relayUrl = do
       queue <- newFrameQueue
       latest <- newTVarIO Nothing
       fallbackScale <- readFallbackScale
+      rulesRef <- newIORef (M.empty :: M.Map (Text, Int) RuleState)
       let metrics = capMetrics sup.csConfig
           (analysisCfg, width, height) = analysisConfigFor fallbackScale snap relayUrl
+          rules = mapMaybe projectRule (csRules snap)
           fsCfg =
             FrameSourceConfig
               { fscAnalysis = analysisCfg,
@@ -215,10 +239,64 @@ maybeStartAnalysis sup snap relayUrl = do
             (T.pack modelPath)
             eps
             queue
-            (\frame tracks -> atomically (writeTVar latest (Just (frame, tracks))))
+            (analysisSink sup snap rules rulesRef latest)
       modifyIORef' sup.csAnalysis $
         Map.insert (csId snap) AnalysisHandle {ahSource = src, ahAnalyzer = ana, ahLatest = latest}
       logInfo ("CaptureSupervisor: analysis pair started for " <> csSlug snap)
+
+-- | Per-frame sink: store the latest (frame, tracks) for the debug
+-- view, evaluate the camera's rules, publish emitted events on
+-- @hnvr.events@ (Phase 4). Rule-eval errors never escape — a bad
+-- frame must not kill the analyzer loop.
+analysisSink ::
+  CaptureSupervisor ->
+  CameraSnapshot ->
+  [Rule] ->
+  IORef (M.Map (Text, Int) RuleState) ->
+  TVar (Maybe (Frame, [Track])) ->
+  Frame ->
+  [Track] ->
+  IO ()
+analysisSink sup snap rules rulesRef latest frame tracks = do
+  atomically (writeTVar latest (Just (frame, tracks)))
+  evs <-
+    atomicModifyIORef' rulesRef $ \st ->
+      evalTracks st rules (frameWidth frame) (frameHeight frame) tracks (frameTimestamp frame)
+  case capBus sup.csConfig of
+    Nothing -> pure ()
+    Just bus ->
+      forM_ evs $ \(rule, track, ev) ->
+        Bus.publishJson bus Subjects.events (toCvEvent sup snap rule track ev frame)
+
+-- | Project an emitted rule event + its track into the wire
+-- 'CvEvent' (bbox normalized 0..1, design 06).
+toCvEvent :: CaptureSupervisor -> CameraSnapshot -> Rule -> Track -> RuleEvent -> Frame -> CvEvent
+toCvEvent sup snap _rule track ev frame =
+  let nb = normalizeBox (frameWidth frame) (frameHeight frame) (tBox track)
+      kindTxt = case reKind ev of
+        LineCrossed -> "line_crossed"
+        ZoneEntered -> "zone_enter"
+        ZoneExited -> "zone_exit"
+        ZoneInsideEvent -> "zone_inside"
+   in CvEvent
+        { ceCamera = csId snap,
+          ceRuleId = Just (reRuleId ev),
+          ceTs = reTs ev,
+          ceKind = kindTxt,
+          ceClassId = Just (tClassId track),
+          ceTrackId = Just (let TrackId n = tId track in n),
+          ceConfidence = Just (realToFrac (tScore track)),
+          ceBbox =
+            Just
+              ( object
+                  [ "x" .= bxX nb,
+                    "y" .= bxY nb,
+                    "w" .= bxW nb,
+                    "h" .= bxH nb
+                  ]
+              ),
+          ceHost = capHostId sup.csConfig
+        }
 
 -- | Pick sub-stream decode vs main-stream-with-scale fallback per
 -- camera snapshot (design 03 §2b). The fallback scale comes from

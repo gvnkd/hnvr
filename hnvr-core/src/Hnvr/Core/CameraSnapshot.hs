@@ -19,13 +19,14 @@
 module Hnvr.Core.CameraSnapshot
   ( CameraSnapshot (..),
     CameraSnapshotBatch (..),
+    RuleSnapshot (..),
     Transport (..),
     transportToText,
     transportFromText,
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
 import Data.List (intercalate)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -96,7 +97,25 @@ data CameraSnapshot = CameraSnapshot
     csUseSubstream :: !Bool,
     csSubWidth :: !(Maybe Int),
     csSubHeight :: !(Maybe Int),
-    csAnalysisFps :: !Int
+    csAnalysisFps :: !Int,
+    -- | Enabled rules on this camera (Phase 4). Projected into
+    -- 'Hnvr.Cv.Rules.Rule' by the receiving host.
+    csRules :: ![RuleSnapshot]
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | One rule row as sent over the wire. Geometry stays raw JSONB
+-- (line endpoints or polygon per design 06) — the receiving host
+-- projects it into the typed 'Hnvr.Cv.Rules.Rule' shape; malformed
+-- geometry is dropped there, not here.
+data RuleSnapshot = RuleSnapshot
+  { rsId :: !Text,
+    -- | @line_cross@ | @zone_enter@ | @zone_exit@ | @zone_inside@.
+    rsKind :: !Text,
+    rsGeometry :: !Value,
+    rsClasses :: ![Int],
+    rsCooldownMs :: !Int
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

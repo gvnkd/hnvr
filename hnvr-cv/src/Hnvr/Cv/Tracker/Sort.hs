@@ -44,6 +44,9 @@ data Track = Track
   { tId :: !TrackId,
     -- | Current best box estimate (Kalman-smoothed).
     tBox :: !(Box Float),
+    -- | Box estimate from the previous update — the rules engine's
+    -- movement segment (p0 → p1) for line crossing (Phase 4).
+    tPrevBox :: !(Box Float),
     tClassId :: !Int,
     -- | Score of the last matched detection.
     tScore :: !Float,
@@ -148,7 +151,7 @@ update tr dets =
     forceTrack t = tId t `seq` tBox t `seq` tHits t `seq` ()
     predictTrack t =
       let k' = predict (tKalman t)
-       in t {tKalman = k', tBox = kalmanBox k', tAge = tAge t + 1, tTimeSinceUpdate = tTimeSinceUpdate t + 1}
+       in t {tKalman = k', tPrevBox = tBox t, tBox = kalmanBox k', tAge = tAge t + 1, tTimeSinceUpdate = tTimeSinceUpdate t + 1}
 
     applyMatch matched detList k t =
       case IM.lookup k matched of
@@ -169,6 +172,7 @@ update tr dets =
       Track
         { tId = tid,
           tBox = detBox d,
+          tPrevBox = detBox d,
           tClassId = detClassId d,
           tScore = detScore d,
           tHits = 1,

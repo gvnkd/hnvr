@@ -1,7 +1,7 @@
 -- This file is auto generated and will be overriden regulary. Please edit `Application/Schema.sql` to change the Types\n"
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, InstanceSigs, MultiParamTypeClasses, TypeFamilies, DataKinds, TypeOperators, UndecidableInstances, ConstraintKinds, StandaloneDeriving  #-}
-{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches #-}
-module Generated.ActualTypes.PrimaryKeys where
+{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches -Wno-ambiguous-fields #-}
+module Generated.ActualTypes.Rule where
 import IHP.HaskellSupport
 import IHP.ModelSupport
 import CorePrelude hiding (id)
@@ -42,15 +42,18 @@ import Hasql.PostgresqlTypes ()
 import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
-type instance PrimaryKey "hosts" = Text
-instance Default (Id' "hosts") where def = Id def
-type instance PrimaryKey "cameras" = UUID
-instance Default (Id' "cameras") where def = Id def
-type instance PrimaryKey "segments" = UUID
-instance Default (Id' "segments") where def = Id def
-type instance PrimaryKey "users" = UUID
-instance Default (Id' "users") where def = Id def
-type instance PrimaryKey "rules" = UUID
-instance Default (Id' "rules") where def = Id def
-type instance PrimaryKey "events" = UUID
-instance Default (Id' "events") where def = Id def
+import Generated.ActualTypes.PrimaryKeys
+data Rule' = Rule {id :: (Id' "rules"), cameraId :: UUID, name :: Text, kind :: RuleKind, geometry :: Data.Aeson.Value, classes :: [Int], cooldownMs :: Int, enabled :: Bool, createdAt :: UTCTime, updatedAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+
+type Rule = Rule'
+
+type instance GetTableName (Rule') = "rules"
+type instance GetModelByTableName "rules" = Rule
+
+
+instance IHP.ModelSupport.Table (Rule') where
+    tableName = "rules"
+    columnNames = ["id","camera_id","name","kind","geometry","classes","cooldown_ms","enabled","created_at","updated_at"]
+    primaryKeyColumnNames = ["id"]
+
+

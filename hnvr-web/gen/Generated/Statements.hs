@@ -19,7 +19,17 @@ module Generated.Statements (
     module Generated.Statements.CreateUser,
     module Generated.Statements.UpdateUser,
     module Generated.Statements.FetchUser,
-    module Generated.Statements.CreateManyUser
+    module Generated.Statements.CreateManyUser,
+    module Generated.Statements.RowDecoderRule,
+    module Generated.Statements.CreateRule,
+    module Generated.Statements.UpdateRule,
+    module Generated.Statements.FetchRule,
+    module Generated.Statements.CreateManyRule,
+    module Generated.Statements.RowDecoderEvent,
+    module Generated.Statements.CreateEvent,
+    module Generated.Statements.UpdateEvent,
+    module Generated.Statements.FetchEvent,
+    module Generated.Statements.CreateManyEvent
 ) where
 import qualified Generated.Statements.RowDecoderHost
 import qualified Generated.Statements.CreateHost
@@ -41,4 +51,14 @@ import qualified Generated.Statements.CreateUser
 import qualified Generated.Statements.UpdateUser
 import qualified Generated.Statements.FetchUser
 import qualified Generated.Statements.CreateManyUser
+import qualified Generated.Statements.RowDecoderRule
+import qualified Generated.Statements.CreateRule
+import qualified Generated.Statements.UpdateRule
+import qualified Generated.Statements.FetchRule
+import qualified Generated.Statements.CreateManyRule
+import qualified Generated.Statements.RowDecoderEvent
+import qualified Generated.Statements.CreateEvent
+import qualified Generated.Statements.UpdateEvent
+import qualified Generated.Statements.FetchEvent
+import qualified Generated.Statements.CreateManyEvent
 

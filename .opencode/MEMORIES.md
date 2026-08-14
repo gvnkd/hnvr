@@ -1463,7 +1463,6 @@ ffprobe notes:
   NATS from day one).
 
 ## Roadmap status (Aug 12 2026 — archive-browser audit-fix landed)
-
 - [x] **Archive browser/manager** (Aug 11 2026, audit-fixed Aug 12 2026) —
       `/Archive`: filter by camera/time-window (24h cap)/min-duration/
       slug-search, segments grouped into recordings (30s gap tolerance)
@@ -1912,7 +1911,28 @@ ffprobe notes:
       + 6 Sort + determinism & ID-stability props). hnvr-cv suite: 44
       total. Watch out: QuickCheck default size × O(n³) Hungarian =
       minutes — `resize 12` in the determinism prop.
-- [ ] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate
+- [~] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate.
+      **Backend pipeline done (Aug 13 2026)**: `Hnvr.Cv.Rules`
+      (pure engine: line-cross direction sign, ray-cast point-in-poly,
+      per-(rule,track) cooldown/zone state, `projectRule` wire→typed,
+      `evalTracks` with dead-track pruning — 23 unit+property tests).
+      Migration 0003 (rules + events tables + enums; complex partial
+      indexes live ONLY in the migration — IHP's schema-compiler can't
+      parse `NOT IN`/`IS NOT NULL` index predicates). IHP codegen
+      regenerated (new Generated.{Rule,Event}* modules, hand-added to
+      hnvr-web.cabal per pitfall #51). `Track` gained `tPrevBox`
+      (movement segment for line-cross). Wire: `RuleSnapshot` +
+      `CvEvent` in hnvr-core; SnapshotResponder joins rules (SQL needs
+      `kind::text` — postgresql-simple won't decode PG enums to Text);
+      `CaptureSupervisor.analysisSink` evals rules per frame and
+      publishes `CvEvent` on hnvr.events; EventWriter persists
+      (needs `?::uuid` + `?::jsonb` casts for rule_id/bbox).
+      AssignPayload path does NOT carry rules (csRules=[]) — rules
+      propagate via snapshot only; Phase 4 follow-up. Verified live:
+      full-frame test zone on backyard → 18 zone_enter events persisted,
+      zero insert errors. **Remaining**: /events UI + thumbnails +
+      archive deep-links + rules CRUD UI (line drawing on still) +
+      live event feed + audit log.
 - [ ] Phase 5 — PTZ manual + presets          ← v1.0 release
 - [ ] Phase 6 — Operational hardening
 - [ ] Phase 7 — Auto-track milestone           ← v1.1

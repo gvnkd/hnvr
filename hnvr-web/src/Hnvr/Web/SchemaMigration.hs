@@ -66,6 +66,10 @@ initialSchemaSql = $(embedFile "migrations/0001-initial.sql")
 brinIndexSql :: ByteString
 brinIndexSql = $(embedFile "migrations/0002-brin-index.sql")
 
+-- | Phase 4: rules + events tables (design_docs/06 §"Rules"/§"Events").
+rulesEventsSql :: ByteString
+rulesEventsSql = $(embedFile "migrations/0003-rules-events.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -93,6 +97,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0002-brin-index" brinIndexSql) True conn
     handleResult "0002-brin-index" brinRes
+    rulesEventsRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0003-rules-events" rulesEventsSql) True conn
+    handleResult "0003-rules-events" rulesEventsRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

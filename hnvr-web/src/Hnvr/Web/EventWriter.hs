@@ -31,6 +31,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.UUID (UUID)
+import Hnvr.Core.Event (CvEvent (..))
 import Hnvr.Core.Id (CameraId (..), HostId (..), sha256ToHex)
 import Hnvr.Core.Logging (logError, logInfo)
 import Hnvr.Core.Segment (SegmentWritten (..))
@@ -65,10 +66,36 @@ drainLoop sub = forever $ do
                 <> T.pack (show e)
             )
     Nothing ->
-      -- Not a SegmentWritten envelope (or parse error). Future event
-      -- kinds (line_crossed etc.) land in Phase 4; for now we silently
-      -- drop anything we can't decode.
-      pure ()
+      case decodeStrict (msgPayload msg) :: Maybe CvEvent of
+        Just ev ->
+          insertCvEvent ev
+            `catch` \(e :: SomeException) ->
+              logError ("EventWriter: CV event insert failed: " <> T.pack (show e))
+        Nothing ->
+          -- Unknown envelope shape (or parse error) — drop silently.
+          pure ()
+
+-- | Insert a CV event (line_crossed / zone_*) into the @events@ table.
+-- @thumbnail_key@ and @segment_ts@ are left NULL in this slice —
+-- thumbnails land with the /events UI slice.
+insertCvEvent :: (?modelContext :: ModelContext) => CvEvent -> IO ()
+insertCvEvent ev =
+  void $
+    sqlExec
+      "INSERT INTO events \
+      \  (camera_id, rule_id, ts, kind, class_id, track_id, confidence, \
+      \   bbox, host_id, created_at) \
+      \ VALUES (?, ?::uuid, ?, ?::event_kind, ?, ?, ?, ?::jsonb, ?, NOW())"
+      ( unCameraId (ceCamera ev) :: UUID,
+        ceRuleId ev,
+        ceTs ev,
+        ceKind ev,
+        ceClassId ev,
+        ceTrackId ev,
+        ceConfidence ev,
+        ceBbox ev,
+        unHostId (ceHost ev) :: Text
+      )
 
 -- | Insert a 'SegmentWritten' row idempotently.
 --

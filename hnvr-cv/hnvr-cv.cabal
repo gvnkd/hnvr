@@ -23,6 +23,7 @@ library
     Hnvr.Cv.Tracker.Sort
 
   build-depends:
+    , aeson
     , base         >=4.18 && <5
     , bytestring
     , containers
@@ -31,8 +32,10 @@ library
     , hnvr-core
     , JuicyPixels
     , massiv
+    , scientific
     , stm
     , text
+    , time
     , unix
     , vector
 
@@ -65,6 +68,7 @@ test-suite hnvr-cv-test
     Hnvr.Cv.DecodeSpec
     Hnvr.Cv.OnnxRuntimeSpec
     Hnvr.Cv.PreprocessSpec
+    Hnvr.Cv.RulesSpec
     Hnvr.Cv.TrackerSpec
 
   build-depends:

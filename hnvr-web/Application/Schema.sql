@@ -97,3 +97,54 @@ CREATE TABLE users (
     last_login_at           TIMESTAMP WITH TIME ZONE,
     created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+-- Phase 4: CV rules (line crossing + zone intrusion). Geometry JSONB:
+-- line_cross: { "a": [x,y], "b": [x,y], "direction": "positive"|"negative"|"any" }
+-- zone_*:     { "polygon": [[x,y], ...] }   (normalized 0..1 coords)
+CREATE TYPE rule_kind AS ENUM ('line_cross', 'zone_enter', 'zone_exit', 'zone_inside');
+
+CREATE TABLE rules (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id       UUID NOT NULL,
+    name            TEXT NOT NULL,
+    kind            rule_kind NOT NULL,
+    geometry        JSONB NOT NULL,
+    classes         INT[] NOT NULL DEFAULT ARRAY[0,1,2,3,5,7],
+    cooldown_ms     INT NOT NULL DEFAULT 5000,
+    enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+);
+
+CREATE INDEX rules_camera_idx ON rules (camera_id) WHERE enabled;
+
+CREATE TYPE event_kind AS ENUM
+    ('line_crossed', 'zone_enter', 'zone_exit', 'zone_inside',
+     'track_start', 'track_end', 'segment_written', 'system');
+
+CREATE TABLE events (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id       UUID NOT NULL,
+    rule_id         UUID,
+    ts              TIMESTAMP WITH TIME ZONE NOT NULL,
+    kind            event_kind NOT NULL,
+    class_id        INT,
+    track_id        INT,
+    confidence      REAL,
+    bbox            JSONB,
+    thumbnail_key   TEXT,
+    segment_ts      TIMESTAMP WITH TIME ZONE,
+    host_id         TEXT,
+    payload         JSONB,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+    FOREIGN KEY (rule_id) REFERENCES rules(id) ON DELETE SET NULL,
+    FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE SET NULL
+);
+
+CREATE INDEX events_cam_ts_idx   ON events (camera_id, ts DESC);
+CREATE INDEX events_ts_brin      ON events USING brin (ts);
+-- Partial indexes events_kind_idx + events_track_idx live only in
+-- migrations/0003-rules-events.sql — IHP's schema-compiler can't parse
+-- NOT IN / IS NOT NULL index predicates, and codegen doesn't need them.

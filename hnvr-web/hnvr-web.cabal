@@ -11,36 +11,52 @@ library
   exposed-modules:
     Generated.ActualTypes
     Generated.ActualTypes.Camera
+    Generated.ActualTypes.Event
     Generated.ActualTypes.Host
     Generated.ActualTypes.PrimaryKeys
+    Generated.ActualTypes.Rule
     Generated.ActualTypes.Segment
     Generated.ActualTypes.User
     Generated.Camera
     Generated.CameraInclude
     Generated.Enums
+    Generated.Event
+    Generated.EventInclude
     Generated.Host
     Generated.HostInclude
+    Generated.Rule
+    Generated.RuleInclude
     Generated.Segment
     Generated.SegmentInclude
     Generated.Statements
     Generated.Statements.CreateCamera
+    Generated.Statements.CreateEvent
     Generated.Statements.CreateHost
     Generated.Statements.CreateManyCamera
+    Generated.Statements.CreateManyEvent
     Generated.Statements.CreateManyHost
+    Generated.Statements.CreateManyRule
     Generated.Statements.CreateManySegment
     Generated.Statements.CreateManyUser
+    Generated.Statements.CreateRule
     Generated.Statements.CreateSegment
     Generated.Statements.CreateUser
     Generated.Statements.FetchCamera
+    Generated.Statements.FetchEvent
     Generated.Statements.FetchHost
+    Generated.Statements.FetchRule
     Generated.Statements.FetchSegment
     Generated.Statements.FetchUser
     Generated.Statements.RowDecoderCamera
+    Generated.Statements.RowDecoderEvent
     Generated.Statements.RowDecoderHost
+    Generated.Statements.RowDecoderRule
     Generated.Statements.RowDecoderSegment
     Generated.Statements.RowDecoderUser
     Generated.Statements.UpdateCamera
+    Generated.Statements.UpdateEvent
     Generated.Statements.UpdateHost
+    Generated.Statements.UpdateRule
     Generated.Statements.UpdateSegment
     Generated.Statements.UpdateUser
     Generated.Types
