@@ -23,7 +23,9 @@ where
 
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.UUID (UUID)
 import Generated.Types
+import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.View.Cameras.Edit
 import Hnvr.Web.View.Cameras.Index
@@ -31,8 +33,19 @@ import Hnvr.Web.View.Cameras.New
 import Hnvr.Web.View.Cameras.Show
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (ensureIsUser)
+import IHP.ModelSupport (Id' (Id))
 import Web.Controller.Cameras.Probe (ProbeInfo (..), probe)
 import Web.Controller.Support.Crypto (decryptPassword, encryptPassword)
+
+-- | Raw UUID of a camera row (audit targets).
+camUuid :: Camera -> UUID
+camUuid cam = case cam |> get #id of Id u -> u
+
+-- | Acting user's UUID for audit rows.
+currentUserUuid :: (?request :: Request) => Maybe UUID
+currentUserUuid = case currentUserOrNothing of
+  Nothing -> Nothing
+  Just u -> case u |> get #id of Id uuid -> Just uuid
 
 data CamerasController
   = CamerasAction
@@ -76,6 +89,7 @@ instance Controller CamerasController where
     if camera |> isValid
       then do
         camera <- camera |> createRecord
+        audit currentUserUuid "camera.create" "camera" (Just (camUuid camera))
         setSuccessMessage "Camera created"
         redirectTo ShowCameraAction {cameraId = camera |> get #id}
       else render NewView {..}
@@ -98,12 +112,14 @@ instance Controller CamerasController where
     if camera'' |> isValid
       then do
         camera''' <- camera'' |> updateRecord
+        audit currentUserUuid "camera.update" "camera" (Just (camUuid camera'''))
         setSuccessMessage "Camera updated"
         redirectTo ShowCameraAction {cameraId = camera''' |> get #id}
       else render EditView {camera = camera''}
   action DeleteCameraAction {cameraId} = do
     camera <- fetch cameraId
     deleteRecord camera
+    audit currentUserUuid "camera.delete" "camera" (Just (camUuid camera))
     setSuccessMessage "Camera deleted"
     redirectTo CamerasAction
 
@@ -155,6 +171,7 @@ instance Controller CamerasController where
               then set #assignedHost Nothing . set #manualAssign False
               else set #assignedHost (Just hostParam) . set #manualAssign True
     camera'' <- camera' |> updateRecord
+    audit currentUserUuid "camera.assign" "camera" (Just (camUuid camera''))
     setSuccessMessage
       $ if cleared
         then "Assignment cleared (auto mode)"

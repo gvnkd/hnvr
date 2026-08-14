@@ -41,6 +41,7 @@ import Generated.Types
 import Hnvr.Core.CameraSnapshot (RuleSnapshot (..))
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (commandAssign)
+import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (AssignPayload (..), cameraIdOf, projectCameraWithRules)
@@ -77,6 +78,7 @@ instance Controller RulesController where
     camera <- fetch (param @(Id Camera) "camera_id")
     let rule = buildRuleFromParams (newRecord @Rule |> set #cameraId (camUuidOf camera))
     rule' <- rule |> createRecord
+    audit currentUserUuid "rule.create" "rule" (Just (ruleUuid rule'))
     publishRuleRefresh camera
     setSuccessMessage "Rule created"
     redirectTo EditRuleAction {ruleId = rule' |> get #id}
@@ -87,6 +89,7 @@ instance Controller RulesController where
   action UpdateRuleAction {ruleId} = do
     rule <- fetch ruleId
     rule' <- buildRuleFromParams rule |> updateRecord
+    audit currentUserUuid "rule.update" "rule" (Just (ruleUuid rule'))
     camera <- fetch (Id rule.cameraId :: Id Camera)
     publishRuleRefresh camera
     setSuccessMessage "Rule updated"
@@ -95,6 +98,7 @@ instance Controller RulesController where
     rule <- fetch ruleId
     camera <- fetch (Id rule.cameraId :: Id Camera)
     deleteRecord rule
+    audit currentUserUuid "rule.delete" "rule" (Just (ruleUuid rule))
     publishRuleRefresh camera
     setSuccessMessage "Rule deleted"
     redirectTo RulesAction
@@ -164,3 +168,13 @@ toSnapshot rule =
 -- IHP 'Id').
 camUuidOf :: Camera -> UUID
 camUuidOf cam = case cam |> get #id of Id u -> u
+
+ruleUuid :: Rule -> UUID
+ruleUuid r = case r |> get #id of Id u -> u
+
+-- | Acting user's UUID for audit rows (Nothing when unauthenticated;
+-- ensureIsUser gates these actions anyway).
+currentUserUuid :: (?request :: Request) => Maybe UUID
+currentUserUuid = case currentUserOrNothing of
+  Nothing -> Nothing
+  Just u -> case u |> get #id of Id uuid -> Just uuid

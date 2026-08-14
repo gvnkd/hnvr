@@ -148,3 +148,17 @@ CREATE INDEX events_ts_brin      ON events USING brin (ts);
 -- Partial indexes events_kind_idx + events_track_idx live only in
 -- migrations/0003-rules-events.sql — IHP's schema-compiler can't parse
 -- NOT IN / IS NOT NULL index predicates, and codegen doesn't need them.
+
+-- Phase 4: admin action audit log.
+CREATE TABLE audit_log (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         UUID,
+    action          TEXT NOT NULL,
+    target_type     TEXT NOT NULL,
+    target_id       UUID,
+    payload         JSONB,
+    ts              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX audit_ts_idx ON audit_log (ts DESC);

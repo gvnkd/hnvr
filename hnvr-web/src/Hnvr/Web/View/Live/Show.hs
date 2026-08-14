@@ -46,6 +46,12 @@ instance View ShowView where
         <span id="hnvr-live-led" class="led led-warn"></span>
         <span id="hnvr-live-status">Connecting…</span>
       </div>
+      <div class="card mt-4">
+        <div class="card-header">Events</div>
+        <div class="card-body" id="hnvr-live-feed">
+          <div class="text-sm text-zinc-400">loading…</div>
+        </div>
+      </div>
       {scriptTag}
     |]
     where
@@ -55,7 +61,24 @@ instance View ShowView where
       -- CSS like `h1 { color:red }` doesn't get re-parsed). Build the
       -- entire <script>…</script> element in Haskell and inject it as
       -- a single body-level splice. See pitfall #63.
-      scriptTag = preEscapedTextValue ("<script>" <> whepJs camera <> "</script>" :: Text)
+      scriptTag = preEscapedTextValue ("<script>" <> whepJs camera <> feedJs camera <> "</script>" :: Text)
+
+-- | Live event feed poller: refreshes the panel from the fragment
+-- endpoint every 5 s (design 05 §"Live event feed"; a fetch poller
+-- instead of IHP autoRefresh — our layout doesn't load ihp.js).
+feedJs :: Camera -> Text
+feedJs cam =
+  "const feedEl = document.getElementById('hnvr-live-feed');"
+    <> "const feedUrl = '/EventsFeedLive?liveCameraId="
+    <> tshow (cam |> get #id)
+    <> "';"
+    <> "async function refreshFeed() {"
+    <> "  try {"
+    <> "    const r = await fetch(feedUrl);"
+    <> "    if (r.ok) feedEl.innerHTML = await r.text();"
+    <> "  } catch (e) { /* keep last good fragment */ }"
+    <> "}"
+    <> "refreshFeed(); setInterval(refreshFeed, 5000);"
 
 -- | Inline WHEP client. ~40 LOC vanilla JS. Talks to our /whep/<slug>
 -- proxy which forwards to MediaMTX. Updates the status pill + LED

@@ -29,19 +29,23 @@ import Generated.Types
 import Hnvr.Core.ArchiveBrowser (parseWhen)
 import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.Auth ()
+import Hnvr.Web.View.Events.Feed
 import Hnvr.Web.View.Events.Index
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 import qualified System.Environment as Env
 import Text.Read (readMaybe)
 
-data EventsController = EventsAction
+data EventsController
+  = EventsAction
+  | -- | HTML fragment: last 10 events for a camera. Polled by the
+    -- /live page's feed panel (IHP autoRefresh needs ihp.js, which our
+    -- layout doesn't load — the page polls this instead).
+    EventsFeedLiveAction {liveCameraId :: !(Id Camera)}
   deriving stock (Eq, Show, Data)
 
 instance AutoRoute EventsController
 
--- | One event row joined with its camera slug + rule name. Defined in
--- the view module (same split as the Archive browser's RecordingRow).
 pageSize :: Int
 pageSize = 20
 
@@ -66,6 +70,10 @@ instance Controller EventsController where
         pageRows = take pageSize rows
     thumbs <- presignThumbs pageRows
     render IndexView {events = zip pageRows thumbs, ..}
+  action EventsFeedLiveAction {liveCameraId} = do
+    let camUuid = case liveCameraId of Id u -> u
+    rows <- fetchEventRows (Just camUuid) Nothing Nothing Nothing 1
+    render FeedView {events = take 10 rows}
 
 -- | Page rows: LIMIT pageSize+1 so a full overflow row tells us
 -- whether a next page exists (no COUNT round-trip). One-shot

@@ -1911,7 +1911,7 @@ ffprobe notes:
       + 6 Sort + determinism & ID-stability props). hnvr-cv suite: 44
       total. Watch out: QuickCheck default size × O(n³) Hungarian =
       minutes — `resize 12` in the determinism prop.
-- [~] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate.
+- [x] Phase 4 — Events (line crossing + zone)  ← v1.0 release candidate.
       **Backend pipeline done (Aug 13 2026)**: `Hnvr.Cv.Rules`
       (pure engine: line-cross direction sign, ray-cast point-in-poly,
       per-(rule,track) cooldown/zone state, `projectRule` wire→typed,
@@ -1963,6 +1963,20 @@ ffprobe notes:
       has /Rules + /Events. Verified: create/edit/purge round-trip via
       curl, EditRule prefills geometry, worker restarts on rule change.
       **Remaining Phase 4**: live event feed on /live, audit log.
+      **Live feed + audit log done (Aug 14 2026)**: /live page has an
+      Events panel polled every 5 s from `EventsFeedLiveAction` (HTML
+      fragment, last 10 per camera — IHP autoRefresh needs ihp.js,
+      which our layout doesn't load, so a fetch poller). Migration
+      0004 `audit_log` + `Hnvr.Web.Audit.audit` (never-throws helper)
+      wired into rule create/update/delete + camera
+      create/update/delete/assign; user id via `currentUserOrNothing`
+      (helper signature needs `(?request :: Request) =>`). Phase 4
+      feature-complete per roadmap. Playwright `rules.spec.ts` (4
+      specs: canvas line create→edit→purge, zone polygon, /Events
+      table, live feed poller) — full suite 23 passed + 1 pre-existing
+      skip. Gotcha: pre-commit ormolu runs in the nix sandbox and does
+      NOT modify the working tree — run `ormolu -i` yourself before
+      committing.
 - [ ] Phase 5 — PTZ manual + presets          ← v1.0 release
 - [ ] Phase 6 — Operational hardening
 - [ ] Phase 7 — Auto-track milestone           ← v1.1

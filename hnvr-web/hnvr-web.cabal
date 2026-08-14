@@ -67,6 +67,7 @@ library
     Hnvr.Node.HealthReporter
     Hnvr.Web
     Hnvr.Web.AssignmentCoordinator
+    Hnvr.Web.Audit
     Hnvr.Web.Auth
     Hnvr.Web.BusRegistry
     Hnvr.Web.CommandTypes
@@ -90,6 +91,7 @@ library
     Hnvr.Web.View.Cameras.Show
     Hnvr.Web.View.Dashboard.Index
     Hnvr.Web.View.Debug.Show
+    Hnvr.Web.View.Events.Feed
     Hnvr.Web.View.Events.Index
     Hnvr.Web.View.Hosts.Index
     Hnvr.Web.View.Layout

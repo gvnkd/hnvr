@@ -70,6 +70,10 @@ brinIndexSql = $(embedFile "migrations/0002-brin-index.sql")
 rulesEventsSql :: ByteString
 rulesEventsSql = $(embedFile "migrations/0003-rules-events.sql")
 
+-- | Phase 4: audit log (design_docs/06 §"Audit log").
+auditLogSql :: ByteString
+auditLogSql = $(embedFile "migrations/0004-audit-log.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -101,6 +105,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0003-rules-events" rulesEventsSql) True conn
     handleResult "0003-rules-events" rulesEventsRes
+    auditRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0004-audit-log" auditLogSql) True conn
+    handleResult "0004-audit-log" auditRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where
