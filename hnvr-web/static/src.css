@@ -116,6 +116,32 @@
     @apply inline-block w-1 h-3 bg-signal-info/70 rounded-sm;
   }
 
+  /* ── Dashboard stat cards ────────────────────────────────────── */
+  .stats-grid {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  }
+  .stat-card {
+    @apply bg-ink-900/70 border border-ink-800 rounded-lg p-4 shadow-panel;
+  }
+  .stat-value {
+    @apply text-2xl font-semibold font-mono text-zinc-100;
+  }
+  .stat-label {
+    @apply text-xs uppercase tracking-wider text-zinc-500 font-mono mt-1;
+  }
+  .stat-sub {
+    @apply text-xs text-zinc-500 mt-1.5 flex flex-wrap gap-1.5 items-center;
+  }
+
+  /* ── Share bars (stats page) ─────────────────────────────────── */
+  .bar {
+    @apply h-1.5 rounded-full bg-ink-800 overflow-hidden w-full;
+  }
+  .bar-fill {
+    @apply h-full rounded-full bg-signal-info/70;
+  }
+
   /* ── Buttons ─────────────────────────────────────────────────── */
   .btn {
     @apply inline-flex items-center justify-center gap-1.5

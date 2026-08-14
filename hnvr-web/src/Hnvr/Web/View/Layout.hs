@@ -35,6 +35,7 @@ renderLayout inner =
         <a href="/Archive" class="nav-link">Archive</a>
         <a href="/Events" class="nav-link">Events</a>
         <a href="/Rules" class="nav-link">Rules</a>
+        <a href="/Stats" class="nav-link">Stats</a>
         <a href="/Hosts" class="nav-link">Hosts</a>
         <span class="spacer"></span>
         {userPill}

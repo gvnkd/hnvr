@@ -108,6 +108,7 @@ library
     Hnvr.Web.View.Rules.Index
     Hnvr.Web.View.Rules.New
     Hnvr.Web.View.Sessions.New
+    Hnvr.Web.View.Stats.Index
     Hnvr.Web.WhepProxy
     Web.Controller.Archive
     Web.Controller.Cameras
@@ -119,6 +120,7 @@ library
     Web.Controller.Live
     Web.Controller.Rules
     Web.Controller.Sessions
+    Web.Controller.Stats
     Web.Controller.Support.Crypto
 
   -- IHP-generated from Application/Schema.sql.
