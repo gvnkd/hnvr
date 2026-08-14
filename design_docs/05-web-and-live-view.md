@@ -290,7 +290,7 @@ IHP action:
 
 1. Parse `from`/`to` (validate ≤ 6 hours apart — longer windows require export).
 2. `SELECT object_key, start_ts, end_ts FROM segments WHERE camera_id=? AND start_ts >= ? AND end_ts <= ? ORDER BY start_ts`.
-3. For each segment, generate a presigned SeaweedFS URL valid for 1 hour.
+3. For each segment, generate a presigned SeaweedFS URL valid for 1 hour. Presign against `HNVR_S3_PUBLIC_ENDPOINT` when set (falling back to `HNVR_S3_ENDPOINT`); the signed URL's host is part of the SigV4 signature and must be reachable by the browser.
 4. Render m3u8:
 
 ```

@@ -56,7 +56,6 @@ import Hnvr.Web.View.Archive.Index
 import Hnvr.Web.View.Archive.Player
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (currentUserOrNothing, ensureIsUser)
-import qualified System.Environment as Env
 import Text.Read (readMaybe)
 
 data ArchiveController
@@ -424,36 +423,19 @@ parseKeyTimestamp slug key = do
 -- segment; pure rendering lives in 'Hnvr.Core.Playlist'.
 buildPlaylist :: Camera -> [Segment] -> S3.S3Config -> IO Text
 buildPlaylist camera segments cfg = do
-  let ci = S3.connectInfo cfg
-      bucket = S3.s3cBucket cfg
+  let bucket = S3.s3cBucket cfg
       slug = camera.slug
-  initUrl <- cs <$> S3.presignGetUrl ci bucket (slug <> "/init.mp4") 3600
-  segUrls <- mapM (presignSegment ci bucket) segments
+  initUrl <- cs <$> S3.presignGetUrlWithConfig cfg bucket (slug <> "/init.mp4") 3600
+  segUrls <- mapM (presignSegment cfg bucket) segments
   let entries = zipWith entry segments segUrls
   pure (renderVodPlaylist initUrl entries)
   where
-    presignSegment ci bucket seg =
-      cs <$> S3.presignGetUrl ci bucket seg.objectKey 3600
+    presignSegment cfg bucket seg =
+      cs <$> S3.presignGetUrlWithConfig cfg bucket seg.objectKey 3600
     entry seg url = (realToFrac (diffUTCTime seg.endTs seg.startTs), url)
 
 -- | Read S3 config from environment variables. Returns Nothing if any
 -- required var is missing. Reads each request — fine for v1; a future
 -- slice will cache via FrameworkConfig + sops-nix.
 readS3Config :: IO (Maybe S3.S3Config)
-readS3Config = do
-  mEndpoint <- Env.lookupEnv "HNVR_S3_ENDPOINT"
-  mAccessKey <- Env.lookupEnv "HNVR_S3_ACCESS_KEY"
-  mSecretKey <- Env.lookupEnv "HNVR_S3_SECRET_KEY"
-  mBucket <- Env.lookupEnv "HNVR_S3_BUCKET"
-  pure $ do
-    endpoint <- T.pack <$> mEndpoint
-    accessKey <- T.pack <$> mAccessKey
-    secretKey <- T.pack <$> mSecretKey
-    bucket <- T.pack <$> mBucket
-    Just
-      S3.S3Config
-        { S3.s3cEndpoint = endpoint,
-          S3.s3cAccessKey = accessKey,
-          S3.s3cSecretKey = secretKey,
-          S3.s3cBucket = bucket
-        }
+readS3Config = S3.readS3ConfigFromEnv

@@ -25,12 +25,15 @@ module Hnvr.Storage.S3
   ( -- * Configuration
     S3Config (..),
     connectInfo,
+    presignConnectInfo,
+    readS3ConfigFromEnv,
 
     -- * Operations
     runS3,
     putObjectBytes,
     getObjectBytes,
     presignGetUrl,
+    presignGetUrlWithConfig,
     listObjectKeys,
     deleteObject,
 
@@ -52,6 +55,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Conduit ((.|))
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Combinators as CC
+import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -81,12 +85,20 @@ import Network.Minio
     runMinio,
     setCreds,
   )
+import System.Environment (lookupEnv)
 
 -- | Static configuration. Pass to 'connectInfo' to build a minio
 -- 'ConnectInfo'; pass that to 'runS3' for each operation.
 data S3Config = S3Config
-  { -- | Full URL e.g. @http://localhost:9000@ or @https://s3.example.com@.
+  { -- | Internal endpoint used by server-side S3 operations, e.g.
+    -- @http://localhost:9000@ or @https://s3.example.internal@.
     s3cEndpoint :: !Text,
+    -- | Browser-reachable endpoint used only for presigned GET URLs
+    -- (@scheme://host[:port]@, no path prefix). The URL host is part of
+    -- the SigV4 signature, so presigning against an internal localhost
+    -- endpoint produces links an external browser cannot use. 'Nothing'
+    -- falls back to 's3cEndpoint'.
+    s3cPublicEndpoint :: !(Maybe Text),
     s3cAccessKey :: !Text,
     s3cSecretKey :: !Text,
     -- | Used by helpers; the @putObject*@ functions take an explicit
@@ -96,9 +108,21 @@ data S3Config = S3Config
   }
   deriving stock (Eq, Show)
 
--- | Build a minio 'ConnectInfo' from static config.
+-- | Build a minio 'ConnectInfo' from static config. Uses the internal
+-- endpoint ('s3cEndpoint'); browser-facing presigned URLs should use
+-- 'presignConnectInfo' instead.
 connectInfo :: S3Config -> ConnectInfo
-connectInfo cfg =
+connectInfo = connectInfoWith s3cEndpoint
+
+-- | Build the 'ConnectInfo' used for presigned GET URLs. Picks
+-- 's3cPublicEndpoint' when set so the signature's host header matches a
+-- URL the browser can actually reach; falls back to 's3cEndpoint'.
+presignConnectInfo :: S3Config -> ConnectInfo
+presignConnectInfo =
+  connectInfoWith (\c -> fromMaybe (s3cEndpoint c) (s3cPublicEndpoint c))
+
+connectInfoWith :: (S3Config -> Text) -> S3Config -> ConnectInfo
+connectInfoWith pick cfg =
   setCreds
     CredentialValue
       { cvAccessKey = AccessKey (s3cAccessKey cfg),
@@ -107,10 +131,37 @@ connectInfo cfg =
             (BA.convert (TE.encodeUtf8 (s3cSecretKey cfg)) :: BA.ScrubbedBytes),
         cvSessionToken = Nothing
       }
-    (fromStringCI (s3cEndpoint cfg))
+    (fromStringCI (pick cfg))
   where
     fromStringCI :: Text -> ConnectInfo
     fromStringCI url = fromString (T.unpack url)
+
+-- | Read the standard @HNVR_S3_*@ environment variables. Required:
+-- @HNVR_S3_ENDPOINT@, @HNVR_S3_ACCESS_KEY@, @HNVR_S3_SECRET_KEY@,
+-- @HNVR_S3_BUCKET@. Optional: @HNVR_S3_PUBLIC_ENDPOINT@ (browser-facing
+-- presign host; ignored when empty).
+readS3ConfigFromEnv :: IO (Maybe S3Config)
+readS3ConfigFromEnv = do
+  let lookupText var = fmap T.pack <$> lookupEnv var
+      nonEmpty t = if T.null t then Nothing else Just t
+  mEndpoint <- lookupText "HNVR_S3_ENDPOINT"
+  mPublicEndpoint <- (>>= nonEmpty) <$> lookupText "HNVR_S3_PUBLIC_ENDPOINT"
+  mAccessKey <- lookupText "HNVR_S3_ACCESS_KEY"
+  mSecretKey <- lookupText "HNVR_S3_SECRET_KEY"
+  mBucket <- lookupText "HNVR_S3_BUCKET"
+  pure $ do
+    endpoint <- mEndpoint
+    accessKey <- mAccessKey
+    secretKey <- mSecretKey
+    bucket <- mBucket
+    Just
+      S3Config
+        { s3cEndpoint = endpoint,
+          s3cPublicEndpoint = mPublicEndpoint,
+          s3cAccessKey = accessKey,
+          s3cSecretKey = secretKey,
+          s3cBucket = bucket
+        }
 
 -- | Run an S3 operation. Wraps 'runMinio' and throws an 'error' on
 -- 'Left' so callers see a normal IO exception (which CaptureWorker can
@@ -159,6 +210,17 @@ presignGetUrl ::
   IO ByteString
 presignGetUrl ci bucket key expiry =
   runS3 ci $ presignedGetObjectUrl bucket key expiry [] []
+
+-- | Convenience wrapper: presign using the config's public endpoint
+-- ('presignConnectInfo'), not the internal upload/list endpoint.
+presignGetUrlWithConfig ::
+  S3Config ->
+  Bucket ->
+  Object ->
+  UrlExpiry ->
+  IO ByteString
+presignGetUrlWithConfig cfg =
+  presignGetUrl (presignConnectInfo cfg)
 
 -- | List all object keys under a prefix. Returns them in lexicographic
 -- order. Used by the RetentionSweeper to find segments older than the

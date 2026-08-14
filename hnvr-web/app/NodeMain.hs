@@ -77,7 +77,7 @@ main = do
 -- @hnvr-recordings@ bucket, spool dir @/var/lib/hnvr/spool@).
 buildCaptureConfig :: Bus -> Text -> Metrics -> IO CaptureConfig
 buildCaptureConfig bus host metrics = do
-  mS3 <- readS3Config
+  mS3 <- S3.readS3ConfigFromEnv
   spool <- fromMaybe "/var/lib/hnvr/spool" <$> Env.lookupEnv "HNVR_SPOOL_DIR"
   pure
     CaptureConfig
@@ -109,26 +109,3 @@ bootstrapFromSnapshot bus host sup = do
     Just batch -> do
       logInfo ("node: snapshot reply contained " <> T.pack (show (length (csbCameras batch))) <> " camera(s)")
       forM_ (csbCameras batch) (startCamera sup)
-
--- | Read S3 config from the standard @HNVR_S3_*@ env vars. Returns
--- 'Nothing' if any required var is missing — the supervisor still
--- starts but workers will spool locally instead of uploading.
-readS3Config :: IO (Maybe S3.S3Config)
-readS3Config = do
-  let lookupText var = fmap T.pack <$> Env.lookupEnv var
-  mEndpoint <- lookupText "HNVR_S3_ENDPOINT"
-  mAccessKey <- lookupText "HNVR_S3_ACCESS_KEY"
-  mSecretKey <- lookupText "HNVR_S3_SECRET_KEY"
-  mBucket <- lookupText "HNVR_S3_BUCKET"
-  pure $ do
-    endpoint <- mEndpoint
-    accessKey <- mAccessKey
-    secretKey <- mSecretKey
-    bucket <- mBucket
-    Just
-      S3.S3Config
-        { S3.s3cEndpoint = endpoint,
-          S3.s3cAccessKey = accessKey,
-          S3.s3cSecretKey = secretKey,
-          S3.s3cBucket = bucket
-        }

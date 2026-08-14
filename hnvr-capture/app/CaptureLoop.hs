@@ -82,6 +82,7 @@ parseFlags ("--s3" : ep : ak : sk : bucket : rest) o =
             Just
               S3Config
                 { s3cEndpoint = T.pack ep,
+                  s3cPublicEndpoint = Nothing,
                   s3cAccessKey = T.pack ak,
                   s3cSecretKey = T.pack sk,
                   s3cBucket = T.pack bucket

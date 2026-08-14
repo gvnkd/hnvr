@@ -35,7 +35,14 @@ main = do
 
 run :: Text -> Text -> Text -> Text -> FilePath -> Text -> IO ()
 run endpoint ak sk bucket file key = do
-  let cfg = S3Config {s3cEndpoint = endpoint, s3cAccessKey = ak, s3cSecretKey = sk, s3cBucket = bucket}
+  let cfg =
+        S3Config
+          { s3cEndpoint = endpoint,
+            s3cPublicEndpoint = Nothing,
+            s3cAccessKey = ak,
+            s3cSecretKey = sk,
+            s3cBucket = bucket
+          }
       ci = connectInfo cfg
       opts = defaultPutObjectOptions {pooContentType = Just "video/mp4"}
   logInfo $ "uploading " ++ file ++ " -> s3://" ++ T.unpack bucket ++ "/" ++ T.unpack key

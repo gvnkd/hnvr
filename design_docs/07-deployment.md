@@ -248,6 +248,9 @@ in {
         HNVR_NATS_URL         = "nats://127.0.0.1:4222";
         HNVR_NATS_CREDS_FILE  = "@${config.sops.secrets.hnvr-nats-creds.path}";
         HNVR_S3_ENDPOINT      = "https://s3.example.internal";
+        # Browser-reachable endpoint for presigned archive/event URLs;
+        # omit when HNVR_S3_ENDPOINT is already public.
+        HNVR_S3_PUBLIC_ENDPOINT = "https://s3.example.com";
         HNVR_S3_ACCESS_KEY    = "@${config.sops.secrets.hnvr-s3-access-key.path}";
         HNVR_S3_SECRET_KEY    = "@${config.sops.secrets.hnvr-s3-secret-key.path}";
         HNVR_EXEC_PROVIDERS   = execProviders;

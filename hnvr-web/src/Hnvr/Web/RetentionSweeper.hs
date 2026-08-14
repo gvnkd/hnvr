@@ -68,7 +68,7 @@ startRetentionSweeper = do
 -- config is missing or no DB connection.
 sweepOnce :: IO ()
 sweepOnce = do
-  mS3 <- readS3Config
+  mS3 <- S3.readS3ConfigFromEnv
   case mS3 of
     Nothing -> logWarn "RetentionSweeper: HNVR_S3_* env not set; skipping sweep"
     Just s3cfg -> do
@@ -134,25 +134,3 @@ sweepCamera s3cfg conn (cid, slug, retentionDays) = do
           <> T.pack (show retentionDays)
           <> "d)"
       )
-
--- | Same S3 config reader as the one in NodeMain / Config.hs. Duplicated
--- to keep this module standalone (no IHP import burden).
-readS3Config :: IO (Maybe S3.S3Config)
-readS3Config = do
-  let lookupText var = fmap T.pack <$> Env.lookupEnv var
-  mEndpoint <- lookupText "HNVR_S3_ENDPOINT"
-  mAccessKey <- lookupText "HNVR_S3_ACCESS_KEY"
-  mSecretKey <- lookupText "HNVR_S3_SECRET_KEY"
-  mBucket <- lookupText "HNVR_S3_BUCKET"
-  pure $ do
-    endpoint <- mEndpoint
-    accessKey <- mAccessKey
-    secretKey <- mSecretKey
-    bucket <- mBucket
-    Just
-      S3.S3Config
-        { S3.s3cEndpoint = endpoint,
-          S3.s3cAccessKey = accessKey,
-          S3.s3cSecretKey = secretKey,
-          S3.s3cBucket = bucket
-        }

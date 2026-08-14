@@ -67,6 +67,19 @@ in
       description = "Extra environment variables. sops-nix secrets land here.";
     };
 
+    s3PublicEndpoint = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        HNVR_S3_PUBLIC_ENDPOINT: browser-reachable S3 endpoint used only
+        for presigned archive/event URLs. The presigned URL's host is
+        part of the SigV4 signature, so when HNVR_S3_ENDPOINT is an
+        internal address (localhost/VPC) set this to the address clients
+        use (for example https://s3.example.com). Null falls back to
+        HNVR_S3_ENDPOINT.
+      '';
+    };
+
     onnxruntimePackage = lib.mkOption {
       type = lib.types.package;
       default = pkgs.onnxruntime;
@@ -166,6 +179,8 @@ in
         HNVR_MODEL_PATH = cfg.modelPath;
       } // lib.optionalAttrs (cfg.modelDir != null) {
         HNVR_MODEL_DIR = cfg.modelDir;
+      } // lib.optionalAttrs (cfg.s3PublicEndpoint != null) {
+        HNVR_S3_PUBLIC_ENDPOINT = cfg.s3PublicEndpoint;
       } // cfg.environment;
 
       serviceConfig = {

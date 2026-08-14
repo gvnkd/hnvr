@@ -137,38 +137,15 @@ defaultDbUrl = "postgresql:///hnvr?host=/run/postgresql"
 -- 'Nothing'; upload failures degrade to a placeholder in the view.
 presignThumbs :: [EventRow] -> IO [Maybe Text]
 presignThumbs rows = do
-  mS3 <- liftIO readS3Config
+  mS3 <- liftIO S3.readS3ConfigFromEnv
   case mS3 of
     Nothing -> pure (map (const Nothing) rows)
     Just cfg -> do
-      let ci = S3.connectInfo cfg
       forM rows $ \r -> case r.erThumbnailKey of
         Nothing -> pure Nothing
         Just key -> do
-          url <- liftIO (S3.presignGetUrl ci (S3.s3cBucket cfg) key 3600)
+          url <- liftIO (S3.presignGetUrlWithConfig cfg (S3.s3cBucket cfg) key 3600)
           pure (Just (cs url))
-
--- | Same env-based S3 config reader as Config/Archive (the duplication
--- is deliberate — see Hnvr.Web.Config.readS3Config's comment).
-readS3Config :: IO (Maybe S3.S3Config)
-readS3Config = do
-  let lookupText var = fmap T.pack <$> Env.lookupEnv var
-  mEndpoint <- lookupText "HNVR_S3_ENDPOINT"
-  mAccessKey <- lookupText "HNVR_S3_ACCESS_KEY"
-  mSecretKey <- lookupText "HNVR_S3_SECRET_KEY"
-  mBucket <- lookupText "HNVR_S3_BUCKET"
-  pure $ do
-    endpoint <- mEndpoint
-    accessKey <- mAccessKey
-    secretKey <- mSecretKey
-    bucket <- mBucket
-    Just
-      S3.S3Config
-        { S3.s3cEndpoint = endpoint,
-          S3.s3cAccessKey = accessKey,
-          S3.s3cSecretKey = secretKey,
-          S3.s3cBucket = bucket
-        }
 
 -- | Read an optional query param as 'Nothing' when absent or empty.
 nonemptyParam :: (?request :: Request) => ByteString -> Maybe Text

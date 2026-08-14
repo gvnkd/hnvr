@@ -700,6 +700,10 @@
               env = {
                 HNVR_NATS_URI = "nats://nats:nats@localhost:4222";
                 HNVR_HOST = "hnvr-2";
+                # Server-side S3 endpoint. If the browser is not on the
+                # same host, also set HNVR_S3_PUBLIC_ENDPOINT to the
+                # browser-reachable S3 address; presigned URLs are signed
+                # against that host (falling back to this endpoint).
                 HNVR_S3_ENDPOINT = "http://localhost:9100";
                 HNVR_S3_ACCESS_KEY = "minioadmin";
                 HNVR_S3_SECRET_KEY = "minioadmin";

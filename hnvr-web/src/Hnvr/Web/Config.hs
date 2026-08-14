@@ -186,7 +186,7 @@ connectNatsAndStartEventWriter = do
 -- don't crash the leader.
 startNodeRoles :: Bus.Bus -> Text -> IO ()
 startNodeRoles bus host = do
-  mS3 <- readS3Config
+  mS3 <- S3.readS3ConfigFromEnv
   spool <- fromMaybe "/var/lib/hnvr/spool" <$> Env.lookupEnv "HNVR_SPOOL_DIR"
   (_, metrics) <- ensureMetrics
   let cfg =
@@ -209,30 +209,6 @@ startNodeRoles bus host = do
       logInfo ("leader: local snapshot reply contained " <> cs (show (length (csbCameras batch))) <> " camera(s)")
       forM_ (csbCameras batch) (startCamera sup)
     _ -> logInfo "leader: no local snapshot reply (continuing)"
-
--- | Read S3 config from the standard @HNVR_S3_*@ env vars. Mirrors the
--- same helper in 'Web.Controller.Archive' and @NodeMain@; kept
--- duplicated to avoid the import tangle (Archive is controller-side
--- and pulls in IHP controller deps that don't belong here).
-readS3Config :: IO (Maybe S3.S3Config)
-readS3Config = do
-  let lookupText var = fmap T.pack <$> Env.lookupEnv var
-  mEndpoint <- lookupText "HNVR_S3_ENDPOINT"
-  mAccessKey <- lookupText "HNVR_S3_ACCESS_KEY"
-  mSecretKey <- lookupText "HNVR_S3_SECRET_KEY"
-  mBucket <- lookupText "HNVR_S3_BUCKET"
-  pure $ do
-    endpoint <- mEndpoint
-    accessKey <- mAccessKey
-    secretKey <- mSecretKey
-    bucket <- mBucket
-    Just
-      S3.S3Config
-        { S3.s3cEndpoint = endpoint,
-          S3.s3cAccessKey = accessKey,
-          S3.s3cSecretKey = secretKey,
-          S3.s3cBucket = bucket
-        }
 
 -- | WAI middleware that short-circuits @/healthz@ and @/_healthz@ with 200 OK.
 -- Falls through to the inner IHP app for everything else.

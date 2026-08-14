@@ -113,7 +113,11 @@ Brings up four services with readiness probes:
 Env vars consumed by HNVR binaries (`HNVR_NATS_URI`, `HNVR_S3_*`,
 `DATABASE_URL`, `HNVR_MEDIAMTX_*`, `PORT=18001`) are exported inside
 the shell — `./result/bin/hnvr-leader` and cabal-built integration
-binaries drop straight in without manual `export`.
+binaries drop straight in without manual `export`. Set
+`HNVR_S3_PUBLIC_ENDPOINT` when archive/event links must be reachable
+from a browser on another host; presigned URLs are signed against that
+host and otherwise fall back to `HNVR_S3_ENDPOINT`. Use
+`scheme://host[:port]` (no path prefix).
 
 ### Stop a hung devenv
 

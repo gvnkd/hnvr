@@ -130,6 +130,7 @@ SORT (Bewley et al. 2016) in `Hnvr.Cv.Tracker.Sort`: ~250 LOC. Kalman filter wit
 
 **SeaweedFS / MinIO specifics**
 - S3 API endpoint via env var `HNVR_S3_ENDPOINT` (e.g. `https://s3.example.internal`).
+- Browser-facing presigned URLs use `HNVR_S3_PUBLIC_ENDPOINT` when set (e.g. `https://s3.example.com`); the signed URL's host is part of the SigV4 signature, so an internal `localhost` endpoint would otherwise leak into archive playlists and event thumbnails. Falls back to `HNVR_S3_ENDPOINT`. Use `scheme://host[:port]` (no path prefix).
 - Path-style addressing — minio-hs default; no virtual-hosted-style.
 - Lifecycle policies: SeaweedFS supports per-bucket TTL, but we sweep ourselves via `Hnvr.Web.RetentionSweeper` (M6, Aug 11 2026) — don't rely on it.
 - Erasure coding is internal to SeaweedFS — we just see a normal S3 API.

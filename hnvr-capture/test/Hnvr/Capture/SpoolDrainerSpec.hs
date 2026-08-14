@@ -48,7 +48,15 @@ tests =
       testCase "drainOnce with unreachable S3 leaves files for the next pass" $
         withSpool $ \spoolDir -> do
           seedSpool spoolDir 3
-          let dead = connectInfo (S3Config "http://127.0.0.1:1" "k" "s" "hnvr-test")
+          let dead =
+                connectInfo
+                  S3Config
+                    { s3cEndpoint = "http://127.0.0.1:1",
+                      s3cPublicEndpoint = Nothing,
+                      s3cAccessKey = "k",
+                      s3cSecretKey = "s",
+                      s3cBucket = "hnvr-test"
+                    }
           -- minio-hs retries connection failures with growing backoff,
           -- so a full drainOnce against a dead endpoint never returns;
           -- bound the pass and assert the property we actually care

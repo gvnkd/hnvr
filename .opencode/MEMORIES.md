@@ -1547,6 +1547,17 @@ ffprobe notes:
          gen/ deleted (it does `rm -rf gen` first — rerun after fixing
          to restore).
 
+    110. **Presigned S3 URLs are signed for the endpoint host** (Aug 14
+         2026) — archive playlists and event thumbnails leaked
+         `http://localhost:9100` to external browsers because presigning
+         used the internal `HNVR_S3_ENDPOINT`; the SigV4 host header is
+         part of the signature, so string-rewriting the URL after
+         presign invalidates it. Fix: `S3Config.s3cPublicEndpoint` +
+         `HNVR_S3_PUBLIC_ENDPOINT`; server-side put/list/delete use
+         `connectInfo`, browser presigns use `presignGetUrlWithConfig` /
+         `presignConnectInfo`. NixOS module option:
+         `services.hnvr.leader.s3PublicEndpoint`.
+
 ## Sergey's working style
 
 - Direct, no hand-holding. Be concise.

@@ -25,6 +25,7 @@ import Hnvr.Storage.S3
     deleteObject,
     getObjectBytes,
     listObjectKeys,
+    presignConnectInfo,
     presignGetUrl,
     putObjectBytes,
   )
@@ -42,7 +43,13 @@ tests =
         [ testCase "http endpoint → insecure" $
             isConnectInfoSecure (connectInfo (mkCfg "http://localhost:9100")) @?= False,
           testCase "https endpoint → secure" $
-            isConnectInfoSecure (connectInfo (mkCfg "https://s3.example.com")) @?= True
+            isConnectInfoSecure (connectInfo (mkCfg "https://s3.example.com")) @?= True,
+          testCase "presignConnectInfo falls back to the internal endpoint" $
+            isConnectInfoSecure (presignConnectInfo (mkCfg "http://localhost:9100")) @?= False,
+          testCase "presignConnectInfo prefers the public endpoint" $
+            isConnectInfoSecure
+              (presignConnectInfo ((mkCfg "http://localhost:9100") {s3cPublicEndpoint = Just "https://s3.example.com"}))
+              @?= True
         ],
       testGroup
         "integration (env-gated)"
@@ -103,6 +110,7 @@ mkCfg :: T.Text -> S3Config
 mkCfg endpoint =
   S3Config
     { s3cEndpoint = endpoint,
+      s3cPublicEndpoint = Nothing,
       s3cAccessKey = "ak",
       s3cSecretKey = "sk",
       s3cBucket = "hnvr-test"
@@ -121,6 +129,7 @@ withS3 action = do
   let cfg =
         S3Config
           { s3cEndpoint = T.pack (fromMaybe "http://localhost:9100" mEndpoint),
+            s3cPublicEndpoint = Nothing,
             s3cAccessKey = T.pack (fromMaybe "minioadmin" mAccess),
             s3cSecretKey = T.pack (fromMaybe "minioadmin" mSecret),
             s3cBucket = T.pack (fromMaybe "hnvr-recordings" mBucket)
