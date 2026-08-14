@@ -17,6 +17,7 @@ import Web.Controller.Debug (DebugController (..))
 import Web.Controller.Events (EventsController (..))
 import Web.Controller.Hosts (HostsController (..))
 import Web.Controller.Live (LiveController (..))
+import Web.Controller.Rules (RulesController (..))
 import Web.Controller.Sessions (SessionsController (..))
 
 instance FrontController RootApplication where
@@ -30,7 +31,8 @@ instance FrontController RootApplication where
       parseRoute @ArchiveController,
       parseRoute @LiveController,
       parseRoute @DebugController,
-      parseRoute @EventsController
+      parseRoute @EventsController,
+      parseRoute @RulesController
     ]
 
 instance Worker RootApplication where

@@ -40,6 +40,7 @@ import Hnvr.Node.HealthReporter (startHealthReporter)
 import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
 import Hnvr.Web.DebugStream (debugStreamMiddleware)
 import Hnvr.Web.EventWriter (startEventWriter)
@@ -156,6 +157,7 @@ connectNatsAndStartEventWriter = do
   uri <- fromMaybe defaultUri <$> Env.lookupEnv "HNVR_NATS_URI"
   let connect' = do
         bus <- Bus.connect Bus.defaultConfig {Bus.busUri = uri}
+        writeIORef busRegistry (Just bus)
         logInfo ("leader: connected to NATS: " <> cs (uri :: String))
         startEventWriter bus ?modelContext
         _ <- startHealthCache bus

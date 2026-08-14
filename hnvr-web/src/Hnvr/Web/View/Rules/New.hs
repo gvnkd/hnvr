@@ -1,0 +1,225 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
+
+-- | /NewRule — rule creation form with the drawing canvas (Phase 4).
+-- The form markup + JS live in 'ruleForm' so the Edit view can reuse
+-- it with a prefilled rule.
+module Hnvr.Web.View.Rules.New
+  ( NewView (..),
+    ruleForm,
+  )
+where
+
+import Data.Aeson (Value (..), encode)
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.ByteString.Lazy as BL
+import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Generated.Types
+import Hnvr.Cv.Decode (cocoClassName)
+import Hnvr.Web.View.Layout (renderLayout)
+import IHP.ViewPrelude
+
+newtype NewView = NewView
+  { camera :: Camera
+  }
+
+instance View NewView where
+  html NewView {..} =
+    renderLayout
+      [hsx|
+      <div class="page-header">
+        <div>
+          <h1>New rule · <span class="font-mono">{camera.slug}</span></h1>
+          <div class="subtitle">draw on the latest analysis frame</div>
+        </div>
+      </div>
+      {ruleForm camera Nothing "/CreateRule"}
+    |]
+
+-- | The rule form: text fields + class checkboxes + a canvas over the
+-- camera's @/debug-frame/<uuid>@ still. Clicks draw the line (2
+-- points) or polygon (N points, Finish closes); geometry is written
+-- into the hidden @geometry@ input as normalized-coords JSON on every
+-- change. @mRule@ prefills for the Edit view. The signature needs the
+-- request implicit params (pitfall #36) + RankNTypes.
+ruleForm :: (?context :: Request, ?request :: Request) => Camera -> Maybe Rule -> Text -> Html
+ruleForm camera mRule actionUrl =
+  [hsx|
+  <div class="card">
+    <div class="card-body">
+      <form class="form" method="POST" action={actionUrl}>
+        <input type="hidden" name="camera_id" value={camId} />
+        <div class="field">
+          <label for="name">Name</label>
+          <input class="input" id="name" name="name" value={nameVal} required />
+        </div>
+        <div class="field">
+          <label for="rule-kind">Kind</label>
+          <select class="input" id="rule-kind" name="kind">
+            <option value="line_cross" selected={kindIs "line_cross"}>line cross</option>
+            <option value="zone_enter" selected={kindIs "zone_enter"}>zone enter</option>
+            <option value="zone_exit" selected={kindIs "zone_exit"}>zone exit</option>
+            <option value="zone_inside" selected={kindIs "zone_inside"}>zone inside</option>
+          </select>
+        </div>
+        <div class="field" id="direction-field">
+          <label for="rule-direction">Direction (line only)</label>
+          <select class="input" id="rule-direction" name="direction">
+            <option value="any" selected={dirIs "any"}>any</option>
+            <option value="positive" selected={dirIs "positive"}>positive</option>
+            <option value="negative" selected={dirIs "negative"}>negative</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Classes</label>
+          {forEach keptClasses classCheckbox}
+        </div>
+        <div class="field">
+          <label for="cooldown_ms">Cooldown (ms)</label>
+          <input class="input" id="cooldown_ms" name="cooldown_ms" type="number" min="0" step="500" value={cooldownVal} />
+        </div>
+        <div class="field">
+          <label><input type="checkbox" name="enabled" checked={enabledVal} /> enabled</label>
+        </div>
+        <div class="field">
+          <label>Geometry — click on the frame</label>
+          <div>
+            <canvas id="rule-canvas" width="960" height="540" style="max-width:100%; border:1px solid #3f3f46; cursor:crosshair;"></canvas>
+          </div>
+          <div class="hint">line: 2 clicks · zone: N clicks then "finish polygon" · direction arrow = line a→b</div>
+          <button class="btn" type="button" id="rule-finish">finish polygon</button>
+          <button class="btn" type="button" id="rule-clear">clear</button>
+        </div>
+        <input type="hidden" name="geometry" id="rule-geometry" value={geometryVal} />
+        <input type="hidden" name="classes" id="rule-classes" value={classesVal} />
+        <button class="btn btn-primary" type="submit">Save rule</button>
+      </form>
+    </div>
+  </div>
+  {scriptTag}
+|]
+  where
+    camId = tshow (camera |> get #id)
+    nameVal :: Text
+    nameVal = maybe "" (.name) mRule
+    kindIs k = maybe (k == "line_cross") (\r -> kindText r.kind == k) mRule
+    dirIs d = maybe (d == "any") ((== d) . existingDirection) mRule
+    cooldownVal :: Text
+    cooldownVal = maybe "5000" (tshow . (.cooldownMs)) mRule
+    enabledVal = maybe True (.enabled) mRule
+    classesVal :: Text
+    classesVal = maybe "0,1,2,3,5,7" (\r -> T.intercalate "," (map tshow r.classes)) mRule
+    geometryVal :: Text
+    geometryVal = maybe "" (\r -> cs (encode r.geometry)) mRule
+    keptClasses = [0, 1, 2, 3, 5, 7]
+
+    classCheckbox cid =
+      [hsx|
+      <label class="text-sm">
+        <input type="checkbox" class="rule-class" value={tshow cid} checked={checked'} />
+        {cocoClassName cid}
+      </label>
+    |]
+      where
+        checked' = maybe True (\r -> cid `elem` r.classes) mRule
+
+    kindText LineCross = "line_cross"
+    kindText RuleKindZoneEnter = "zone_enter"
+    kindText RuleKindZoneExit = "zone_exit"
+    kindText RuleKindZoneInside = "zone_inside"
+
+    -- Direction for an existing line rule comes from its geometry JSON.
+    existingDirection r = case r.geometry of
+      Object o
+        | Just (String d) <- KM.lookup "direction" o -> d
+      _ -> "any"
+    scriptTag =
+      preEscapedTextValue
+        ( "<script>"
+            <> js
+            <> "</script>"
+        )
+
+    js =
+      T.unlines
+        [ "(function(){",
+          "var canvas = document.getElementById('rule-canvas');",
+          "var ctx = canvas.getContext('2d');",
+          "var kindEl = document.getElementById('rule-kind');",
+          "var dirField = document.getElementById('direction-field');",
+          "var geoEl = document.getElementById('rule-geometry');",
+          "var classesEl = document.getElementById('rule-classes');",
+          "var img = new Image();",
+          "img.onload = function(){",
+          "  canvas.height = Math.round(canvas.width * img.height / img.width);",
+          "  redraw();",
+          "};",
+          "img.src = '/debug-frame/" <> camId <> "?t=' + Date.now();",
+          "var points = [];",
+          "try { var g = JSON.parse(geoEl.value || 'null');",
+          "  if (g && g.polygon) points = g.polygon;",
+          "  if (g && g.a && g.b) points = [g.a, g.b];",
+          "} catch(e) {}",
+          "function kind(){ return kindEl.value; }",
+          "function isLine(){ return kind() === 'line_cross'; }",
+          "function syncVisibility(){ dirField.style.display = isLine() ? '' : 'none'; }",
+          "function writeGeometry(){",
+          "  var dir = document.getElementById('rule-direction').value;",
+          "  if (isLine()) {",
+          "    geoEl.value = points.length === 2 ? JSON.stringify({a: points[0], b: points[1], direction: dir}) : '';",
+          "  } else {",
+          "    geoEl.value = points.length >= 3 ? JSON.stringify({polygon: points}) : '';",
+          "  }",
+          "}",
+          "function redraw(){",
+          "  ctx.clearRect(0,0,canvas.width,canvas.height);",
+          "  if (img.complete && img.naturalWidth) ctx.drawImage(img,0,0,canvas.width,canvas.height);",
+          "  ctx.strokeStyle = '#ff3838'; ctx.fillStyle = 'rgba(255,56,56,0.25)'; ctx.lineWidth = 2;",
+          "  points.forEach(function(p,i){",
+          "    ctx.beginPath(); ctx.arc(p[0]*canvas.width, p[1]*canvas.height, 4, 0, 7); ctx.fill();",
+          "    if (i===0 && isLine()) { ctx.fillStyle='#fff'; ctx.fillText('a', p[0]*canvas.width+6, p[1]*canvas.height-6); ctx.fillStyle='rgba(255,56,56,0.25)'; }",
+          "    if (i===1 && isLine()) { ctx.fillStyle='#fff'; ctx.fillText('b', p[0]*canvas.width+6, p[1]*canvas.height-6); ctx.fillStyle='rgba(255,56,56,0.25)'; }",
+          "  });",
+          "  if (isLine() && points.length === 2) {",
+          "    ctx.beginPath(); ctx.moveTo(points[0][0]*canvas.width, points[0][1]*canvas.height);",
+          "    ctx.lineTo(points[1][0]*canvas.width, points[1][1]*canvas.height); ctx.stroke();",
+          "    var mx=(points[0][0]+points[1][0])/2*canvas.width, my=(points[0][1]+points[1][1])/2*canvas.height;",
+          "    var dx=points[1][0]-points[0][0], dy=points[1][1]-points[0][1]; var len=Math.sqrt(dx*dx+dy*dy)||1;",
+          "    ctx.beginPath(); ctx.moveTo(mx,my);",
+          "    ctx.lineTo(mx+(-dy/len)*10-(dx/len)*8, my+(dx/len)*10-(dy/len)*8);",
+          "    ctx.lineTo(mx-(-dy/len)*10-(dx/len)*8, my-(dx/len)*10-(dy/len)*8); ctx.stroke();",
+          "  }",
+          "  if (!isLine() && points.length >= 2) {",
+          "    ctx.beginPath(); ctx.moveTo(points[0][0]*canvas.width, points[0][1]*canvas.height);",
+          "    for (var i=1;i<points.length;i++) ctx.lineTo(points[i][0]*canvas.width, points[i][1]*canvas.height);",
+          "    if (points.length >= 3) ctx.closePath();",
+          "    ctx.stroke(); if (points.length >= 3) ctx.fill();",
+          "  }",
+          "  writeGeometry();",
+          "}",
+          "canvas.addEventListener('click', function(e){",
+          "  var x = e.offsetX / canvas.width, y = e.offsetY / canvas.height;",
+          "  if (isLine()) { points = points.length >= 2 ? [[x,y]] : points.concat([[x,y]]); }",
+          "  else { points.push([x,y]); }",
+          "  redraw();",
+          "});",
+          "document.getElementById('rule-clear').addEventListener('click', function(){ points = []; redraw(); });",
+          "document.getElementById('rule-finish').addEventListener('click', function(){ writeGeometry(); redraw(); });",
+          "kindEl.addEventListener('change', function(){ points = []; syncVisibility(); redraw(); });",
+          "document.getElementById('rule-direction').addEventListener('change', writeGeometry);",
+          "document.querySelectorAll('.rule-class').forEach(function(cb){",
+          "  cb.addEventListener('change', function(){",
+          "    var vals = Array.prototype.slice.call(document.querySelectorAll('.rule-class'))",
+          "      .filter(function(c){return c.checked;}).map(function(c){return c.value;});",
+          "    classesEl.value = vals.join(',');",
+          "  });",
+          "});",
+          "syncVisibility(); redraw();",
+          "})();"
+        ]

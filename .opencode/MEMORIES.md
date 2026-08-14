@@ -1943,8 +1943,26 @@ ffprobe notes:
       (SnapshotResponder pattern); float4 `confidence` needs an
       explicit `Maybe Float` annotation (GHC defaults to Integer →
       IHP's "Database looks outdated" page); NoFieldSelectors again
-      (record-dot in the view). **Remaining**: rules CRUD UI (line
-      drawing on still frame), live event feed on /live, audit log.
+      (record-dot in the view).
+      **Rules CRUD + live propagation done (Aug 14 2026)**:
+      `/debug-frame/<uuid>` one-shot PNG (DebugStream middleware) is the
+      drawing canvas background; `Web.Controller.Rules` CRUD
+      (PurgeRuleAction per pitfall #82 — no Delete* prefix); New/Edit
+      share `ruleForm` (canvas click-to-draw line/polygon, normalized
+      coords into a hidden JSON input, direction select for lines,
+      class checkboxes → hidden csv input; inline script via
+      body-level `preEscapedTextValue` per pitfall #63; the
+      shared-helper signature needed `(?context::Request,
+      ?request::Request) =>` + RankNTypes per pitfall #36).
+      `Hnvr.Web.BusRegistry` (same IORef pattern as
+      SupervisorRegistry) lets controllers publish: every rule
+      mutation republishes the camera's assign payload with fresh
+      rules (`projectCameraWithRules` — closes the AssignPayload
+      csRules=[] gap), owning host restarts the analysis pair via
+      ConfigWatcher. Camera Show page gained a "New rule" button; nav
+      has /Rules + /Events. Verified: create/edit/purge round-trip via
+      curl, EditRule prefills geometry, worker restarts on rule change.
+      **Remaining Phase 4**: live event feed on /live, audit log.
 - [ ] Phase 5 — PTZ manual + presets          ← v1.0 release
 - [ ] Phase 6 — Operational hardening
 - [ ] Phase 7 — Auto-track milestone           ← v1.1

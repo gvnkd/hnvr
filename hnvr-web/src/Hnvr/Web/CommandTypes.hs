@@ -16,6 +16,7 @@ module Hnvr.Web.CommandTypes
     ControlPayload (..),
     SnapshotRequest (..),
     projectCamera,
+    projectCameraWithRules,
     cameraIdOf,
   )
 where
@@ -27,6 +28,7 @@ import Data.UUID (UUID)
 import Generated.Types
 import Hnvr.Core.CameraSnapshot
   ( CameraSnapshot (..),
+    RuleSnapshot (..),
     Transport,
     transportFromText,
   )
@@ -117,7 +119,13 @@ instance FromJSON SnapshotRequest where
 --     (we log + treat as disabled rather than spawning a worker that
 --     will immediately fail at ffmpeg SETUP).
 projectCamera :: Camera -> Maybe CameraSnapshot
-projectCamera cam =
+projectCamera = projectCameraWithRules []
+
+-- | 'projectCamera' with the camera's rules attached (Phase 4: rule
+-- CRUD republishes the assign payload so the owning host restarts the
+-- analysis pair with fresh rules).
+projectCameraWithRules :: [RuleSnapshot] -> Camera -> Maybe CameraSnapshot
+projectCameraWithRules rules cam =
   if not cam.enabled
     then Nothing
     else case transportFromText cam.rtspTransport of
@@ -135,12 +143,7 @@ projectCamera cam =
               csSubWidth = fromIntegral <$> cam.substreamWidth,
               csSubHeight = fromIntegral <$> cam.substreamHeight,
               csAnalysisFps = fromIntegral cam.analysisFps,
-              -- Rules travel via the snapshot path (SnapshotResponder
-              -- joins the rules table); assign payloads don't carry
-              -- them — a camera (re)assigned by command starts without
-              -- rules until the next snapshot refresh. Phase 4
-              -- follow-up: include rules here too.
-              csRules = []
+              csRules = rules
             }
 
 -- | Unwrap the IHP @Id' "cameras"@ newtype into the underlying 'UUID'

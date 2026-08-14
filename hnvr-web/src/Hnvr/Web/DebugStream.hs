@@ -3,6 +3,8 @@
 
 -- | /debug-stream/<camera-uuid> — multipart stream of the analysis
 -- overlay (Phase 3 debug view).
+-- /debug-frame/<camera-uuid> — one-shot PNG of the latest analysis
+-- frame (Phase 4 rules UI uses it as the drawing canvas background).
 --
 -- WAI middleware (like 'Hnvr.Web.WhepProxy') because IHP controllers
 -- don't own long-lived streaming responses. Reads the camera's
@@ -27,7 +29,7 @@ import Hnvr.Core.Frame (Frame (..))
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Cv.DebugRender (renderDebugPng)
 import Hnvr.Cv.Tracker.Sort (Track)
-import Hnvr.Node.CaptureSupervisor (analysisTVar)
+import Hnvr.Node.CaptureSupervisor (analysisTVar, latestAnalysis)
 import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
 import Network.HTTP.Types (status200, status404, status503)
 import Network.Wai
@@ -36,6 +38,7 @@ debugStreamMiddleware :: Middleware
 debugStreamMiddleware app req respond =
   case pathInfo req of
     ["debug-stream", uuidTxt] -> handle uuidTxt
+    ["debug-frame", uuidTxt] -> handleStill uuidTxt
     _ -> app req respond
   where
     handle uuidTxt =
@@ -50,6 +53,28 @@ debugStreamMiddleware app req respond =
               case mTVar of
                 Nothing -> respond (text status404 "no analysis running for this camera on this host")
                 Just tvar -> respond (stream tvar)
+
+    -- One-shot PNG of the latest frame (no track overlay — the rules
+    -- canvas draws its own geometry on top). 404 until the first
+    -- frame lands.
+    handleStill uuidTxt =
+      case UUID.fromText uuidTxt of
+        Nothing -> respond (text status404 "malformed camera id")
+        Just uuid -> do
+          mSup <- readIORef supervisorRegistry
+          case mSup of
+            Nothing -> respond (text status503 "no capture supervisor on this host")
+            Just sup -> do
+              mLatest <- latestAnalysis sup (CameraId uuid)
+              case mLatest of
+                Nothing -> respond (text status404 "no frame yet")
+                Just (frame, _tracks) ->
+                  respond
+                    ( responseLBS
+                        status200
+                        [("Content-Type", "image/png"), ("Cache-Control", "no-cache")]
+                        (renderDebugPng frame [])
+                    )
 
     text st msg =
       responseLBS st [("Content-Type", "text/plain")] (BL.fromStrict (TE.encodeUtf8 msg))

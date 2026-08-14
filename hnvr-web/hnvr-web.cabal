@@ -68,6 +68,7 @@ library
     Hnvr.Web
     Hnvr.Web.AssignmentCoordinator
     Hnvr.Web.Auth
+    Hnvr.Web.BusRegistry
     Hnvr.Web.CommandTypes
     Hnvr.Web.Config
     Hnvr.Web.ConfigBroadcaster
@@ -93,6 +94,9 @@ library
     Hnvr.Web.View.Hosts.Index
     Hnvr.Web.View.Layout
     Hnvr.Web.View.Live.Show
+    Hnvr.Web.View.Rules.Edit
+    Hnvr.Web.View.Rules.Index
+    Hnvr.Web.View.Rules.New
     Hnvr.Web.View.Sessions.New
     Hnvr.Web.WhepProxy
     Web.Controller.Archive
@@ -103,6 +107,7 @@ library
     Web.Controller.Events
     Web.Controller.Hosts
     Web.Controller.Live
+    Web.Controller.Rules
     Web.Controller.Sessions
     Web.Controller.Support.Crypto
 
