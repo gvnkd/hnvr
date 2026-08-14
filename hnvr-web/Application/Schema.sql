@@ -55,6 +55,7 @@ CREATE TABLE cameras (
     substream_height INT,
     record_audio    BOOLEAN NOT NULL DEFAULT FALSE,
     analysis_fps    INT NOT NULL DEFAULT 5,
+    model_name      TEXT NOT NULL DEFAULT 'yolov8n-320',
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     retention_days  INT NOT NULL DEFAULT 7,
     assigned_host   TEXT,

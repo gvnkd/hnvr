@@ -143,6 +143,7 @@ projectCameraWithRules rules cam =
               csSubWidth = fromIntegral <$> cam.substreamWidth,
               csSubHeight = fromIntegral <$> cam.substreamHeight,
               csAnalysisFps = fromIntegral cam.analysisFps,
+              csModelName = cam.modelName,
               csRules = rules
             }
 

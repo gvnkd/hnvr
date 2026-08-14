@@ -1,6 +1,6 @@
 -- This file is auto generated and will be overriden regulary.
 {-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches #-}
-module Generated.Statements.FetchCamera (statement) where
+module Generated.Statements.FetchAuditLog (statement) where
 
 import Prelude (($), (.), (<$>), (<*>), (<>), (+), (*), (-), show, fromIntegral, length, null, zip, mconcat, (++), Maybe(..), (!!), map, Bool(..), Int, Integer, pure, (&&), not)
 import Generated.ActualTypes
@@ -30,15 +30,15 @@ import PostgresqlTypes.Inet (Inet)
 import PostgresqlTypes.Tsvector (Tsvector)
 import PostgresqlTypes.Interval (Interval)
 
-import qualified Generated.Statements.RowDecoderCamera as RowDecoder
-statement :: Statement.Statement (Id' "cameras") (Maybe Generated.ActualTypes.Camera)
+import qualified Generated.Statements.RowDecoderAuditLog as RowDecoder
+statement :: Statement.Statement (Id' "audit_log") (Maybe Generated.ActualTypes.AuditLog)
 statement = Statement.preparable sql encoder decoder
 
 sql :: Text
-sql = "SELECT id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_days, assigned_host, manual_assign, created_at, updated_at FROM cameras WHERE id = $1 LIMIT 1"
+sql = "SELECT id, user_id, action, target_type, target_id, payload, ts FROM audit_log WHERE id = $1 LIMIT 1"
 
-encoder :: Encoders.Params (Id' "cameras")
+encoder :: Encoders.Params (Id' "audit_log")
 encoder = Encoders.param (Encoders.nonNullable Mapping.encoder)
 
-decoder :: Decoders.Result (Maybe Generated.ActualTypes.Camera)
+decoder :: Decoders.Result (Maybe Generated.ActualTypes.AuditLog)
 decoder = Decoders.rowMaybe RowDecoder.rowDecoder

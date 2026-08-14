@@ -45,7 +45,6 @@ module Hnvr.Storage.S3
 where
 
 import Control.Exception (throwIO)
-import Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.ByteArray as BA (ScrubbedBytes, convert)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -53,7 +52,6 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Conduit ((.|))
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Combinators as CC
-import Data.IORef
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -66,7 +64,6 @@ import Network.Minio
     GetObjectResponse (..),
     ListItem (..),
     Minio,
-    MinioErr,
     Object,
     ObjectInfo (..),
     PutObjectOptions,
@@ -169,8 +166,6 @@ presignGetUrl ci bucket key expiry =
 -- bounded.
 listObjectKeys :: ConnectInfo -> Bucket -> Text -> IO [Object]
 listObjectKeys ci bucket prefix = do
-  ref <- newIORef []
-  -- sinkList consumes the conduit; we then map to extract Object keys.
   items <-
     runS3 ci $
       C.runConduit $

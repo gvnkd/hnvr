@@ -70,13 +70,14 @@ instance FromRow Generated.ActualTypes.Camera where
         substreamHeight <- field
         recordAudio <- field
         analysisFps <- field
+        modelName <- field
         enabled <- field
         retentionDays <- field
         assignedHost <- field
         manualAssign <- field
         createdAt <- field
         updatedAt <- field
-        let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTemplate rtspTransport host port username passwordEnc passwordNonce codec rtspSubUrl rtspSubTemplate useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps enabled retentionDays assignedHost manualAssign createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
+        let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTemplate rtspTransport host port username passwordEnc passwordNonce codec rtspSubUrl rtspSubTemplate useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionDays assignedHost manualAssign createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
         pure theRecord
 
 instance FromRowHasql Generated.ActualTypes.Camera where
@@ -128,7 +129,7 @@ updateRecordDiscardResultCamera model = do
 
 instance Record Generated.ActualTypes.Camera where
     {-# INLINE newRecord #-}
-    newRecord = Generated.ActualTypes.Camera def def def def def "tcp" def def def def def def def def True def def def False def True def def False def def  def
+    newRecord = Generated.ActualTypes.Camera def def def def def "tcp" def def def def def def def def True def def def False def "yolov8n-320" True def def False def def  def
 
 
 instance QueryBuilder.FilterPrimaryKey "cameras" where
@@ -196,24 +197,27 @@ instance SetField "recordAudio" (Camera') Bool where
 instance SetField "analysisFps" (Camera') Int where
     {-# INLINE setField #-}
     setField newValue record = record { analysisFps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 524288 } }
+instance SetField "modelName" (Camera') Text where
+    {-# INLINE setField #-}
+    setField newValue record = record { modelName = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1048576 } }
 instance SetField "enabled" (Camera') Bool where
     {-# INLINE setField #-}
-    setField newValue record = record { enabled = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1048576 } }
+    setField newValue record = record { enabled = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2097152 } }
 instance SetField "retentionDays" (Camera') Int where
     {-# INLINE setField #-}
-    setField newValue record = record { retentionDays = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2097152 } }
+    setField newValue record = record { retentionDays = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4194304 } }
 instance SetField "assignedHost" (Camera') (Maybe Text) where
     {-# INLINE setField #-}
-    setField newValue record = record { assignedHost = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4194304 } }
+    setField newValue record = record { assignedHost = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8388608 } }
 instance SetField "manualAssign" (Camera') Bool where
     {-# INLINE setField #-}
-    setField newValue record = record { manualAssign = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8388608 } }
+    setField newValue record = record { manualAssign = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16777216 } }
 instance SetField "createdAt" (Camera') UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16777216 } }
+    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 33554432 } }
 instance SetField "updatedAt" (Camera') UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 33554432 } }
+    setField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 67108864 } }
 instance SetField "meta" (Camera') MetaBag where
     {-# INLINE setField #-}
     setField newValue record = record { meta = newValue }
@@ -277,24 +281,27 @@ instance UpdateField "recordAudio" (Camera') (Camera') Bool Bool where
 instance UpdateField "analysisFps" (Camera') (Camera') Int Int where
     {-# INLINE updateField #-}
     updateField newValue record = record { analysisFps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 524288 } }
+instance UpdateField "modelName" (Camera') (Camera') Text Text where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { modelName = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1048576 } }
 instance UpdateField "enabled" (Camera') (Camera') Bool Bool where
     {-# INLINE updateField #-}
-    updateField newValue record = record { enabled = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1048576 } }
+    updateField newValue record = record { enabled = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2097152 } }
 instance UpdateField "retentionDays" (Camera') (Camera') Int Int where
     {-# INLINE updateField #-}
-    updateField newValue record = record { retentionDays = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2097152 } }
+    updateField newValue record = record { retentionDays = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4194304 } }
 instance UpdateField "assignedHost" (Camera') (Camera') (Maybe Text) (Maybe Text) where
     {-# INLINE updateField #-}
-    updateField newValue record = record { assignedHost = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4194304 } }
+    updateField newValue record = record { assignedHost = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8388608 } }
 instance UpdateField "manualAssign" (Camera') (Camera') Bool Bool where
     {-# INLINE updateField #-}
-    updateField newValue record = record { manualAssign = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8388608 } }
+    updateField newValue record = record { manualAssign = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16777216 } }
 instance UpdateField "createdAt" (Camera') (Camera') UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16777216 } }
+    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 33554432 } }
 instance UpdateField "updatedAt" (Camera') (Camera') UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 33554432 } }
+    updateField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 67108864 } }
 instance UpdateField "meta" (Camera') (Camera') MetaBag MetaBag where
     {-# INLINE updateField #-}
     updateField newValue record = record { meta = newValue }
@@ -319,11 +326,12 @@ instance FieldBit "substreamWidth" (Camera') where fieldBit = 65536
 instance FieldBit "substreamHeight" (Camera') where fieldBit = 131072
 instance FieldBit "recordAudio" (Camera') where fieldBit = 262144
 instance FieldBit "analysisFps" (Camera') where fieldBit = 524288
-instance FieldBit "enabled" (Camera') where fieldBit = 1048576
-instance FieldBit "retentionDays" (Camera') where fieldBit = 2097152
-instance FieldBit "assignedHost" (Camera') where fieldBit = 4194304
-instance FieldBit "manualAssign" (Camera') where fieldBit = 8388608
-instance FieldBit "createdAt" (Camera') where fieldBit = 16777216
-instance FieldBit "updatedAt" (Camera') where fieldBit = 33554432
+instance FieldBit "modelName" (Camera') where fieldBit = 1048576
+instance FieldBit "enabled" (Camera') where fieldBit = 2097152
+instance FieldBit "retentionDays" (Camera') where fieldBit = 4194304
+instance FieldBit "assignedHost" (Camera') where fieldBit = 8388608
+instance FieldBit "manualAssign" (Camera') where fieldBit = 16777216
+instance FieldBit "createdAt" (Camera') where fieldBit = 33554432
+instance FieldBit "updatedAt" (Camera') where fieldBit = 67108864
 
 

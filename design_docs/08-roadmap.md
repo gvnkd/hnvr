@@ -86,7 +86,7 @@ Goal: YOLOv8n detections with persistent track IDs, visible in a debug overlay, 
 
 **Demo**: open `/DebugCamera?cameraId=…`, see bounding boxes following people; EKG shows EP labels per camera. Disable sub-stream on the camera → analyzer auto-falls-back to main-stream-with-scale; `hnvr_substream_fallback_total` increments; recording unaffected.
 
-**No events yet** — just proves the pipeline end-to-end. Remaining: longer bake + per-camera YOLOv8n-320 vs YOLOv8s-640 accuracy call (open decision below).
+**No events yet** — just proves the pipeline end-to-end. Remaining: the longer soak itself (tooling: `hnvr-cv-soak`, Aug 14 2026) + final per-camera YOLOv8n-320 vs YOLOv8s-640 call (tooling: `hnvr-cv-compare`; per-camera `cameras.model_name` plumbing landed Aug 14 2026; first data point: backyard → s-640).
 
 ## Phase 4 — Events: line crossing + zone intrusion (weeks 7–8)
 

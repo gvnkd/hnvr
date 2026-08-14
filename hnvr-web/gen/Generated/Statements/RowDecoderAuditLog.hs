@@ -1,6 +1,7 @@
+{-# LANGUAGE ApplicativeDo, OverloadedLabels, TypeApplications, ScopedTypeVariables #-}
 -- This file is auto generated and will be overriden regulary.
 {-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches #-}
-module Generated.Statements.FetchCamera (statement) where
+module Generated.Statements.RowDecoderAuditLog (rowDecoder) where
 
 import Prelude (($), (.), (<$>), (<*>), (<>), (+), (*), (-), show, fromIntegral, length, null, zip, mconcat, (++), Maybe(..), (!!), map, Bool(..), Int, Integer, pure, (&&), not)
 import Generated.ActualTypes
@@ -30,15 +31,15 @@ import PostgresqlTypes.Inet (Inet)
 import PostgresqlTypes.Tsvector (Tsvector)
 import PostgresqlTypes.Interval (Interval)
 
-import qualified Generated.Statements.RowDecoderCamera as RowDecoder
-statement :: Statement.Statement (Id' "cameras") (Maybe Generated.ActualTypes.Camera)
-statement = Statement.preparable sql encoder decoder
-
-sql :: Text
-sql = "SELECT id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_days, assigned_host, manual_assign, created_at, updated_at FROM cameras WHERE id = $1 LIMIT 1"
-
-encoder :: Encoders.Params (Id' "cameras")
-encoder = Encoders.param (Encoders.nonNullable Mapping.encoder)
-
-decoder :: Decoders.Result (Maybe Generated.ActualTypes.Camera)
-decoder = Decoders.rowMaybe RowDecoder.rowDecoder
+import qualified IHP.QueryBuilder as QueryBuilder
+import GHC.Records
+rowDecoder :: Decoders.Row Generated.ActualTypes.AuditLog
+rowDecoder = do
+    id <- Decoders.column (Decoders.nonNullable Mapping.decoder)
+    userId <- Decoders.column (Decoders.nullable Decoders.uuid)
+    action <- Decoders.column (Decoders.nonNullable Decoders.text)
+    targetType <- Decoders.column (Decoders.nonNullable Decoders.text)
+    targetId <- Decoders.column (Decoders.nullable Decoders.uuid)
+    payload <- Decoders.column (Decoders.nullable Decoders.jsonb)
+    ts <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
+    pure (let theRecord = Generated.ActualTypes.AuditLog id userId action targetType targetId payload ts def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)

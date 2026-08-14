@@ -58,7 +58,10 @@ test-suite hnvr-core-test
   other-modules:
     Hnvr.Core.ArchiveBrowserSpec
     Hnvr.Core.AssignmentSpec
+    Hnvr.Core.CameraSnapshotSpec
     Hnvr.Core.CryptoSpec
+    Hnvr.Core.EventSpec
+    Hnvr.Core.FrameSpec
     Hnvr.Core.GeometrySpec
     Hnvr.Core.IdSpec
     Hnvr.Core.MetricsSpec
@@ -81,6 +84,7 @@ test-suite hnvr-core-test
     , text
     , time
     , uuid
+    , vector
 
   default-language: Haskell2010
   ghc-options:      -threaded -rtsopts -with-rtsopts=-N

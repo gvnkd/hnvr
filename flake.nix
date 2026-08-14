@@ -745,6 +745,10 @@
                 # ultralytics env, see pitfall #97).
                 HNVR_ONNXRUNTIME_LIB = "${onnxruntimeCuda}/lib/libonnxruntime.so";
                 HNVR_MODEL_PATH = "/home/pion/.local/share/hnvr/model_cache/yolov8/yolov8n-320.onnx";
+                # Per-camera model resolution (cameras.model_name →
+                # <dir>/<name>.onnx); holds both yolov8n-320 and
+                # yolov8s-640 (pitfall #97).
+                HNVR_MODEL_DIR = "/home/pion/.local/share/hnvr/model_cache/yolov8";
                 # Per-host EP priority (design 04 §"Per-host EP
                 # selection"). Dev box is hnvr-2 (RTX 4090): TRT wins,
                 # CUDA falls back, CPU is the safety net.

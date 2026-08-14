@@ -75,12 +75,18 @@ test-suite hnvr-capture-test
     Hnvr.Capture.FfmpegSpec
     Hnvr.Capture.Fmp4Spec
     Hnvr.Capture.FrameSourceSpec
+    Hnvr.Capture.SpoolDrainerSpec
     Hnvr.Capture.WorkerSpec
 
   build-depends:
     , base              >=4.18 && <5
     , bytestring
+    , directory
+    , filepath
     , hnvr-capture
+    , hnvr-core
+    , hnvr-storage
+    , minio-hs
     , QuickCheck
     , stm
     , tasty
@@ -88,6 +94,7 @@ test-suite hnvr-capture-test
     , tasty-quickcheck
     , text
     , time
+    , uuid
 
   default-language: Haskell2010
   ghc-options:      -threaded -rtsopts -with-rtsopts=-N

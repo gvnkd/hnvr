@@ -28,7 +28,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeAsyncException, SomeException, fromException, throwIO, try)
 import Control.Monad (forM_, unless, void, when)
 import qualified Data.ByteString as B
 import Data.Text (Text)
@@ -124,7 +124,9 @@ runFrameSource cfg q = do
 -- | Supervised frame source: restart ffmpeg on exit with exponential
 -- backoff (1s doubling to a 30s cap), logging through the standard
 -- 'Hnvr.Core.Logging' channel. Runs forever — cancel the enclosing
--- async to stop.
+-- async to stop. Async exceptions (cancellation) are rethrown, never
+-- swallowed: catching 'AsyncCancelled' here would respawn ffmpeg on
+-- every stop and make @cancel@ block forever.
 frameSourceLoop :: FrameSourceConfig -> TBQueue Frame -> IO ()
 frameSourceLoop cfg q = go (0 :: Int)
   where
@@ -136,8 +138,10 @@ frameSourceLoop cfg q = go (0 :: Int)
           logWarn (fscTag cfg <> ": analysis ffmpeg exited cleanly; restarting in " <> tshow delayUs)
         Right (ExitFailure code) ->
           logWarn (fscTag cfg <> ": analysis ffmpeg exit " <> tshow code <> "; backoff " <> tshow delayUs)
-        Left (e :: SomeException) ->
-          logWarn (fscTag cfg <> ": analysis ffmpeg exception " <> T.pack (show e) <> "; backoff " <> tshow delayUs)
+        Left (e :: SomeException)
+          | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+          | otherwise ->
+              logWarn (fscTag cfg <> ": analysis ffmpeg exception " <> T.pack (show e) <> "; backoff " <> tshow delayUs)
       threadDelay delayUs
       go (failures + 1)
 

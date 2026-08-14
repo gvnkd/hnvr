@@ -100,6 +100,16 @@ in
       '';
     };
 
+    modelDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        HNVR_MODEL_DIR: directory holding the per-camera ONNX models
+        referenced by cameras.model_name (<dir>/<model_name>.onnx).
+        Null = the directory of modelPath.
+      '';
+    };
+
     metricsPort = lib.mkOption {
       type = lib.types.port;
       default = 9100;
@@ -154,6 +164,8 @@ in
         HNVR_TRT_CACHE_DIR = "${cfg.dataDir}/trt-cache";
       } // lib.optionalAttrs (cfg.modelPath != null) {
         HNVR_MODEL_PATH = cfg.modelPath;
+      } // lib.optionalAttrs (cfg.modelDir != null) {
+        HNVR_MODEL_DIR = cfg.modelDir;
       } // cfg.environment;
 
       serviceConfig = {

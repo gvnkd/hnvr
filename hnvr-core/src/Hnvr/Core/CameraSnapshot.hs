@@ -98,6 +98,10 @@ data CameraSnapshot = CameraSnapshot
     csSubWidth :: !(Maybe Int),
     csSubHeight :: !(Maybe Int),
     csAnalysisFps :: !Int,
+    -- | Bare model name (e.g. @yolov8n-320@); the receiving host
+    -- resolves it to @<model-dir>/<name>.onnx@ (design 04
+    -- §"Model: YOLOv8n" — per-camera model override).
+    csModelName :: !Text,
     -- | Enabled rules on this camera (Phase 4). Projected into
     -- 'Hnvr.Cv.Rules.Rule' by the receiving host.
     csRules :: ![RuleSnapshot]

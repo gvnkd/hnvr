@@ -1,5 +1,6 @@
 module Main (main) where
 
+import qualified Hnvr.Cv.AnalyzerRunnerSpec as AnalyzerRunnerSpec
 import qualified Hnvr.Cv.AnalyzerSpec as AnalyzerSpec
 import qualified Hnvr.Cv.DebugRenderSpec as DebugRenderSpec
 import qualified Hnvr.Cv.DecodeSpec as DecodeSpec
@@ -14,7 +15,8 @@ main =
   defaultMain $
     testGroup
       "hnvr-cv"
-      [ AnalyzerSpec.tests,
+      [ AnalyzerRunnerSpec.tests,
+        AnalyzerSpec.tests,
         DebugRenderSpec.tests,
         DecodeSpec.tests,
         OnnxRuntimeSpec.tests,

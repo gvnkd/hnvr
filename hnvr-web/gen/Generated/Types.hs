@@ -1,5 +1,5 @@
 -- This file is auto generated and will be overriden regulary. Please edit `Application/Schema.sql` to change the Types\n"
-module Generated.Types (module Generated.ActualTypes, module Generated.Host, module Generated.HostInclude, module Generated.Camera, module Generated.CameraInclude, module Generated.Segment, module Generated.SegmentInclude, module Generated.User, module Generated.UserInclude, module Generated.Rule, module Generated.RuleInclude, module Generated.Event, module Generated.EventInclude) where
+module Generated.Types (module Generated.ActualTypes, module Generated.Host, module Generated.HostInclude, module Generated.Camera, module Generated.CameraInclude, module Generated.Segment, module Generated.SegmentInclude, module Generated.User, module Generated.UserInclude, module Generated.Rule, module Generated.RuleInclude, module Generated.Event, module Generated.EventInclude, module Generated.AuditLog, module Generated.AuditLogInclude) where
 import Generated.ActualTypes
 import Generated.Host
 import Generated.HostInclude
@@ -13,3 +13,5 @@ import Generated.Rule
 import Generated.RuleInclude
 import Generated.Event
 import Generated.EventInclude
+import Generated.AuditLog
+import Generated.AuditLogInclude

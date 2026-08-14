@@ -115,7 +115,9 @@ import qualified Hnvr.Nats.Bus as Bus
 import qualified Hnvr.Nats.Subjects as Subjects
 import Hnvr.Storage.S3 (putObjectBytes)
 import Network.Minio (defaultPutObjectOptions, pooContentType)
+import qualified System.Directory as Dir
 import System.Environment (lookupEnv)
+import System.FilePath (takeDirectory, (<.>), (</>))
 import System.Timeout (timeout)
 import Text.Read (readMaybe)
 
@@ -203,7 +205,11 @@ startCamera sup snap = do
 -- | Spawn the analysis pair (frame source + analyzer) for a camera.
 --
 -- Enabled when @HNVR_MODEL_PATH@ points at an ONNX model and
--- @HNVR_ANALYSIS_ENABLED@ is not @0@. Sub-stream decode is preferred
+-- @HNVR_ANALYSIS_ENABLED@ is not @0@. The model file is per-camera:
+-- @cameras.model_name@ is resolved by 'resolveModelPath' against
+-- @HNVR_MODEL_DIR@ (default: the @HNVR_MODEL_PATH@ directory), so
+-- e.g. one camera can run yolov8s-640 while the rest stay on
+-- yolov8n-320. Sub-stream decode is preferred
 -- (direct camera URL, native dims from Probe); when
 -- @use_substream_for_analysis@ is false or dims/URL are missing we
 -- fall back to the mediamtx relay main stream with @scale=640:360@
@@ -222,6 +228,7 @@ maybeStartAnalysis sup snap relayUrl = do
       latest <- newTVarIO Nothing
       fallbackScale <- readFallbackScale
       rulesRef <- newIORef (M.empty :: M.Map (Text, Int) RuleState)
+      modelFile <- resolveModelPath modelPath (csModelName snap)
       let metrics = capMetrics sup.csConfig
           (analysisCfg, width, height) = analysisConfigFor fallbackScale snap relayUrl
           rules = mapMaybe projectRule (csRules snap)
@@ -242,13 +249,36 @@ maybeStartAnalysis sup snap relayUrl = do
           runAnalyzer
             metrics
             defaultAnalyzerConfig
-            (T.pack modelPath)
+            (T.pack modelFile)
             eps
             queue
             (analysisSink sup snap rules rulesRef latest)
       modifyIORef' sup.csAnalysis $
         Map.insert (csId snap) AnalysisHandle {ahSource = src, ahAnalyzer = ana, ahLatest = latest}
-      logInfo ("CaptureSupervisor: analysis pair started for " <> csSlug snap)
+      logInfo ("CaptureSupervisor: analysis pair started for " <> csSlug snap <> " (model " <> csModelName snap <> ")")
+
+-- | Resolve the per-camera model file. @cameras.model_name@ is a bare
+-- name resolved against @HNVR_MODEL_DIR@ (or the directory of
+-- @HNVR_MODEL_PATH@ when unset). Empty name → the env default. Missing
+-- file → warn + env default: a typo'd model_name must not silently
+-- kill the camera's whole analysis pair.
+resolveModelPath :: FilePath -> Text -> IO FilePath
+resolveModelPath defaultPath name
+  | T.null name = pure defaultPath
+  | otherwise = do
+      mDir <- lookupEnv "HNVR_MODEL_DIR"
+      let dir = fromMaybe (takeDirectory defaultPath) mDir
+          candidate = dir </> T.unpack name <.> "onnx"
+      exists <- Dir.doesFileExist candidate
+      if exists
+        then pure candidate
+        else do
+          logWarn
+            ( "CaptureSupervisor: model file "
+                <> T.pack candidate
+                <> " not found; falling back to HNVR_MODEL_PATH"
+            )
+          pure defaultPath
 
 -- | Per-frame sink: store the latest (frame, tracks) for the debug
 -- view, evaluate the camera's rules, publish emitted events on

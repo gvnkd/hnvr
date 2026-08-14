@@ -28,66 +28,85 @@ import Hnvr.Storage.S3
     presignGetUrl,
     putObjectBytes,
   )
-import Network.Minio (Bucket, ConnectInfo, Object)
+import Network.Minio (Bucket, ConnectInfo, Object, isConnectInfoSecure)
 import System.Environment (lookupEnv)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertBool, assertEqual, testCase)
+import Test.Tasty.HUnit (assertBool, assertEqual, testCase, (@?=))
 
 tests :: TestTree
 tests =
   testGroup
-    "Hnvr.Storage.S3 (integration, env-gated)"
-    [ integrationTest "putObjectBytes + getObjectBytes roundtrip" $
-        withS3 $ \ci bucket -> do
-          let key = "s3spec-roundtrip-test"
-              payload = "hello hnvr" :: ByteString
-          cleanup ci bucket key
-          putObjectBytes ci bucket key payload defaultPutObjectOptions
-          got <- getObjectBytes ci bucket key
-          assertEqual "roundtrip bytes" payload got
-          deleteObject ci bucket key,
-      integrationTest "putObjectBytes overwrites existing key" $
-        withS3 $ \ci bucket -> do
-          let key = "s3spec-overwrite-test"
-          cleanup ci bucket key
-          putObjectBytes ci bucket key "v1" defaultPutObjectOptions
-          putObjectBytes ci bucket key "v2-two" defaultPutObjectOptions
-          got <- getObjectBytes ci bucket key
-          assertEqual "after overwrite" ("v2-two" :: ByteString) got
-          deleteObject ci bucket key,
-      integrationTest "deleteObject is idempotent" $
-        withS3 $ \ci bucket -> do
-          let key = "s3spec-delete-idempotent"
-          cleanup ci bucket key
-          putObjectBytes ci bucket key "x" defaultPutObjectOptions
-          deleteObject ci bucket key
-          -- Second delete must not throw.
-          deleteObject ci bucket key,
-      integrationTest "listObjectKeys returns matching keys (any order)" $
-        withS3 $ \ci bucket -> do
-          let keys =
-                [ "s3spec-list/c/2",
-                  "s3spec-list/a/1",
-                  "s3spec-list/b/1"
-                ] ::
-                  [Object]
-          mapM_ (cleanup ci bucket) keys
-          mapM_
-            (\k -> putObjectBytes ci bucket k "x" defaultPutObjectOptions)
-            keys
-          got <- listObjectKeys ci bucket "s3spec-list/"
-          assertEqual "list (sorted)" (sort keys) (sort got)
-          mapM_ (deleteObject ci bucket) keys,
-      integrationTest "presignGetUrl returns a non-empty URL" $
-        withS3 $ \ci bucket -> do
-          let key = "s3spec-presign-test"
-              payload = "signed-content" :: ByteString
-          cleanup ci bucket key
-          putObjectBytes ci bucket key payload defaultPutObjectOptions
-          url <- presignGetUrl ci bucket key 3600
-          assertBool "url non-empty" (not (B.null url))
-          deleteObject ci bucket key
+    "Hnvr.Storage.S3"
+    [ testGroup
+        "connectInfo (pure)"
+        [ testCase "http endpoint → insecure" $
+            isConnectInfoSecure (connectInfo (mkCfg "http://localhost:9100")) @?= False,
+          testCase "https endpoint → secure" $
+            isConnectInfoSecure (connectInfo (mkCfg "https://s3.example.com")) @?= True
+        ],
+      testGroup
+        "integration (env-gated)"
+        [ integrationTest "putObjectBytes + getObjectBytes roundtrip" $
+            withS3 $ \ci bucket -> do
+              let key = "s3spec-roundtrip-test"
+                  payload = "hello hnvr" :: ByteString
+              cleanup ci bucket key
+              putObjectBytes ci bucket key payload defaultPutObjectOptions
+              got <- getObjectBytes ci bucket key
+              assertEqual "roundtrip bytes" payload got
+              deleteObject ci bucket key,
+          integrationTest "putObjectBytes overwrites existing key" $
+            withS3 $ \ci bucket -> do
+              let key = "s3spec-overwrite-test"
+              cleanup ci bucket key
+              putObjectBytes ci bucket key "v1" defaultPutObjectOptions
+              putObjectBytes ci bucket key "v2-two" defaultPutObjectOptions
+              got <- getObjectBytes ci bucket key
+              assertEqual "after overwrite" ("v2-two" :: ByteString) got
+              deleteObject ci bucket key,
+          integrationTest "deleteObject is idempotent" $
+            withS3 $ \ci bucket -> do
+              let key = "s3spec-delete-idempotent"
+              cleanup ci bucket key
+              putObjectBytes ci bucket key "x" defaultPutObjectOptions
+              deleteObject ci bucket key
+              -- Second delete must not throw.
+              deleteObject ci bucket key,
+          integrationTest "listObjectKeys returns matching keys (any order)" $
+            withS3 $ \ci bucket -> do
+              let keys =
+                    [ "s3spec-list/c/2",
+                      "s3spec-list/a/1",
+                      "s3spec-list/b/1"
+                    ] ::
+                      [Object]
+              mapM_ (cleanup ci bucket) keys
+              mapM_
+                (\k -> putObjectBytes ci bucket k "x" defaultPutObjectOptions)
+                keys
+              got <- listObjectKeys ci bucket "s3spec-list/"
+              assertEqual "list (sorted)" (sort keys) (sort got)
+              mapM_ (deleteObject ci bucket) keys,
+          integrationTest "presignGetUrl returns a non-empty URL" $
+            withS3 $ \ci bucket -> do
+              let key = "s3spec-presign-test"
+                  payload = "signed-content" :: ByteString
+              cleanup ci bucket key
+              putObjectBytes ci bucket key payload defaultPutObjectOptions
+              url <- presignGetUrl ci bucket key 3600
+              assertBool "url non-empty" (not (B.null url))
+              deleteObject ci bucket key
+        ]
     ]
+
+mkCfg :: T.Text -> S3Config
+mkCfg endpoint =
+  S3Config
+    { s3cEndpoint = endpoint,
+      s3cAccessKey = "ak",
+      s3cSecretKey = "sk",
+      s3cBucket = "hnvr-test"
+    }
 
 -- ---- helpers -------------------------------------------------------
 

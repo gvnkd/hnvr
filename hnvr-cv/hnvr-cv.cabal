@@ -58,11 +58,49 @@ executable hnvr-leak-probe
   default-language: Haskell2010
   ghc-options:      -threaded -rtsopts -with-rtsopts=-N
 
+executable hnvr-cv-soak
+  main-is:          Soak.hs
+  hs-source-dirs:   app
+  build-depends:
+    , async
+    , base
+    , containers
+    , hnvr-capture
+    , hnvr-core
+    , hnvr-cv
+    , stm
+    , text
+    , time
+
+  default-language: Haskell2010
+  ghc-options:      -threaded -rtsopts -with-rtsopts=-N
+
+executable hnvr-cv-compare
+  main-is:          CompareModels.hs
+  hs-source-dirs:   app
+  build-depends:
+    , async
+    , base
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , hnvr-capture
+    , hnvr-core
+    , hnvr-cv
+    , stm
+    , text
+    , vector
+
+  default-language: Haskell2010
+  ghc-options:      -threaded -rtsopts -with-rtsopts=-N
+
 test-suite hnvr-cv-test
   type:             exitcode-stdio-1.0
   main-is:          Main.hs
   hs-source-dirs:   test
   other-modules:
+    Hnvr.Cv.AnalyzerRunnerSpec
     Hnvr.Cv.AnalyzerSpec
     Hnvr.Cv.DebugRenderSpec
     Hnvr.Cv.DecodeSpec
@@ -85,6 +123,7 @@ test-suite hnvr-cv-test
     , massiv
     , QuickCheck
     , random
+    , stm
     , tasty
     , tasty-hunit
     , tasty-quickcheck

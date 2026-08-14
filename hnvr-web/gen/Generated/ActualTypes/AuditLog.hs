@@ -1,7 +1,7 @@
 -- This file is auto generated and will be overriden regulary. Please edit `Application/Schema.sql` to change the Types\n"
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, InstanceSigs, MultiParamTypeClasses, TypeFamilies, DataKinds, TypeOperators, UndecidableInstances, ConstraintKinds, StandaloneDeriving  #-}
 {-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches -Wno-ambiguous-fields #-}
-module Generated.ActualTypes.Camera where
+module Generated.ActualTypes.AuditLog where
 import IHP.HaskellSupport
 import IHP.ModelSupport
 import CorePrelude hiding (id)
@@ -43,17 +43,17 @@ import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
 import Generated.ActualTypes.PrimaryKeys
-data Camera' = Camera {id :: (Id' "cameras"), slug :: Text, name :: Text, rtspUrl :: Text, rtspTemplate :: (Maybe Text), rtspTransport :: Text, host :: (Maybe Text), port :: Int, username :: (Maybe Text), passwordEnc :: (Maybe (Binary ByteString)), passwordNonce :: (Maybe (Binary ByteString)), codec :: CodecKind, rtspSubUrl :: (Maybe Text), rtspSubTemplate :: (Maybe Text), useSubstreamForAnalysis :: Bool, substreamCodec :: CodecKind, substreamWidth :: (Maybe Int), substreamHeight :: (Maybe Int), recordAudio :: Bool, analysisFps :: Int, modelName :: Text, enabled :: Bool, retentionDays :: Int, assignedHost :: (Maybe Text), manualAssign :: Bool, createdAt :: UTCTime, updatedAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+data AuditLog' = AuditLog {id :: (Id' "audit_log"), userId :: (Maybe UUID), action :: Text, targetType :: Text, targetId :: (Maybe UUID), payload :: (Maybe Data.Aeson.Value), ts :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
 
-type Camera = Camera'
+type AuditLog = AuditLog'
 
-type instance GetTableName (Camera') = "cameras"
-type instance GetModelByTableName "cameras" = Camera
+type instance GetTableName (AuditLog') = "audit_log"
+type instance GetModelByTableName "audit_log" = AuditLog
 
 
-instance IHP.ModelSupport.Table (Camera') where
-    tableName = "cameras"
-    columnNames = ["id","slug","name","rtsp_url","rtsp_template","rtsp_transport","host","port","username","password_enc","password_nonce","codec","rtsp_sub_url","rtsp_sub_template","use_substream_for_analysis","substream_codec","substream_width","substream_height","record_audio","analysis_fps","model_name","enabled","retention_days","assigned_host","manual_assign","created_at","updated_at"]
+instance IHP.ModelSupport.Table (AuditLog') where
+    tableName = "audit_log"
+    columnNames = ["id","user_id","action","target_type","target_id","payload","ts"]
     primaryKeyColumnNames = ["id"]
 
 

@@ -79,6 +79,15 @@ instance View EditView where
               </select>
             </div>
 
+            <div class="field">
+              <label>Analysis model</label>
+              <select name="modelName">
+                <option value="yolov8n-320" selected={camera.modelName == "yolov8n-320"}>yolov8n-320 (default)</option>
+                <option value="yolov8s-640" selected={camera.modelName == "yolov8s-640"}>yolov8s-640 (hnvr-2 only)</option>
+              </select>
+              <div class="hint">Resolved to &lt;model-dir&gt;/&lt;name&gt;.onnx on the assigned host</div>
+            </div>
+
             <div class="flex items-center gap-2 mt-6">
               <button class="btn btn-primary" type="submit">Save Changes</button>
               <a class="btn btn-ghost" href={showUrl}>Cancel</a>

@@ -79,7 +79,7 @@ instance Controller CamerasController where
   action CreateCameraAction = do
     let camera0 =
           newRecord @Camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "enabled", "retentionDays", "assignedHost", "manualAssign"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "modelName", "enabled", "retentionDays", "assignedHost", "manualAssign"]
         plaintext = paramOrDefault ("" :: Text) "password"
     (enc, nonce) <- liftIO (encryptPassword plaintext)
     let camera =
@@ -97,7 +97,7 @@ instance Controller CamerasController where
     camera <- fetch cameraId
     let camera' =
           camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "enabled", "retentionDays", "assignedHost", "manualAssign"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "modelName", "enabled", "retentionDays", "assignedHost", "manualAssign"]
         plaintext = paramOrNothing "password" :: Maybe Text
     camera'' <- case plaintext of
       Nothing -> pure camera'

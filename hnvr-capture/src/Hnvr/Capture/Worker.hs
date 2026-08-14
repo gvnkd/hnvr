@@ -35,6 +35,7 @@ module Hnvr.Capture.Worker
     captureWorkerWithStop,
 
     -- * Internal helpers (exported for unit tests; do not use outside)
+    transition,
     backoffDuration,
     countRecent,
     recordRestart,
@@ -46,7 +47,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
-import Control.Exception (SomeException, catch)
+import Control.Exception (SomeAsyncException (..), SomeException, catch, fromException, throwIO)
 import Control.Monad (foldM, when)
 import Crypto.Hash (Digest, SHA256 (..), hash)
 import qualified Data.ByteArray as BA (convert)
@@ -164,6 +165,11 @@ transition cfg cam recentRef = \case
     logInfo cam "Pending → Running"
     ec <-
       runOnce cfg cam `catch` \(e :: SomeException) -> do
+        -- Cancellation must propagate — swallowing it would turn a
+        -- stop into an infinite ffmpeg-respawn loop and hang @cancel@.
+        case fromException e of
+          Just (SomeAsyncException _) -> throwIO e
+          Nothing -> pure ()
         logErr cam $ "runOnce threw: " <> show e
         pure (ExitFailure 99)
     now <- getCurrentTime
@@ -308,6 +314,9 @@ handleFragment cfg cam isAudio pending frag =
         else flushPendingAt cfg cam ts pending
       pure (Just (PendingFrag ts bs sha key))
     `catch` \(e :: SomeException) -> do
+      case fromException e of
+        Just (SomeAsyncException _) -> throwIO e
+        Nothing -> pure ()
       logErr cam $ "fragment handler failed: " <> show e
       pure pending
 
@@ -357,6 +366,9 @@ storeOrUpload cfg cam keyBytes bytes kind = do
       let opts = defaultPutObjectOptions {pooContentType = Just "video/mp4"}
       putObjectBytes ci (capBucket cfg) keyBytes bytes opts
         `catch` \(e :: SomeException) -> do
+          case fromException e of
+            Just (SomeAsyncException _) -> throwIO e
+            Nothing -> pure ()
           logErr cam $ "S3 put failed (" <> kind <> "), spooling locally: " <> show e
           spoolLocally cfg keyBytes bytes
     Nothing -> spoolLocally cfg keyBytes bytes

@@ -22,12 +22,15 @@
 module Hnvr.Capture.SpoolDrainer
   ( startSpoolDrainer,
     drainOnce,
+
+    -- * Internal helpers (exported for unit tests; do not use outside)
+    trimOldest,
   )
 where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException, catch, try)
+import Control.Exception (SomeAsyncException, SomeException, catch, fromException, throwIO, try)
 import Control.Monad (filterM, forM_, forever, when)
 import qualified Data.ByteString as BS
 import Data.List (isSuffixOf, sort)
@@ -150,8 +153,12 @@ tryUpload ci bucket spoolDir localPath = do
       let opts = defaultPutObjectOptions {pooContentType = Just "video/mp4"}
       result <- try (putObjectBytes ci bucket key bytes opts) :: IO (Either SomeException ())
       case result of
-        Left e ->
-          logWarn ("SpoolDrainer: upload failed for " <> key <> ": " <> T.pack (show e))
+        -- Never swallow async exceptions (cancellation, timeout) —
+        -- rethrow so process shutdown and bounding combinators work.
+        Left e
+          | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+          | otherwise ->
+              logWarn ("SpoolDrainer: upload failed for " <> key <> ": " <> T.pack (show e))
         Right _ -> do
           Dir.removeFile localPath
             `catch` \(e :: SomeException) ->

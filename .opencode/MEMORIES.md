@@ -12,8 +12,13 @@
 - **Current branch state**: Phase 0 + 1 + 2 done (code; live VM tests
   pending). Phase 3 slices 1–12 done (CV pipeline + EKG + CUDA + TRT
   with engine cache + yolov8s-640 resolution bump + the lazy-SORT
-  leak fix — Aug 13 2026). Remaining Phase 3: longer bake; YOLOv8n/s
-  accuracy decision per camera. hnvr-1 stays CPU EP (pitfall #103).
+  leak fix — Aug 13 2026) + close-out (bake/accuracy tooling,
+  per-camera `cameras.model_name` plumbing — Aug 14 2026). Phase 3
+  done pending the longer soak run itself + final per-camera model
+  call (first compare: backyard → yolov8s-640). Phase 4 (events)
+  largely landed Aug 13–14 (rules engine, CvEvent pipeline,
+  thumbnails, /Events UI, rules CRUD + live propagation, live feed,
+  audit log). hnvr-1 stays CPU EP (pitfall #103).
   Phase 2 audit-and-fix pass landed Aug 10 2026 (see
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
   that have been resolved; `.opencode/PHASE_AUDIT_REPORT_2.md` for the
@@ -213,7 +218,11 @@ hnvr/
 │   │                    Preprocess, Decode, Rules, AutoTrack,
 │   │                    Tracker/Sort (stubs — land with Phase 3 slices)
 │   ├── app/LeakProbe.hs hnvr-leak-probe: per-stage heap-leak bisect
-│   │                    tool (pitfall #105)
+│   │                    tool (pitfall #105); Soak.hs hnvr-cv-soak:
+│   │                    live-stream bake runner (pitfall #106 RSS
+│   │                    watch, per-EP inference stats); CompareModels.hs
+│   │                    hnvr-cv-compare: yolov8n-320 vs yolov8s-640
+│   │                    A/B accuracy tool (Phase 3 close-out)
 │   └── test/            S6 started: OnnxRuntimeSpec (2 smoke tests,
 │                        env-gated on HNVR_ONNXRUNTIME_LIB, pitfall #91)
 ├── hnvr-ptz/            Driver (REAL typeclass), Onvif (stub), Controller (stub)
@@ -268,6 +277,10 @@ Archive-browser slice added Aug 12 2026 (commit `8bd8d1f`).
 
 > Aug 13 2026: now **217 Haskell tests** (103 core + 35 capture +
 > 58 cv + 16 nats + 5 storage) after the Phase 3 EKG slice.
+> Aug 14 2026: now **272 Haskell tests** (119 core + 45 capture +
+> 85 cv + 16 nats + 7 storage) after the Phase 3 close-out coverage
+> pass (CameraSnapshot/Event/Frame, SpoolDrainer, Worker.transition,
+> gated AnalyzerRunner loop, storage pure lane).
 
 | Layer | Where | Status |
 |-------|-------|--------|
@@ -294,6 +307,28 @@ nix build .#checks.x86_64-linux.hnvr-leader-smoke
 # Playwright UI tests (start devenv up + ./result/bin/hnvr-leader first)
 cd tests/e2e && npm install && npx playwright install chromium
 nix develop --command bash -c 'cd tests/e2e && npm test'
+
+# ---- Phase 3 bake + accuracy tooling (Aug 14 2026) ------------------
+# Both need the devenv env (HNVR_ONNXRUNTIME_LIB etc.) — run inside
+# nix develop. Pull from the mediamtx relay (rtsp://localhost:8554/<slug>)
+# rather than the camera directly when the production node is running
+# (session caps, pitfall #11).
+cabal build hnvr-cv:exe:hnvr-cv-soak hnvr-cv:exe:hnvr-cv-compare
+SOAK=$(find dist-newstyle -name 'hnvr-cv-soak' -type f -executable | head -1)
+CMP=$(find dist-newstyle -name 'hnvr-cv-compare' -type f -executable | head -1)
+# Bake: production frameSourceLoop+runAnalyzer path; 60s tick reports
+# decoded/dropped/analyzed, per-EP avg inference ms, VmRSS. --minutes
+# bounds the run; without it, runs until Ctrl-C (final summary either way).
+$SOAK 'rtsp://localhost:8554/floor_2_5' tcp 640x360 5 \
+  ~/.local/share/hnvr/model_cache/yolov8/yolov8n-320.onnx \
+  --scale 640x360 --minutes 360
+# A/B accuracy: N frames through both models; per-frame detections at
+# --conf (default 0.10), by-class summary, person-verdict disagreements,
+# annotated PNGs with --png-dir. --scale = relay fallback shape.
+$CMP 'rtsp://localhost:8554/backyard' tcp 1280x720 5 \
+  ~/.local/share/hnvr/model_cache/yolov8/yolov8n-320.onnx \
+  ~/.local/share/hnvr/model_cache/yolov8/yolov8s-640.onnx \
+  --frames 30 --scale 1280x720 --png-dir /tmp/hnvr-compare
 ```
 
 **CI matrix** (`.github/workflows/ci.yml`):
@@ -1466,9 +1501,51 @@ ffprobe notes:
          capabilities ≈ 2 GB of arenas. Now `-A16m` (~500 MB). Final
          working set at yolov8s-640/TRT/3 cams ≈ 2.3 GB flat over
          15 min (≈1 GB TRT contexts, rest IHP+RTS). New gauge:
-         `hnvr_process_resident_bytes` (read from /proc/self/statm by
-         the metrics poller every 15 s) — watch the bake on /metrics
-         instead of eyeballing `top`.
+          `hnvr_process_resident_bytes` (read from /proc/self/statm by
+          the metrics poller every 15 s) — watch the bake on /metrics
+          instead of eyeballing `top`.
+
+    107. **`catch`/`try SomeException` swallows cancellation** (Aug 14
+         2026, Phase 3 close-out) — `frameSourceLoop` caught
+         `SomeException` around `runFrameSource`, so `cancel` on the
+         source async delivered `AsyncCancelled`, the loop logged it
+         as a transient error and RESPAWNED ffmpeg; `cancel` then
+         blocked forever waiting for the thread to die (deadlock on
+         camera stop). Same latent pattern in `Worker.transition`'s
+         runOnce catch (stop → respawn loop), `handleFragment` and
+         `storeOrUpload`. Fix pattern everywhere:
+         ```haskell
+         `catch` \(e :: SomeException) -> do
+           case fromException e of
+             Just (SomeAsyncException _) -> throwIO e  -- needs SomeAsyncException(..) import
+             Nothing -> pure ()
+           ...sync-error handling...
+         ```
+         `System.Timeout.timeout`'s exception also arrives
+         async-wrapped, so a SomeException catch silently defeats
+         `timeout` bounds too (this is why the SpoolDrainer test's
+         5 s bound did nothing before the fix). `ConfigBroadcaster` /
+         `MediaMTXConfigSyncer` / `SnapshotResponder` catches not yet
+         audited — check them next time they're touched.
+
+    108. **minio-hs retries connection-refused forever** (Aug 14 2026)
+         — `putObjectBytes` against a dead endpoint
+         (`http://127.0.0.1:1`) never returns: minio-hs's retry policy
+         covers connect failures, not just 5xx. Consequence 1: tests
+         that exercise S3-failure paths must bound the call with
+         `timeout` (works only post-pitfall-#107 fix). Consequence 2:
+         `drainOnce` against a long-dead S3 sits inside one upload
+         retry loop rather than cycling files — acceptable (next pass
+         re-lists anyway), but don't expect a drain pass to terminate
+         during a full outage.
+
+    109. **IHP schema-compiler rejects `--` comments inside CREATE
+         TABLE column lists** (Aug 14 2026) — `nix run …#schema-compiler`
+         fails with `unexpected "-- per-"` when a comment sits between
+         column definitions. Keep comments outside the table body
+         (above the CREATE TABLE) or regen.sh dies mid-run leaving
+         gen/ deleted (it does `rm -rf gen` first — rerun after fixing
+         to restore).
 
 ## Sergey's working style
 
@@ -1891,6 +1968,35 @@ ffprobe notes:
       LeakProbe fulllazy 5000 frames clean, leader flat ~2.6 GB RSS
       over 15 min at yolov8s-640/TRT/3 cams (was ~80 MB/s growth).
       cv suite: 61 tests. New dev tool: `hnvr-cv:hnvr-leak-probe`.
+      **Phase 3 close-out done (Aug 14 2026)**: bake + accuracy
+      tooling + per-camera model plumbing + coverage pass. New exes
+      (`hnvr-cv/app`): `hnvr-cv-soak` (live stream → production
+      frameSourceLoop+runAnalyzer path; 60 s tick: decoded/dropped/
+      analyzed/per-EP avg inference ms/VmRSS; `--minutes` bound) and
+      `hnvr-cv-compare` (N frames → both models; per-frame detections
+      at `--conf` 0.10 + by-class summary + person-verdict
+      disagreements + `--png-dir` annotated PNGs). `cameras.model_name`
+      landed (Schema.sql + regen — 7 stale audit_log Generated modules
+      surfaced, hand-added to hnvr-web.cabal per pitfall #51; New/Edit
+      forms gained an Analysis-model select). CaptureSupervisor
+      `resolveModelPath`: bare name → `HNVR_MODEL_DIR` (default:
+      dirname of `HNVR_MODEL_PATH`) `<name>.onnx`; missing file →
+      warn + env fallback. nix module gained `modelDir`. Pitfall #107
+      async-exception audit: FrameSource/Worker/SpoolDrainer
+      SomeException catches now rethrow SomeAsyncException (was:
+      cancel on a frame source respawned ffmpeg forever). First live
+      compare (backyard relay 1280x720, CPU EP): s-640 = 59 dets
+      (car max 0.87, truck detected) vs n-320 = 33 (car max 0.71,
+      truck misread as car) → backyard is an s-640 camera;
+      floor_2_5 frames had no objects (no signal). **Open**: compare
+      run showed 0 confirmed tracks despite 4 consecutive frames of
+      consistent car detections — check SORT minHits/IoU gating
+      against real box jitter during the bake. Coverage: +56 tests
+      (272 total): CameraSnapshot/Event/Frame, SpoolDrainer,
+      Worker.transition, gated AnalyzerRunner loop, storage pure lane.
+      Remaining Phase 3: the longer soak run itself + final
+      per-camera model call (needs a person in frame on floor_2_5 /
+      low_ent).
       **Slice 7 done (Aug 12 2026)**: /debug view + the great SIGSEGV
       hunt. `Hnvr.Cv.DebugRender` (pure: palette box overlay +
       JuicyPixels PNG — MJPEG→PNG-multipart deviation documented;

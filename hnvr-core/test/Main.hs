@@ -2,7 +2,10 @@ module Main (main) where
 
 import qualified Hnvr.Core.ArchiveBrowserSpec as ArchiveBrowserSpec
 import qualified Hnvr.Core.AssignmentSpec as AssignmentSpec
+import qualified Hnvr.Core.CameraSnapshotSpec as CameraSnapshotSpec
 import qualified Hnvr.Core.CryptoSpec as CryptoSpec
+import qualified Hnvr.Core.EventSpec as EventSpec
+import qualified Hnvr.Core.FrameSpec as FrameSpec
 import qualified Hnvr.Core.GeometrySpec as GeometrySpec
 import qualified Hnvr.Core.IdSpec as IdSpec
 import qualified Hnvr.Core.MetricsSpec as MetricsSpec
@@ -20,7 +23,10 @@ main =
       "hnvr-core"
       [ ArchiveBrowserSpec.tests,
         AssignmentSpec.tests,
+        CameraSnapshotSpec.tests,
         CryptoSpec.tests,
+        EventSpec.tests,
+        FrameSpec.tests,
         GeometrySpec.tests,
         IdSpec.tests,
         MetricsSpec.tests,

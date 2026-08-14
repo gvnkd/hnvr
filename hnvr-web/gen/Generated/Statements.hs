@@ -29,7 +29,12 @@ module Generated.Statements (
     module Generated.Statements.CreateEvent,
     module Generated.Statements.UpdateEvent,
     module Generated.Statements.FetchEvent,
-    module Generated.Statements.CreateManyEvent
+    module Generated.Statements.CreateManyEvent,
+    module Generated.Statements.RowDecoderAuditLog,
+    module Generated.Statements.CreateAuditLog,
+    module Generated.Statements.UpdateAuditLog,
+    module Generated.Statements.FetchAuditLog,
+    module Generated.Statements.CreateManyAuditLog
 ) where
 import qualified Generated.Statements.RowDecoderHost
 import qualified Generated.Statements.CreateHost
@@ -61,4 +66,9 @@ import qualified Generated.Statements.CreateEvent
 import qualified Generated.Statements.UpdateEvent
 import qualified Generated.Statements.FetchEvent
 import qualified Generated.Statements.CreateManyEvent
+import qualified Generated.Statements.RowDecoderAuditLog
+import qualified Generated.Statements.CreateAuditLog
+import qualified Generated.Statements.UpdateAuditLog
+import qualified Generated.Statements.FetchAuditLog
+import qualified Generated.Statements.CreateManyAuditLog
 

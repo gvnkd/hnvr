@@ -54,3 +54,5 @@ type instance PrimaryKey "rules" = UUID
 instance Default (Id' "rules") where def = Id def
 type instance PrimaryKey "events" = UUID
 instance Default (Id' "events") where def = Id def
+type instance PrimaryKey "audit_log" = Integer
+instance Default (Id' "audit_log") where def = Id def

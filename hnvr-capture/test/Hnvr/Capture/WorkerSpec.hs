@@ -14,15 +14,24 @@ import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock
   ( UTCTime (..),
     addUTCTime,
+    getCurrentTime,
     secondsToDiffTime,
   )
+import qualified Data.UUID as UUID
 import Hnvr.Capture.Worker
-  ( backoffDuration,
+  ( CameraConfig (..),
+    CaptureConfig (..),
+    CaptureState (..),
+    Transport (..),
+    backoffDuration,
     countRecent,
     recordRestart,
+    transition,
   )
+import Hnvr.Core.Id (CameraId (..), HostId (..))
+import Hnvr.Core.Metrics (noOpMetrics)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertEqual, testCase)
+import Test.Tasty.HUnit (assertBool, assertEqual, testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -75,6 +84,42 @@ tests =
             _ <- countRecent ref t0
             kept <- readIORef ref
             assertEqual "stale pruned" [recent] kept
+        ],
+      testGroup
+        "transition (dead RTSP endpoint)"
+        [ testCase "Pending → Backoff 1 on ffmpeg exit" $ do
+            ref <- newIORef []
+            st <- transition cfg deadCam ref Pending
+            case st of
+              Backoff 1 _ -> pure ()
+              other -> assertBool ("expected Backoff 1, got " <> show other) False,
+          testCase "5 restarts within 60s → FailedPermanent" $ do
+            ref <- newIORef []
+            let drive :: Int -> IO CaptureState
+                drive 0 = pure (error "unreached")
+                drive 1 = transition cfg deadCam ref Pending
+                drive k = do
+                  st <- transition cfg deadCam ref Pending
+                  case st of
+                    Backoff _ _ -> drive (k - 1)
+                    other -> pure other
+            st <- drive 5
+            case st of
+              FailedPermanent _ -> pure ()
+              other -> assertBool ("expected FailedPermanent, got " <> show other) False,
+          testCase "Backoff with elapsed nextAt → Pending" $ do
+            ref <- newIORef []
+            now <- getCurrentTime
+            st <- transition cfg deadCam ref (Backoff 3 (addUTCTime (-1) now))
+            st @?= Pending,
+          testCase "FailedPermanent cooldown elapsed → Pending + restart budget reset" $ do
+            ref <- newIORef []
+            now <- getCurrentTime
+            writeIORef ref [now, now]
+            st <- transition cfg deadCam ref (FailedPermanent (addUTCTime (-1) now))
+            st @?= Pending
+            kept <- readIORef ref
+            kept @?= []
         ]
     ]
 
@@ -84,3 +129,39 @@ tests =
 -- assertions are stable.
 t0 :: UTCTime
 t0 = UTCTime (fromGregorian 2026 8 7) (secondsToDiffTime (12 * 3600))
+
+-- | Process-wide config for transition tests: no NATS, no S3, no-op
+-- metrics. The spool dir is never touched — the dead camera's ffmpeg
+-- exits before any fragment is produced.
+cfg :: CaptureConfig
+cfg =
+  CaptureConfig
+    { capBus = Nothing,
+      capS3 = Nothing,
+      capBucket = "hnvr-test",
+      capHostId = HostId "test-host",
+      capSpoolDir = "/tmp/hnvr-workerspec-spool",
+      capMetrics = noOpMetrics
+    }
+
+-- | Camera pointing at a nonexistent file: ffmpeg's demuxer fails
+-- immediately and fatally (unlike a dead RTSP endpoint, which the
+-- @-reconnect@ flags in 'recordingArgs' would retry forever). If
+-- ffmpeg isn't installed at all, the spawn exception is caught inside
+-- 'transition' with the same result. Either way 'Pending' transitions
+-- to 'Backoff' quickly and hermetically.
+deadCam :: CameraConfig
+deadCam =
+  CameraConfig
+    { ccId = CameraId sampleUuid,
+      ccSlug = "dead-cam",
+      ccRtspUrl = "file:///nonexistent-cam",
+      ccTransport = TcpTransport,
+      ccRecordAudio = False
+    }
+
+sampleUuid :: UUID.UUID
+sampleUuid =
+  case UUID.fromText "00000000-0000-0000-0000-000000000099" of
+    Just u -> u
+    Nothing -> error "invalid UUID literal in test fixture"
