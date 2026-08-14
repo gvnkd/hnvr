@@ -31,10 +31,11 @@ where
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (modifyMVar, newMVar)
 import Control.Exception (SomeException, try)
-import Control.Monad (forever, void)
+import Control.Monad (forM_, forever, void)
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.HashMap.Strict as HM
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Int (Int64)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe)
@@ -158,12 +159,14 @@ startMetricsServer store = do
       Label _ -> Nothing
 
 -- | Poll @nvidia-smi@ every 15 s and publish
--- @hnvr_gpu_memory_used_bytes@ (sum across GPUs). Silent when
--- nvidia-smi is absent or fails (CPU-only hosts) — the gauge just
--- stays at 0.
+-- @hnvr_gpu_memory_used_bytes@ (sum across GPUs) plus the process's
+-- own RSS (@hnvr_process_resident_bytes@, from /proc/self/statm) —
+-- the leak-watch metric. Silent when nvidia-smi is absent or fails
+-- (CPU-only hosts) — the gauges just stay at 0.
 startGpuPoller :: Store -> IO ()
 startGpuPoller store = do
   gauge <- createGauge "hnvr_gpu_memory_used_bytes" store
+  rssGauge <- createGauge "hnvr_process_resident_bytes" store
   _ <- forkIO $ forever $ do
     r <-
       try
@@ -177,5 +180,20 @@ startGpuPoller store = do
       Right out ->
         let mib = sum (mapMaybe (readMaybe . LBS.unpack) (LBS.lines out))
          in Gauge.set gauge (round (mib * 1024 * 1024))
+    rss <- readRssBytes
+    forM_ rss (Gauge.set rssGauge)
     threadDelay 15_000_000
   pure ()
+  where
+    -- statm field 2 is resident pages.
+    readRssBytes :: IO (Maybe Int64)
+    readRssBytes = do
+      r <- try (readFile "/proc/self/statm") :: IO (Either SomeException String)
+      pure $ case r of
+        Left _ -> Nothing
+        Right s ->
+          case words s of
+            (_ : pages : _) ->
+              let pagesN = read pages :: Integer
+               in Just (fromIntegral (pagesN * 4096))
+            _ -> Nothing

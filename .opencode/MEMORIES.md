@@ -1421,8 +1421,7 @@ ffprobe notes:
          `cuda12.9-tensorrt-10.14.1.48` breaks on the next nixpkgs
          bump).
 
-    105. **Lazy pure-state threading in a forever-loop = linear heap
-         leak** (Aug 13 2026, the leader OOM) — `Sort.update` is a
+    105. **Lazy pure-state threading in a forever-loop = linear heap         leak** (Aug 13 2026, the leader OOM) — `Sort.update` is a
          pure lazy function; `analyzeFrame` stored its result in the
          analyzer record UNFORCED. Nothing ever forced it in
          production (the leader's TVar sink stores `tracks` lazily),
@@ -1450,8 +1449,26 @@ ffprobe notes:
          alive. And `Heap exhausted` under `-M` does NOT necessarily
          kill a multi-threaded GHC process — the zombie kept serving
          :18001/:9102 with analysis threads dead; later leaders then
-         die on `bind: Address already in use`. Check `lstart` of the
+         die on `bind: Address already in use`.          Check `lstart` of the
          port owner before trusting restart logs.
+
+    106. **Not every RSS climb is a leak — measure first** (Aug 14
+         2026, "leader leaks again" investigation) — the leader showed
+         sustained native growth to ~2.8 GB that CONVERGED, not a
+         leak. Discrimination recipe: (1) `+RTS -M4G` — GHC-heap leaks
+         die "Heap exhausted" in minutes, native/plateau growth sails
+         on; (2) `+RTS -S` — the live-bytes column after each GC
+         (ours: 10–16 MB live ⇒ Haskell heap clean); (3) ORT-only
+         repro via LeakProbe (flat ⇒ native libs clean); (4) bisect
+         envs (analysis off = 850 MB flat ⇒ analysis-path working
+         set). The actual baseline driver: executables carried
+         `-A64m -I0` (copied from a test suite) — 64 MB nursery × 32
+         capabilities ≈ 2 GB of arenas. Now `-A16m` (~500 MB). Final
+         working set at yolov8s-640/TRT/3 cams ≈ 2.3 GB flat over
+         15 min (≈1 GB TRT contexts, rest IHP+RTS). New gauge:
+         `hnvr_process_resident_bytes` (read from /proc/self/statm by
+         the metrics poller every 15 s) — watch the bake on /metrics
+         instead of eyeballing `top`.
 
 ## Sergey's working style
 
