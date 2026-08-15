@@ -10,7 +10,7 @@
 - **Local path**: `/home/pion/work/dev/hnvr`
 - **Remote**: `gitea@192.168.0.254:omg/hnvr.git` (branch `master`)
 
-> **Event video clips (Aug 15 2026 — v0.4.0.0, committed as TBD)**:
+> **Event video clips (Aug 15 2026 — v0.4.0.0, commit 1c2c6d5)**:
 > separated event video store. Rules gain `clip_preroll_sec` /
 > `clip_postroll_sec` / `clip_retention_hours` (NULL = clips off);
 > cameras moved `retention_days` → `retention_hours` (migration 0007,
