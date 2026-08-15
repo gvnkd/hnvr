@@ -1637,6 +1637,16 @@ ffprobe notes:
          gen/ deleted (it does `rm -rf gen` first — rerun after fixing
          to restore).
 
+    110. **Node snapshot request races leader boot** (Aug 15 2026) —
+         a node that boots before the leader's SnapshotResponder is
+         subscribed gets no reply and logs "will rely on assign
+         messages" — but AssignmentCoordinator only publishes ON
+         CHANGE, so the node runs camera-less until something
+         reassigns or the node restarts. No periodic retry exists.
+         Follow-up: node should re-request the snapshot on a timer
+         (or leader should republish assignments on a slow tick).
+         Workaround: restart the node once the leader is up.
+
     110. **Presigned S3 URLs are signed for the endpoint host** (Aug 14
          2026) — archive playlists and event thumbnails leaked
          `http://localhost:9100` to external browsers because presigning
@@ -2171,10 +2181,15 @@ ffprobe notes:
       compare (backyard relay 1280x720, CPU EP): s-640 = 59 dets
       (car max 0.87, truck detected) vs n-320 = 33 (car max 0.71,
       truck misread as car) → backyard is an s-640 camera;
-      floor_2_5 frames had no objects (no signal). **Open**: compare
-      run showed 0 confirmed tracks despite 4 consecutive frames of
-      consistent car detections — check SORT minHits/IoU gating
-      against real box jitter during the bake. Coverage: +56 tests
+      floor_2_5 frames had no objects (no signal). **Resolved**: the
+      "0 confirmed tracks" anomaly was a compare-tool bug (tracker
+      state never threaded between frames — every frame birthed fresh
+      tracks); SORT itself is fine. Fixed run (backyard, 8 frames):
+      n-320 = 6 confirmed tracks, s-640 = 10, and s-640 caught a
+      person on frames 4–6 that n-320 missed entirely. Sergey set the
+      per-camera calls in the DB: backyard + low_ent → yolov8s-640,
+      floor_2_5 → yolov8n-320; verified live via snapshot →
+      resolveModelPath (node log prints the per-camera model). Coverage: +56 tests
       (272 total): CameraSnapshot/Event/Frame, SpoolDrainer,
       Worker.transition, gated AnalyzerRunner loop, storage pure lane.
       Remaining Phase 3: the longer soak run itself + final

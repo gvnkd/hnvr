@@ -98,9 +98,9 @@ run opts = do
   eps <- execProvidersFromEnv
   let cfg = defaultAnalyzerConfig {acConfThreshold = optConf opts}
   hPutStrLn stderr "=== model A pass ==="
-  resA <- withAnalyzer cfg (T.pack (optModelA opts)) eps $ \an0 -> mapM (inferFrame an0) (zip [1 ..] frames)
+  resA <- withAnalyzer cfg (T.pack (optModelA opts)) eps $ \an0 -> threadFrames an0 (zip [1 ..] frames)
   hPutStrLn stderr "=== model B pass ==="
-  resB <- withAnalyzer cfg (T.pack (optModelB opts)) eps $ \an0 -> mapM (inferFrame an0) (zip [1 ..] frames)
+  resB <- withAnalyzer cfg (T.pack (optModelB opts)) eps $ \an0 -> threadFrames an0 (zip [1 ..] frames)
   let rows = zipWith3 mkRow frames resA resB
   mapM_ (printRow opts) rows
   maybe (pure ()) (dumpPngs rows) (optPngDir opts)
@@ -135,10 +135,19 @@ grabFrames opts = do
       f <- atomically (readTBQueue q)
       collect q (n - 1) (f : acc)
 
+-- | Map 'inferFrame' over the frames, threading the analyzer (tracker
+-- state) from frame to frame — without this every frame births fresh
+-- tracks and nothing ever confirms.
+threadFrames :: Analyzer -> [(Int, Frame)] -> IO [(Int, [DetTxt], [Track])]
+threadFrames _ [] = pure []
+threadFrames an ((i, f) : rest) = do
+  (an', row) <- inferFrame an (i, f)
+  (row :) <$> threadFrames an' rest
+
 -- | One frame through preprocess → infer → decode → NMS → unletterbox
 -- → SORT, mirroring 'Hnvr.Cv.Analyzer.analyzeFrame'. Returns the raw
 -- (post-NMS, pre-tracker) detections AND the confirmed tracks.
-inferFrame :: Analyzer -> (Int, Frame) -> IO (Int, [DetTxt], [Track])
+inferFrame :: Analyzer -> (Int, Frame) -> IO (Analyzer, (Int, [DetTxt], [Track]))
 inferFrame an (i, frame) = do
   let cfg = anConfig an
       target = acTargetSize cfg
@@ -151,7 +160,7 @@ inferFrame an (i, frame) = do
       tracker' = Sort.update (anTracker an) inSource
   _ <- evaluate tracker'
   let detsTxt = [(cocoClassName (detClassId d), detScore d) | d <- V.toList inSource]
-  pure (i, detsTxt, Sort.confirmedTracks tracker')
+  pure (an {anTracker = tracker'}, (i, detsTxt, Sort.confirmedTracks tracker'))
 
 printRow :: Opts -> FrameRow -> IO ()
 printRow _ row =
