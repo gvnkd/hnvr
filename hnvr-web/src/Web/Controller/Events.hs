@@ -25,6 +25,7 @@ import Data.Time.Clock (UTCTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Database.PostgreSQL.Simple as PG
+import Database.PostgreSQL.Simple.FromRow (FromRow (..), field)
 import Generated.Types
 import Hnvr.Core.ArchiveBrowser (parseWhen)
 import qualified Hnvr.Storage.S3 as S3
@@ -93,7 +94,11 @@ fetchEventRows mCam mKind mFrom mTo page = do
       PG.query
         conn
         "SELECT e.id, e.ts, e.kind::text, e.class_id, e.track_id, \
-        \       e.confidence, e.thumbnail_key, c.slug, c.id, r.name \
+        \       e.confidence, e.thumbnail_key, c.slug, c.id, r.name, \
+        \       (SELECT ec.id FROM event_clip_events ce \
+        \         JOIN event_clips ec ON ec.id = ce.clip_id \
+        \        WHERE ce.event_id = e.id AND ec.pending_delete_at IS NULL \
+        \        LIMIT 1) \
         \FROM events e \
         \JOIN cameras c ON c.id = e.camera_id \
         \LEFT JOIN rules r ON r.id = e.rule_id \
@@ -116,19 +121,52 @@ fetchEventRows mCam mKind mFrom mTo page = do
         )
   pure (map toRow rows)
   where
-    toRow (eid, ts, kind, classId, trackId, conf, thumb, slug, camUuid, ruleName) =
+    toRow (EventRowQ eid ts kind classId trackId conf thumb slug camUuid ruleName clipId) =
       EventRow
         { erId = eid,
           erTs = ts,
           erKind = kind,
-          erClassId = fromIntegral <$> (classId :: Maybe Int32),
-          erTrackId = fromIntegral <$> (trackId :: Maybe Int32),
-          erConfidence = realToFrac <$> (conf :: Maybe Float),
+          erClassId = fromIntegral <$> classId,
+          erTrackId = fromIntegral <$> trackId,
+          erConfidence = realToFrac <$> conf,
           erThumbnailKey = thumb,
           erCameraSlug = slug,
           erCameraUuid = camUuid,
-          erRuleName = ruleName
+          erRuleName = ruleName,
+          erClipId = clipId
         }
+
+-- | Raw query row for 'fetchEventRows'. 11 fields exceed
+-- postgresql-simple's tuple 'FromRow' instances, so we decode field by
+-- field.
+data EventRowQ
+  = EventRowQ
+      !UUID
+      !UTCTime
+      !Text
+      !(Maybe Int32)
+      !(Maybe Int32)
+      !(Maybe Float)
+      !(Maybe Text)
+      !Text
+      !UUID
+      !(Maybe Text)
+      !(Maybe UUID)
+
+instance FromRow EventRowQ where
+  fromRow =
+    EventRowQ
+      <$> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
 
 defaultDbUrl :: String
 defaultDbUrl = "postgresql:///hnvr?host=/run/postgresql"

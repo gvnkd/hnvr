@@ -119,7 +119,12 @@ data RuleSnapshot = RuleSnapshot
     rsKind :: !Text,
     rsGeometry :: !Value,
     rsClasses :: ![Int],
-    rsCooldownMs :: !Int
+    rsCooldownMs :: !Int,
+    -- | Event-clip config (separated event video store). Clip recording
+    -- is enabled for the rule iff 'rsClipRetentionHours' is 'Just'.
+    rsClipPrerollSec :: !Int,
+    rsClipPostrollSec :: !Int,
+    rsClipRetentionHours :: !(Maybe Int)
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

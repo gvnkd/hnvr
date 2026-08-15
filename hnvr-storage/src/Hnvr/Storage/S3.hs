@@ -226,13 +226,32 @@ presignGetUrlWithConfig cfg =
 -- order. Used by the RetentionSweeper to find segments older than the
 -- cutoff. Caller should chunk large prefixes by date to keep the listing
 -- bounded.
+--
+-- minio-hs's 'listObjects' conduit re-requests pages while the server
+-- reports @IsTruncated@; against our MinIO it loops forever on the same
+-- page (next-token never advances), so 'CC.sinkList' would accumulate
+-- without bound — the 2026-08-15 leader OOM (RSS 13→47 GB). Guard: S3
+-- listings are lexicographically ascending, so the sink stops as soon as
+-- a key fails to strictly increase (a repeated page starts over at a
+-- smaller key).
 listObjectKeys :: ConnectInfo -> Bucket -> Text -> IO [Object]
 listObjectKeys ci bucket prefix = do
-  items <-
+  keys <-
     runS3 ci $
       C.runConduit $
-        listObjects bucket (Just prefix) True .| CC.sinkList
-  pure [oiObject oi | ListItemObject oi <- items]
+        listObjects bucket (Just prefix) True .| sinkIncreasing []
+  pure (reverse keys)
+  where
+    sinkIncreasing acc = do
+      mx <- C.await
+      case mx of
+        Nothing -> pure acc
+        Just (ListItemPrefix _) -> sinkIncreasing acc
+        Just (ListItemObject oi) ->
+          let k = oiObject oi
+           in case acc of
+                (prev : _) | k <= prev -> pure acc
+                _ -> sinkIncreasing (k : acc)
 
 -- | Delete an object. Idempotent (no error if the object doesn't exist).
 deleteObject :: ConnectInfo -> Bucket -> Object -> IO ()

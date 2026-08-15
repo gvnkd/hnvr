@@ -11,6 +11,7 @@
 -- coords (resolution-independent, per Hnvr.Core.Geometry docs).
 module Hnvr.Core.Event
   ( CvEvent (..),
+    ClipReady (..),
   )
 where
 
@@ -39,6 +40,30 @@ data CvEvent = CvEvent
     -- S3 was unreachable at event time.
     ceThumbnailKey :: !(Maybe Text),
     ceHost :: !HostId
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | Published by the clip recorder (node-side) when an event clip has
+-- been fully uploaded to S3. The leader's EventWriter turns it into an
+-- @event_clips@ row and links the events it covers. Field names are
+-- @cr@-prefixed so the envelope can never decode as 'CvEvent' or
+-- 'Hnvr.Core.Segment.SegmentWritten' (EventWriter tries those first).
+data ClipReady = ClipReady
+  { crCamera :: !CameraId,
+    crSlug :: !Text,
+    -- | The rule whose fire OPENED the clip (merged clips may cover
+    -- events from other rules; linkage is by camera + time window).
+    crRuleId :: !(Maybe Text),
+    crStartedAt :: !UTCTime,
+    crDurationSec :: !Int,
+    -- | S3 prefix owning the clip's init.mp4 + fragments
+    -- ('Hnvr.Core.Clip.clipPrefix').
+    crObjectPrefix :: !Text,
+    -- | Retention snapshotted from the firing rule(s) at record time —
+    -- later rule edits must not retro-change existing clips.
+    crRetentionHours :: !Int,
+    crHost :: !HostId
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

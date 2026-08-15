@@ -109,7 +109,8 @@ run slugS transport url opts = do
             ccSlug = slug,
             ccRtspUrl = T.pack url,
             ccTransport = transport,
-            ccRecordAudio = False -- CLI doesn't expose this; M5 audio is wired through the live system
+            ccRecordAudio = False, -- CLI doesn't expose this; M5 audio is wired through the live system
+            ccClipBuffer = Nothing
           }
       cfgBase =
         CaptureConfig

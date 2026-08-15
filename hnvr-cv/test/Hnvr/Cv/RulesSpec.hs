@@ -216,7 +216,10 @@ tests =
           rsKind = "zone_motion",
           rsGeometry = geo,
           rsClasses = [0],
-          rsCooldownMs = 5000
+          rsCooldownMs = 5000,
+          rsClipPrerollSec = 5,
+          rsClipPostrollSec = 5,
+          rsClipRetentionHours = Nothing
         }
     motionGeo :: Maybe Double -> Value
     motionGeo mThr =

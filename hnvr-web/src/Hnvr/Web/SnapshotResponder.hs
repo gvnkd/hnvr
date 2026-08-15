@@ -100,17 +100,20 @@ fetchAssignedCameras host = do
     ruleRows <-
       PG.query_
         conn
-        "SELECT id, camera_id, kind::text, geometry, classes, cooldown_ms FROM rules WHERE enabled = TRUE"
-    let rulesByCam = foldl' (\m r@(_rid, cid, _, _, _, _) -> M.insertWith (++) (cid :: UUID) [mkRuleSnap r] m) M.empty ruleRows
+        "SELECT id, camera_id, kind::text, geometry, classes, cooldown_ms, clip_preroll_sec, clip_postroll_sec, clip_retention_hours FROM rules WHERE enabled = TRUE"
+    let rulesByCam = foldl' (\m r@(_rid, cid, _, _, _, _, _, _, _) -> M.insertWith (++) (cid :: UUID) [mkRuleSnap r] m) M.empty ruleRows
     pure (foldMap (mkSnapshot rulesByCam) rows)
   where
-    mkRuleSnap (rid, _cid, kind, geometry, PGArray classes, cooldown) =
+    mkRuleSnap (rid, _cid, kind, geometry, PGArray classes, cooldown, pre, post, retHours) =
       RuleSnapshot
         { rsId = UUID.toText rid,
           rsKind = kind,
           rsGeometry = geometry,
           rsClasses = map fromIntegral classes,
-          rsCooldownMs = fromIntegral cooldown
+          rsCooldownMs = fromIntegral cooldown,
+          rsClipPrerollSec = fromIntegral pre,
+          rsClipPostrollSec = fromIntegral post,
+          rsClipRetentionHours = fmap fromIntegral retHours
         }
     mkSnapshot rulesByCam (cid, slug, url, transportTxt, recordAudio, subUrl, useSub, subW, subH, fps, modelName) =
       case transportFromText transportTxt of

@@ -44,11 +44,11 @@ sql touchedFieldsList =
             let (g, offset') = valueGroup tf offset
             in (gs ++ [g], offset')
             ) ([], 1) touchedFieldsList
-    in "INSERT INTO rules (id, camera_id, name, kind, geometry, classes, cooldown_ms, enabled, created_at, updated_at) VALUES "
+    in "INSERT INTO rules (id, camera_id, name, kind, geometry, classes, cooldown_ms, clip_preroll_sec, clip_postroll_sec, clip_retention_hours, enabled, created_at, updated_at) VALUES "
         <> Text.intercalate ", " valueGroups
-        <> " RETURNING id, camera_id, name, kind, geometry, classes, cooldown_ms, enabled, created_at, updated_at"
+        <> " RETURNING id, camera_id, name, kind, geometry, classes, cooldown_ms, clip_preroll_sec, clip_postroll_sec, clip_retention_hours, enabled, created_at, updated_at"
   where
-    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, False), (5, True), (6, True), (7, True), (8, True), (9, True)]
+    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, False), (5, True), (6, True), (7, True), (8, True), (9, False), (10, True), (11, True), (12, True)]
     valueGroup tf offset =
         let step (parts, off) (bitIdx, hasDefault) =
                 if hasDefault && not (testBit tf bitIdx)
@@ -69,9 +69,12 @@ singleEncoder touchedFields = mconcat $ catMaybes
     , Just ((.geometry) >$< Encoders.param (Encoders.nonNullable Encoders.jsonb))
     , if testBit touchedFields 5 then Just ((.classes) >$< Encoders.param (Encoders.nonNullable (Encoders.foldableArray (Encoders.nonNullable (fromIntegral >$< Encoders.int4))))) else Nothing
     , if testBit touchedFields 6 then Just ((.cooldownMs) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
-    , if testBit touchedFields 7 then Just ((.enabled) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 8 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
-    , if testBit touchedFields 9 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 7 then Just ((.clipPrerollSec) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 8 then Just ((.clipPostrollSec) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , Just ((.clipRetentionHours) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , if testBit touchedFields 10 then Just ((.enabled) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
+    , if testBit touchedFields 11 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 12 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 decoder :: Decoders.Result [Generated.ActualTypes.Rule]

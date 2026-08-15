@@ -98,7 +98,7 @@ config = do
   -- IHP middleware chain (own warp on HNVR_METRICS_PORT) so the node
   -- binary can share the same code path. Best-effort: a port clash
   -- (e.g. two dev leaders) must not take the leader down.
-  liftIO startMetricsStack
+  liftIO (gated "HNVR_DISABLE_METRICS" startMetricsStack)
 
 -- | Bring up the metrics stack (store + /metrics warp + GPU poller).
 -- Failures are logged, never fatal.
@@ -151,43 +151,44 @@ seedAdminUser = do
 -- MediaMTXConfigSyncer is independent of NATS and runs regardless.
 connectNatsAndStartEventWriter :: (?context :: FrameworkConfig, ?modelContext :: ModelContext) => IO ()
 connectNatsAndStartEventWriter = do
-  startMediaMTXConfigSyncer
-    `E.catch` \(e :: E.SomeException) ->
-      logError ("leader: MediaMTXConfigSyncer start failed: " <> cs (show e))
+  gated "HNVR_DISABLE_MEDIAMTX" startMediaMTXConfigSyncer
   -- Retention sweep also independent of NATS (just PG + S3). Best-effort.
-  startRetentionSweeper
-    `E.catch` \(e :: E.SomeException) ->
-      logError ("leader: RetentionSweeper start failed: " <> cs (show e))
+  gated "HNVR_DISABLE_RETENTION" startRetentionSweeper
   -- Verified-delete sweeper (tombstoned segments → S3 purge → row
   -- DELETE). Same PG+S3-only profile as the retention sweep.
-  startPendingPurgeSweeper
-    `E.catch` \(e :: E.SomeException) ->
-      logError ("leader: PendingPurge sweeper start failed: " <> cs (show e))
+  gated "HNVR_DISABLE_PENDINGPURGE" startPendingPurgeSweeper
   let defaultUri = "nats://nats:nats@localhost:4222"
   uri <- fromMaybe defaultUri <$> Env.lookupEnv "HNVR_NATS_URI"
   let connect' = do
         bus <- Bus.connect Bus.defaultConfig {Bus.busUri = uri}
         writeIORef busRegistry (Just bus)
         logInfo ("leader: connected to NATS: " <> cs (uri :: String))
-        startEventWriter bus ?modelContext
-        _ <- startHealthCache bus
-        startAssignmentCoordinator bus
-        startConfigBroadcaster bus
+        gated "HNVR_DISABLE_EVENTWRITER" (startEventWriter bus ?modelContext)
+        gated "HNVR_DISABLE_HEALTHCACHE" (void (startHealthCache bus))
+        gated "HNVR_DISABLE_COORDINATOR" (startAssignmentCoordinator bus)
+        gated "HNVR_DISABLE_BROADCASTER" (startConfigBroadcaster bus)
         -- Leader-only: respond to node snapshot requests so workers
         -- can bootstrap their initial camera set on boot.
-        startSnapshotResponder bus
-          `E.catch` \(e :: E.SomeException) ->
-            logError ("leader: SnapshotResponder start failed: " <> cs (show e))
+        gated "HNVR_DISABLE_SNAPSHOTRESPONDER" (startSnapshotResponder bus)
         -- Leader also runs the full node role (CaptureSupervisor +
         -- ConfigWatcher + HealthReporter) per @01-architecture.md:21@
         -- — "leader = all of node + leader roles".
         host <- maybe "hnvr-2" T.pack <$> Env.lookupEnv "HNVR_HOST"
-        startNodeRoles bus host
-          `E.catch` \(e :: E.SomeException) ->
-            logError ("leader: node-role start failed: " <> cs (show e))
-        startHealthReporter bus host
+        gated "HNVR_DISABLE_NODEROLES" (startNodeRoles bus host)
+        gated "HNVR_DISABLE_HEALTHREPORTER" (startHealthReporter bus host)
   connect' `E.catch` \(e :: E.SomeException) ->
     logError ("leader: NATS connect failed (continuing without bus): " <> cs (show e))
+
+-- | Leak-bisect kill switch: run the action unless the named env var
+-- is set to "1". Logs the skip so a forgotten toggle is visible.
+gated :: String -> IO () -> IO ()
+gated var act = do
+  off <- (== Just "1") <$> Env.lookupEnv var
+  if off
+    then logInfo ("leader: " <> cs var <> "=1 — component disabled")
+    else
+      act `E.catch` \(e :: E.SomeException) ->
+        logError ("leader: component start failed (" <> cs var <> "): " <> cs (show e))
 
 -- | Wire the node-side roles on the leader: build CaptureConfig from
 -- env, start the CaptureSupervisor, subscribe ConfigWatcher, and

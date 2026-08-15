@@ -50,13 +50,16 @@ sql touchedFields returning =
             , Just "geometry"
             , if testBit touchedFields 5 then Just "classes" else Nothing
             , if testBit touchedFields 6 then Just "cooldown_ms" else Nothing
-            , if testBit touchedFields 7 then Just "enabled" else Nothing
-            , if testBit touchedFields 8 then Just "created_at" else Nothing
-            , if testBit touchedFields 9 then Just "updated_at" else Nothing
+            , if testBit touchedFields 7 then Just "clip_preroll_sec" else Nothing
+            , if testBit touchedFields 8 then Just "clip_postroll_sec" else Nothing
+            , Just "clip_retention_hours"
+            , if testBit touchedFields 10 then Just "enabled" else Nothing
+            , if testBit touchedFields 11 then Just "created_at" else Nothing
+            , if testBit touchedFields 12 then Just "updated_at" else Nothing
             ]
         columns = Text.intercalate ", " entries
         placeholders = Text.intercalate ", " ["$" <> Text.pack (show i) | i <- [1 .. length entries]]
-        returningClause = if returning then " RETURNING id, camera_id, name, kind, geometry, classes, cooldown_ms, enabled, created_at, updated_at" else ""
+        returningClause = if returning then " RETURNING id, camera_id, name, kind, geometry, classes, cooldown_ms, clip_preroll_sec, clip_postroll_sec, clip_retention_hours, enabled, created_at, updated_at" else ""
     in if null entries
         then "INSERT INTO rules DEFAULT VALUES" <> returningClause
         else "INSERT INTO rules (" <> columns <> ") VALUES (" <> placeholders <> ")" <> returningClause
@@ -71,9 +74,12 @@ encoder touchedFields = mconcat $ catMaybes
     , Just ((.geometry) >$< Encoders.param (Encoders.nonNullable Encoders.jsonb))
     , if testBit touchedFields 5 then Just ((.classes) >$< Encoders.param (Encoders.nonNullable (Encoders.foldableArray (Encoders.nonNullable (fromIntegral >$< Encoders.int4))))) else Nothing
     , if testBit touchedFields 6 then Just ((.cooldownMs) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
-    , if testBit touchedFields 7 then Just ((.enabled) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 8 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
-    , if testBit touchedFields 9 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 7 then Just ((.clipPrerollSec) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 8 then Just ((.clipPostrollSec) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , Just ((.clipRetentionHours) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , if testBit touchedFields 10 then Just ((.enabled) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
+    , if testBit touchedFields 11 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 12 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 

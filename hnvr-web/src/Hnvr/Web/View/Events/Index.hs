@@ -35,7 +35,10 @@ data EventRow = EventRow
     erThumbnailKey :: Maybe Text,
     erCameraSlug :: Text,
     erCameraUuid :: UUID,
-    erRuleName :: Maybe Text
+    erRuleName :: Maybe Text,
+    -- | Live event clip covering this event, if one exists
+    -- (separated event video store).
+    erClipId :: Maybe UUID
   }
 
 data IndexView = IndexView
@@ -158,13 +161,30 @@ instance View IndexView where
           <td>{confText}</td>
           <td class="mono">{trackText}</td>
           <td>{fromMaybe "—" ev.erRuleName}</td>
-          <td><a class="btn btn-ghost btn-sm" href={playUrl ev}>play</a></td>
+          <td>{clipCell ev}</td>
         </tr>
       |]
         where
           className = maybe "—" cocoClassName ev.erClassId
           confText = maybe "—" (\c -> tshow (round (c * 100) :: Int) <> "%") ev.erConfidence
           trackText = maybe "—" tshow ev.erTrackId
+
+      -- Clip play button when the event is covered by an event clip,
+      -- plus the classic archive deep-link (30 s window).
+      clipCell ev =
+        [hsx|
+          <span class="row-actions">
+            {clipBtn}
+            <a class="btn btn-ghost btn-sm" href={playUrl ev}>archive</a>
+          </span>
+        |]
+        where
+          clipBtn = case ev.erClipId of
+            Just cid ->
+              [hsx|<a class="btn btn-primary btn-sm" href={clipUrl}>▶ clip</a>|]
+              where
+                clipUrl = "/PlayerEventClip?clipId=" <> tshow cid
+            Nothing -> [hsx||]
 
       thumb ev mThumbUrl = case mThumbUrl of
         Just url ->

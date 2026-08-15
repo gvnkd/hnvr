@@ -7,6 +7,14 @@ packages:
   ./hnvr-ptz
   ./hnvr-web
   ./vendored/nats-queue
+  ./vendored/minio-hs
+
+-- NOTE: minio-hs is vendored under ./vendored/minio-hs with the
+-- one-token ListObjectsV2 fix: it sent `continuation_token` (underscore)
+-- where S3 requires `continuation-token` (hyphen); MinIO ignored the
+-- param, so paginated listings looped page 1 forever (the 2026-08-15
+-- leader OOM, RSS 13→47 GB). Unmaintained upstream (bug present on
+-- master as of 2026-08). flake.nix overrides via callCabal2nix.
 
 -- NOTE: nats-queue is vendored under ./vendored/nats-queue with the
 -- single-line sClose → close fix applied (network >= 3.x rename). Keeping

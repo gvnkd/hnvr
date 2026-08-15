@@ -57,10 +57,13 @@ instance FromRow Generated.ActualTypes.Rule where
         geometry <- field
         classes <- field
         cooldownMs <- field
+        clipPrerollSec <- field
+        clipPostrollSec <- field
+        clipRetentionHours <- field
         enabled <- field
         createdAt <- field
         updatedAt <- field
-        let theRecord = Generated.ActualTypes.Rule id cameraId name kind geometry classes cooldownMs enabled createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
+        let theRecord = Generated.ActualTypes.Rule id cameraId name kind geometry classes cooldownMs clipPrerollSec clipPostrollSec clipRetentionHours enabled createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
         pure theRecord
 
 instance FromRowHasql Generated.ActualTypes.Rule where
@@ -112,7 +115,7 @@ updateRecordDiscardResultRule model = do
 
 instance Record Generated.ActualTypes.Rule where
     {-# INLINE newRecord #-}
-    newRecord = Generated.ActualTypes.Rule def def def def def def def True def def  def
+    newRecord = Generated.ActualTypes.Rule def def def def def def def def def def True def def  def
 
 
 instance QueryBuilder.FilterPrimaryKey "rules" where
@@ -141,15 +144,24 @@ instance SetField "classes" (Rule') [Int] where
 instance SetField "cooldownMs" (Rule') Int where
     {-# INLINE setField #-}
     setField newValue record = record { cooldownMs = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 64 } }
+instance SetField "clipPrerollSec" (Rule') Int where
+    {-# INLINE setField #-}
+    setField newValue record = record { clipPrerollSec = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 128 } }
+instance SetField "clipPostrollSec" (Rule') Int where
+    {-# INLINE setField #-}
+    setField newValue record = record { clipPostrollSec = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 256 } }
+instance SetField "clipRetentionHours" (Rule') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { clipRetentionHours = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 512 } }
 instance SetField "enabled" (Rule') Bool where
     {-# INLINE setField #-}
-    setField newValue record = record { enabled = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 128 } }
+    setField newValue record = record { enabled = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1024 } }
 instance SetField "createdAt" (Rule') UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 256 } }
+    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2048 } }
 instance SetField "updatedAt" (Rule') UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 512 } }
+    setField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4096 } }
 instance SetField "meta" (Rule') MetaBag where
     {-# INLINE setField #-}
     setField newValue record = record { meta = newValue }
@@ -174,15 +186,24 @@ instance UpdateField "classes" (Rule') (Rule') [Int] [Int] where
 instance UpdateField "cooldownMs" (Rule') (Rule') Int Int where
     {-# INLINE updateField #-}
     updateField newValue record = record { cooldownMs = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 64 } }
+instance UpdateField "clipPrerollSec" (Rule') (Rule') Int Int where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { clipPrerollSec = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 128 } }
+instance UpdateField "clipPostrollSec" (Rule') (Rule') Int Int where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { clipPostrollSec = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 256 } }
+instance UpdateField "clipRetentionHours" (Rule') (Rule') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { clipRetentionHours = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 512 } }
 instance UpdateField "enabled" (Rule') (Rule') Bool Bool where
     {-# INLINE updateField #-}
-    updateField newValue record = record { enabled = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 128 } }
+    updateField newValue record = record { enabled = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1024 } }
 instance UpdateField "createdAt" (Rule') (Rule') UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 256 } }
+    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2048 } }
 instance UpdateField "updatedAt" (Rule') (Rule') UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 512 } }
+    updateField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4096 } }
 instance UpdateField "meta" (Rule') (Rule') MetaBag MetaBag where
     {-# INLINE updateField #-}
     updateField newValue record = record { meta = newValue }
@@ -194,8 +215,11 @@ instance FieldBit "kind" (Rule') where fieldBit = 8
 instance FieldBit "geometry" (Rule') where fieldBit = 16
 instance FieldBit "classes" (Rule') where fieldBit = 32
 instance FieldBit "cooldownMs" (Rule') where fieldBit = 64
-instance FieldBit "enabled" (Rule') where fieldBit = 128
-instance FieldBit "createdAt" (Rule') where fieldBit = 256
-instance FieldBit "updatedAt" (Rule') where fieldBit = 512
+instance FieldBit "clipPrerollSec" (Rule') where fieldBit = 128
+instance FieldBit "clipPostrollSec" (Rule') where fieldBit = 256
+instance FieldBit "clipRetentionHours" (Rule') where fieldBit = 512
+instance FieldBit "enabled" (Rule') where fieldBit = 1024
+instance FieldBit "createdAt" (Rule') where fieldBit = 2048
+instance FieldBit "updatedAt" (Rule') where fieldBit = 4096
 
 

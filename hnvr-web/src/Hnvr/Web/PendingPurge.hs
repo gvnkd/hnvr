@@ -177,10 +177,6 @@ purgeBatch :: S3.S3Config -> PG.Connection -> PendingBatch -> IO ()
 purgeBatch s3cfg conn PendingBatch {..} = do
   let ci = S3.connectInfo s3cfg
       bucket = S3.s3cBucket s3cfg
-  -- Protect set: object keys of LIVE (non-tombstoned) rows overlapping
-  -- the window. Two quick successive deletes on the same camera can
-  -- merge windows via the min/max derivation; the protect set keeps
-  -- the orphan pass from touching the other recording's objects.
   protectRows <-
     PG.query
       conn

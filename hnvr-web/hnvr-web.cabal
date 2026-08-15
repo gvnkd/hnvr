@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:          hnvr-web
-version:       0.3.0.0
+version:       0.4.0.0
 synopsis:
   HNVR leader (IHP web + event writer + MediaMTX sync) and node binaries
 
@@ -13,6 +13,8 @@ library
     Generated.ActualTypes.AuditLog
     Generated.ActualTypes.Camera
     Generated.ActualTypes.Event
+    Generated.ActualTypes.EventClip
+    Generated.ActualTypes.EventClipEvent
     Generated.ActualTypes.Host
     Generated.ActualTypes.PrimaryKeys
     Generated.ActualTypes.Rule
@@ -24,6 +26,10 @@ library
     Generated.CameraInclude
     Generated.Enums
     Generated.Event
+    Generated.EventClip
+    Generated.EventClipEvent
+    Generated.EventClipEventInclude
+    Generated.EventClipInclude
     Generated.EventInclude
     Generated.Host
     Generated.HostInclude
@@ -35,10 +41,14 @@ library
     Generated.Statements.CreateAuditLog
     Generated.Statements.CreateCamera
     Generated.Statements.CreateEvent
+    Generated.Statements.CreateEventClip
+    Generated.Statements.CreateEventClipEvent
     Generated.Statements.CreateHost
     Generated.Statements.CreateManyAuditLog
     Generated.Statements.CreateManyCamera
     Generated.Statements.CreateManyEvent
+    Generated.Statements.CreateManyEventClip
+    Generated.Statements.CreateManyEventClipEvent
     Generated.Statements.CreateManyHost
     Generated.Statements.CreateManyRule
     Generated.Statements.CreateManySegment
@@ -49,6 +59,8 @@ library
     Generated.Statements.FetchAuditLog
     Generated.Statements.FetchCamera
     Generated.Statements.FetchEvent
+    Generated.Statements.FetchEventClip
+    Generated.Statements.FetchEventClipEvent
     Generated.Statements.FetchHost
     Generated.Statements.FetchRule
     Generated.Statements.FetchSegment
@@ -56,6 +68,8 @@ library
     Generated.Statements.RowDecoderAuditLog
     Generated.Statements.RowDecoderCamera
     Generated.Statements.RowDecoderEvent
+    Generated.Statements.RowDecoderEventClip
+    Generated.Statements.RowDecoderEventClipEvent
     Generated.Statements.RowDecoderHost
     Generated.Statements.RowDecoderRule
     Generated.Statements.RowDecoderSegment
@@ -63,6 +77,8 @@ library
     Generated.Statements.UpdateAuditLog
     Generated.Statements.UpdateCamera
     Generated.Statements.UpdateEvent
+    Generated.Statements.UpdateEventClip
+    Generated.Statements.UpdateEventClipEvent
     Generated.Statements.UpdateHost
     Generated.Statements.UpdateRule
     Generated.Statements.UpdateSegment
@@ -71,6 +87,7 @@ library
     Generated.User
     Generated.UserInclude
     Hnvr.Node.CaptureSupervisor
+    Hnvr.Node.ClipRecorder
     Hnvr.Node.ConfigWatcher
     Hnvr.Node.HealthReporter
     Hnvr.Web
@@ -100,6 +117,7 @@ library
     Hnvr.Web.View.Cameras.Show
     Hnvr.Web.View.Dashboard.Index
     Hnvr.Web.View.Debug.Show
+    Hnvr.Web.View.EventClips.Player
     Hnvr.Web.View.Events.Feed
     Hnvr.Web.View.Events.Index
     Hnvr.Web.View.Hosts.Index
@@ -116,6 +134,7 @@ library
     Web.Controller.Cameras.Probe
     Web.Controller.Dashboard
     Web.Controller.Debug
+    Web.Controller.EventClips
     Web.Controller.Events
     Web.Controller.Hosts
     Web.Controller.Live

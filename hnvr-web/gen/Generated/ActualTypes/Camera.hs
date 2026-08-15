@@ -43,7 +43,7 @@ import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
 import Generated.ActualTypes.PrimaryKeys
-data Camera' = Camera {id :: (Id' "cameras"), slug :: Text, name :: Text, rtspUrl :: Text, rtspTemplate :: (Maybe Text), rtspTransport :: Text, host :: (Maybe Text), port :: Int, username :: (Maybe Text), passwordEnc :: (Maybe (Binary ByteString)), passwordNonce :: (Maybe (Binary ByteString)), codec :: CodecKind, rtspSubUrl :: (Maybe Text), rtspSubTemplate :: (Maybe Text), useSubstreamForAnalysis :: Bool, substreamCodec :: CodecKind, substreamWidth :: (Maybe Int), substreamHeight :: (Maybe Int), recordAudio :: Bool, analysisFps :: Int, modelName :: Text, enabled :: Bool, retentionDays :: Int, assignedHost :: (Maybe Text), manualAssign :: Bool, createdAt :: UTCTime, updatedAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+data Camera' = Camera {id :: (Id' "cameras"), slug :: Text, name :: Text, rtspUrl :: Text, rtspTemplate :: (Maybe Text), rtspTransport :: Text, host :: (Maybe Text), port :: Int, username :: (Maybe Text), passwordEnc :: (Maybe (Binary ByteString)), passwordNonce :: (Maybe (Binary ByteString)), codec :: CodecKind, rtspSubUrl :: (Maybe Text), rtspSubTemplate :: (Maybe Text), useSubstreamForAnalysis :: Bool, substreamCodec :: CodecKind, substreamWidth :: (Maybe Int), substreamHeight :: (Maybe Int), recordAudio :: Bool, analysisFps :: Int, modelName :: Text, enabled :: Bool, retentionHours :: Int, assignedHost :: (Maybe Text), manualAssign :: Bool, createdAt :: UTCTime, updatedAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
 
 type Camera = Camera'
 
@@ -53,7 +53,7 @@ type instance GetModelByTableName "cameras" = Camera
 
 instance IHP.ModelSupport.Table (Camera') where
     tableName = "cameras"
-    columnNames = ["id","slug","name","rtsp_url","rtsp_template","rtsp_transport","host","port","username","password_enc","password_nonce","codec","rtsp_sub_url","rtsp_sub_template","use_substream_for_analysis","substream_codec","substream_width","substream_height","record_audio","analysis_fps","model_name","enabled","retention_days","assigned_host","manual_assign","created_at","updated_at"]
+    columnNames = ["id","slug","name","rtsp_url","rtsp_template","rtsp_transport","host","port","username","password_enc","password_nonce","codec","rtsp_sub_url","rtsp_sub_template","use_substream_for_analysis","substream_codec","substream_width","substream_height","record_audio","analysis_fps","model_name","enabled","retention_hours","assigned_host","manual_assign","created_at","updated_at"]
     primaryKeyColumnNames = ["id"]
 
 

@@ -114,8 +114,17 @@ buildRuleFromParams rule =
     |> set #geometry geometryValue
     |> set #classes (parseClasses (param @Text "classes"))
     |> set #cooldownMs (param @Int "cooldown_ms")
+    |> set #clipPrerollSec (param @Int "clip_preroll_sec")
+    |> set #clipPostrollSec (param @Int "clip_postroll_sec")
+    |> set #clipRetentionHours clipRetention
     |> set #enabled (paramOrFalse "enabled")
   where
+    -- The checkbox gates clip recording; the hours input only matters
+    -- when it's on. Unchecked → NULL → the node's ClipRecorder ignores
+    -- this rule entirely.
+    clipRetention
+      | paramOrFalse "clip_enabled" = Just (param @Int "clip_retention_hours")
+      | otherwise = Nothing
     kindEnum = case param @Text "kind" of
       "zone_enter" -> RuleKindZoneEnter
       "zone_exit" -> RuleKindZoneExit
@@ -156,7 +165,10 @@ toSnapshot rule =
       rsKind = kindText rule.kind,
       rsGeometry = rule.geometry,
       rsClasses = rule.classes,
-      rsCooldownMs = rule.cooldownMs
+      rsCooldownMs = rule.cooldownMs,
+      rsClipPrerollSec = rule.clipPrerollSec,
+      rsClipPostrollSec = rule.clipPostrollSec,
+      rsClipRetentionHours = rule.clipRetentionHours
     }
   where
     ruleIdText r = case r |> get #id of Id u -> UUID.toText u

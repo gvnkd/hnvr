@@ -1,11 +1,12 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Leader-side RetentionSweeper.
 --
--- Runs hourly (default) to enforce the per-camera @retention_days@
+-- Runs hourly (default) to enforce the per-camera @retention_hours@
 -- cutoff. Uses the @segments@ table as the source of truth: queries
--- rows older than @NOW() - retention_days * INTERVAL '1 day'@, deletes
+-- rows older than @NOW() - retention_hours * INTERVAL '1 hour'@, deletes
 -- their @object_key@s from S3, then deletes the rows.
 --
 -- Trust-the-DB approach (vs S3-list-and-filter): simpler, no paginated
@@ -22,13 +23,15 @@
 module Hnvr.Web.RetentionSweeper
   ( startRetentionSweeper,
     sweepOnce,
+    sweepEventClips,
+    purgeClipObjects,
   )
 where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException, bracket, catch)
-import Control.Monad (forM_, forever, unless, void, when)
+import Control.Exception (SomeException, bracket, catch, try)
+import Control.Monad (forM, forM_, forever, unless, void, when)
 import qualified Data.ByteString.Char8 as BSC
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -77,22 +80,67 @@ sweepOnce = do
         cams <-
           PG.query_
             conn
-            "SELECT id, slug, retention_days FROM cameras WHERE enabled ORDER BY slug"
+            "SELECT id, slug, retention_hours FROM cameras WHERE enabled ORDER BY slug"
         unless (null cams) $
           logInfo ("RetentionSweeper: sweeping " <> T.pack (show (length cams)) <> " camera(s)")
         forM_ cams (sweepCamera s3cfg conn)
+        sweepEventClips s3cfg conn
+
+-- | Sweep expired event clips (separated event video store) and resume
+-- stale UI-tombstoned clips (90 s grace, same pattern as PendingPurge).
+-- Each row carries its own snapshotted @retention_hours@; expiry is
+-- @started_at < NOW() - retention_hours * INTERVAL '1 hour'@. Deletion
+-- is prefix-scoped and exact (a clip owns every object under its
+-- prefix — 'Hnvr.Core.Clip'), so unlike segments there is no orphan
+-- ambiguity: list the prefix, delete what is listed, delete the row.
+sweepEventClips :: S3.S3Config -> PG.Connection -> IO ()
+sweepEventClips s3cfg conn = do
+  clips <-
+    PG.query_
+      conn
+      "SELECT id, object_prefix FROM event_clips \
+      \ WHERE (pending_delete_at IS NULL \
+      \        AND started_at < NOW() - (retention_hours * INTERVAL '1 hour')) \
+      \    OR (pending_delete_at IS NOT NULL \
+      \        AND pending_delete_at < NOW() - INTERVAL '90 seconds')"
+  forM_ clips $ \(clipId, prefix) -> do
+    failures <- purgeClipObjects s3cfg prefix
+    if failures > 0
+      then logWarn ("RetentionSweeper: " <> prefix <> " had failed deletes; row kept for next pass")
+      else do
+        n <- PG.execute conn "DELETE FROM event_clips WHERE id = ?" (Only (clipId :: UUID))
+        when (n > 0) $
+          logInfo ("RetentionSweeper: expired event clip " <> prefix <> " purged")
+
+-- | Delete every S3 object under a clip prefix (best-effort per
+-- object). Returns the number of FAILED deletes — callers must keep
+-- the DB row when non-zero so the next pass converges. Exported for
+-- the /Events purge action.
+purgeClipObjects :: S3.S3Config -> Text -> IO Int
+purgeClipObjects s3cfg prefix = do
+  let ci = S3.connectInfo s3cfg
+      bucket = S3.s3cBucket s3cfg
+  objs <- S3.listObjectKeys ci bucket prefix
+  fails <- forM objs $ \key -> do
+    r <- try (S3.deleteObject ci bucket key)
+    case r of
+      Right () -> pure (0 :: Int)
+      Left (e :: SomeException) -> do
+        logWarn ("RetentionSweeper: clip object delete failed for " <> key <> ": " <> T.pack (show e))
+        pure 1
+  pure (sum fails)
 
 -- | Sweep one camera. Both queries use the same cutoff expression
--- (@NOW() - retention_days * INTERVAL '1 day'@) so the S3 keys
+-- (@NOW() - retention_hours * INTERVAL '1 hour'@) so the S3 keys
 -- returned and the rows deleted are guaranteed to match — even if
 -- time advances mid-call (PG evaluates NOW() per query but the
--- difference is sub-second and the cutoff is days in the past).
+-- difference is sub-second and the cutoff is hours in the past).
 sweepCamera ::
   S3.S3Config ->
   PG.Connection ->
   (UUID, Text, Int) ->
   IO ()
-sweepCamera s3cfg conn (cid, slug, retentionDays) = do
+sweepCamera s3cfg conn (cid, slug, retentionHours) = do
   let ci = S3.connectInfo s3cfg
       bucket = S3.s3cBucket s3cfg
   -- 1. Collect object_keys older than cutoff. Tombstoned rows
@@ -103,9 +151,9 @@ sweepCamera s3cfg conn (cid, slug, retentionDays) = do
       conn
       "SELECT object_key FROM segments \
       \ WHERE camera_id = ? \
-      \   AND end_ts < NOW() - (? * INTERVAL '1 day') \
+      \   AND end_ts < NOW() - (? * INTERVAL '1 hour') \
       \   AND pending_delete_at IS NULL"
-      (cid, retentionDays)
+      (cid, retentionHours)
   -- 2. Delete each from S3 (best-effort — log per-key failures but
   -- don't abort the sweep; the next pass retries).
   forM_ keys $ \(Only key) ->
@@ -123,9 +171,9 @@ sweepCamera s3cfg conn (cid, slug, retentionDays) = do
       conn
       "DELETE FROM segments \
       \ WHERE camera_id = ? \
-      \   AND end_ts < NOW() - (? * INTERVAL '1 day') \
+      \   AND end_ts < NOW() - (? * INTERVAL '1 hour') \
       \   AND pending_delete_at IS NULL"
-      (cid, retentionDays)
+      (cid, retentionHours)
   when (n > 0) $
     logInfo
       ( "RetentionSweeper: "
@@ -135,6 +183,6 @@ sweepCamera s3cfg conn (cid, slug, retentionDays) = do
           <> " segment(s) + "
           <> T.pack (show (length keys))
           <> " S3 object(s) (retention="
-          <> T.pack (show retentionDays)
-          <> "d)"
+          <> T.pack (show retentionHours)
+          <> "h)"
       )

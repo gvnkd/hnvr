@@ -9,6 +9,39 @@
 - **Owner**: Sergey (`omgbebebe@gmail.com`)
 - **Local path**: `/home/pion/work/dev/hnvr`
 - **Remote**: `gitea@192.168.0.254:omg/hnvr.git` (branch `master`)
+
+> **Event video clips (Aug 15 2026 — v0.4.0.0, committed as TBD)**:
+> separated event video store. Rules gain `clip_preroll_sec` /
+> `clip_postroll_sec` / `clip_retention_hours` (NULL = clips off);
+> cameras moved `retention_days` → `retention_hours` (migration 0007,
+> backfilled ×24). Node-side: per-camera `Hnvr.Capture.RingBuffer`
+> (pure, time-bounded, cabal-tested) fed by `Worker.handleFragment`
+> via new `CameraConfig.ccClipBuffer` (CameraConfig lost its Eq/Show
+> deriving — TVar); `Hnvr.Node.ClipRecorder` opens a clip on rule fire
+> (snapshot buffer window `[ts-pre, ts]`), EXTENDS on subsequent fires
+> (one clip per camera, deadline = last ts + postroll, retention =
+> max), 1 s ticker closes + uploads `init.mp4` + fragments to
+> `<slug>/clips/<YYYY-MM-DD/HH-MM-SS.mmm>/` and publishes `ClipReady`
+> (cr*-prefixed fields — can't decode as CvEvent/SegmentWritten) on
+> hnvr.events. EventWriter inserts `event_clips` (idempotent on
+> object_prefix) + links `event_clip_events` by camera+window.
+> RetentionSweeper now hours-based (`INTERVAL '1 hour'`) + sweeps
+> event_clips (prefix-scoped exact delete, incl. stale tombstones 90 s
+> grace). Playback: `/PlayerEventClip?clipId=` +
+> `/PlaylistEventClip?playlistClipId=` (prefix LIST + presign,
+> durations from key-embedded timestamps via
+> `Hnvr.Core.Clip.playlistDurations`), `PurgeEventClipAction` (POST,
+> admin, tombstone + async purge). /Events rows gain a "▶ clip"
+> button (scalar-subquery clip_id in fetchEventRows — 11 fields
+> exceeds pg-simple's 10-tuple FromRow, so a hand-written FromRow).
+> Rules form gained clip fields (checkbox gates retention → NULL).
+> Camera forms gained retention_hours input. Verified live: backyard
+> zone_motion event → 15-fragment playable clip (ffprobe OK), playlist
+> serves presigned public-endpoint URLs, purge round-trip clean.
+> Playwright: 28 passed + 2 conditional skips (archive-browser
+> page-param test now skips when the controller clamps to page 1 —
+> pre-existing data-dependence, not a clip regression).
+
 - **Current branch state**: Phase 0 + 1 + 2 done (code; live VM tests
   pending). Phase 3 slices 1–12 done (CV pipeline + EKG + CUDA + TRT
   with engine cache + yolov8s-640 resolution bump + the lazy-SORT
@@ -1656,6 +1689,46 @@ ffprobe notes:
          (never `./result` — pitfall #83's overwrite trap), and
          `pgrep -af 'hnvr-lead[e]r'` must show exactly one process
          before trusting what the browser shows.
+
+116. **minio-hs `continuation_token` typo = infinite listing loop**
+         (Aug 15 2026, the 13→47 GB leader OOM) — see the dedicated
+         block at the top of this file. Core lessons: (1) a "memory
+         leak" with GHC live-bytes flat but RSS linear is foreign/
+         pinned accumulation — but here even live-bytes doubled each
+         second because sinkList's accumulation IS heap; `-M4G -S` +
+         env kill-switch bisect found PendingPurge in six 100-s runs.
+         (2) `listObjectKeys` now has a strictly-increasing-key sink
+         guard. (3) Never trust `nix build … | tail; echo $?` — pipe
+         exit codes; verify freshness via `strings binary | grep
+         marker`.
+
+> **minio-hs pagination OOM (Aug 15 2026, evening — the 13→47 GB
+> leak)**: minio-hs 1.7.0 `listObjects'` sends `continuation_token`
+> (underscore) where S3 ListObjectsV2 requires `continuation-token`
+> (hyphen). MinIO ignores it → every paginated listing re-fetches
+> page 1 forever → `CC.sinkList` accumulates unboundedly (~30 MB/s,
+> heap "live" doubling each second until `-M4G` exhaustion). ANY
+> prefix with >1000 objects triggers it; yesterday's PendingPurge
+> verification passed only because its windows listed <1 page. Fix:
+> **vendored `vendored/minio-hs`** (in cabal.project `packages` +
+> flake overlay via callCabal2nix) with the one-token patch PLUS the
+> crypton-connection patches nixpkgs applies (commits 786cf188 +
+> e2169892 — otherwise it needs `connection-0.3.1`, source-incompatible
+> with tls 2.x). Plus a belt-and-braces guard in
+> `Hnvr.Storage.S3.listObjectKeys`: the sink stops when keys stop
+> strictly increasing (a repeated page restarts at a smaller key).
+> Verified: listing floor_2_5's 7150-object day-prefix terminates
+> correctly; the two stuck tombstone batches (91+288 rows) converged;
+> leader flat ~2.2 GB RSS under full load. Leader also gained env kill
+> switches for every background component (`HNVR_DISABLE_NODEROLES`,
+> `_HEALTHREPORTER`, `_SNAPSHOTRESPONDER`, `_EVENTWRITER`,
+> `_HEALTHCACHE`, `_COORDINATOR`, `_BROADCASTER`, `_MEDIAMTX`,
+> `_RETENTION`, `_PENDINGPURGE`, `_METRICS`) in Hnvr.Web.Config —
+> `gated` helper; used for the binary-search bisect (`-M4G -S`,
+> 100 s runs: exhaust = leaking). **Bisect lesson: `cmd | tail -1;
+> echo exit=$?` measures tail's exit code, not nix's — a stale
+> `./result-web` cost three probe rounds; check `strings` for a fresh
+> marker string instead.**
 
 ## Sergey's working style
 

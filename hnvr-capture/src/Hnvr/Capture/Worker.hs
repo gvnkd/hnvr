@@ -47,8 +47,9 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar')
 import Control.Exception (SomeAsyncException (..), SomeException, catch, fromException, throwIO)
-import Control.Monad (foldM, when)
+import Control.Monad (foldM, unless, when)
 import Crypto.Hash (Digest, SHA256 (..), hash)
 import qualified Data.ByteArray as BA (convert)
 import Data.ByteString (ByteString)
@@ -60,6 +61,8 @@ import qualified Data.Text as T
 import Data.Time.Clock (UTCTime, addUTCTime, getCurrentTime)
 import Hnvr.Capture.Ffmpeg (RecordingConfig (..), Transport (..), audioArgs, recordingArgs)
 import Hnvr.Capture.Fmp4 (Fmp4State, Fragment (..), feed, finish, initial)
+import Hnvr.Capture.RingBuffer (RingBuffer)
+import qualified Hnvr.Capture.RingBuffer as RB
 import Hnvr.Core.Id (CameraId, HostId, Sha256 (..))
 import qualified Hnvr.Core.Logging as Log
 import Hnvr.Core.Metrics (Metrics)
@@ -96,9 +99,13 @@ data CameraConfig = CameraConfig
     -- | When True, the worker spawns a second ffmpeg (audioArgs) in
     -- parallel to capture muxed audio as .m4a fragments. Per
     -- @03-capture-and-storage.md@ §3. Default False.
-    ccRecordAudio :: !Bool
+    ccRecordAudio :: !Bool,
+    -- | Rolling fragment buffer feeding the event-clip recorder
+    -- ('Hnvr.Capture.RingBuffer'). 'Nothing' when no clip-enabled rule
+    -- exists for the camera — zero overhead in that case. Shared (STM)
+    -- between this worker (writer) and the clip recorder (reader).
+    ccClipBuffer :: !(Maybe (TVar RingBuffer))
   }
-  deriving stock (Eq, Show)
 
 -- | Process-wide config shared by all workers on a host. @Maybe@ fields
 -- allow running in degraded modes (e.g. S3 down → spool only; NATS down →
@@ -298,10 +305,14 @@ handleFragment cfg cam isAudio pending frag =
     InitFragment bs -> do
       let initName = if isAudio then "init.m4a" else "init.mp4"
           key = ccSlug cam <> "/" <> initName
+      for_ (ccClipBuffer cam) $ \buf ->
+        unless isAudio $ atomically (modifyTVar' buf (RB.setInit bs))
       storeOrUpload cfg cam key bs "init"
       pure pending
     MediaFragment _tfdt bs -> do
       ts <- getCurrentTime
+      for_ (ccClipBuffer cam) $ \buf ->
+        unless isAudio $ atomically (modifyTVar' buf (RB.push ts bs))
       let sha = sha256Bytes bs
           ext = if isAudio then "m4a" else "mp4"
           key = formatSegmentObjectKeyMsExt (ccSlug cam) ts ext

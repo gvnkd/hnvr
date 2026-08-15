@@ -157,7 +157,8 @@ deadCam =
       ccSlug = "dead-cam",
       ccRtspUrl = "file:///nonexistent-cam",
       ccTransport = TcpTransport,
-      ccRecordAudio = False
+      ccRecordAudio = False,
+      ccClipBuffer = Nothing
     }
 
 sampleUuid :: UUID.UUID

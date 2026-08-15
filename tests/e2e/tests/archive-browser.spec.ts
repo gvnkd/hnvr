@@ -184,6 +184,11 @@ test.describe('Archive browser', () => {
     // we may still be on page 1 if there's not enough data.
     const deleteButtons = page.getByRole('button', {name: 'Delete'});
     test.skip((await deleteButtons.count()) === 0, 'no recordings on page 2');
+    // The controller clamps out-of-range pages; if we landed on page 1
+    // the purge actions rightly carry no &page= param — nothing to
+    // assert.
+    const badge = await page.locator('text=/Page \\d+ \\/ \\d+/').first().textContent();
+    test.skip(!badge || !badge.includes('Page 2 /'), 'clamped to page 1 (not enough recordings to page)');
 
     // Inspect the form action — when page > 1, the delete URL should
     // include &page=N so the redirect lands back on the same page.

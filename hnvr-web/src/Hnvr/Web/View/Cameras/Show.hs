@@ -49,7 +49,7 @@ instance View ShowView where
             {kvRow "Record audio" (tshow camera.recordAudio)}
             {kvRow "Analysis FPS" (tshow camera.analysisFps)}
             {kvRow "Enabled" (tshow camera.enabled)}
-            {kvRow "Retention days" (tshow camera.retentionDays)}
+            {kvRow "Retention hours" (tshow camera.retentionHours)}
             {kvRow "Assigned host" (fromMaybe "—" camera.assignedHost)}
             {kvRow "Manual assign" (tshow camera.manualAssign)}
           </tbody>

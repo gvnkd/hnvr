@@ -35,7 +35,7 @@ statement :: Statement.Statement (Id' "cameras") (Maybe Generated.ActualTypes.Ca
 statement = Statement.preparable sql encoder decoder
 
 sql :: Text
-sql = "SELECT id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_days, assigned_host, manual_assign, created_at, updated_at FROM cameras WHERE id = $1 LIMIT 1"
+sql = "SELECT id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, created_at, updated_at FROM cameras WHERE id = $1 LIMIT 1"
 
 encoder :: Encoders.Params (Id' "cameras")
 encoder = Encoders.param (Encoders.nonNullable Mapping.encoder)

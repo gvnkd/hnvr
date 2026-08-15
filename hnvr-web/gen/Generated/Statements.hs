@@ -30,6 +30,16 @@ module Generated.Statements (
     module Generated.Statements.UpdateEvent,
     module Generated.Statements.FetchEvent,
     module Generated.Statements.CreateManyEvent,
+    module Generated.Statements.RowDecoderEventClip,
+    module Generated.Statements.CreateEventClip,
+    module Generated.Statements.UpdateEventClip,
+    module Generated.Statements.FetchEventClip,
+    module Generated.Statements.CreateManyEventClip,
+    module Generated.Statements.RowDecoderEventClipEvent,
+    module Generated.Statements.CreateEventClipEvent,
+    module Generated.Statements.UpdateEventClipEvent,
+    module Generated.Statements.FetchEventClipEvent,
+    module Generated.Statements.CreateManyEventClipEvent,
     module Generated.Statements.RowDecoderAuditLog,
     module Generated.Statements.CreateAuditLog,
     module Generated.Statements.UpdateAuditLog,
@@ -66,6 +76,16 @@ import qualified Generated.Statements.CreateEvent
 import qualified Generated.Statements.UpdateEvent
 import qualified Generated.Statements.FetchEvent
 import qualified Generated.Statements.CreateManyEvent
+import qualified Generated.Statements.RowDecoderEventClip
+import qualified Generated.Statements.CreateEventClip
+import qualified Generated.Statements.UpdateEventClip
+import qualified Generated.Statements.FetchEventClip
+import qualified Generated.Statements.CreateManyEventClip
+import qualified Generated.Statements.RowDecoderEventClipEvent
+import qualified Generated.Statements.CreateEventClipEvent
+import qualified Generated.Statements.UpdateEventClipEvent
+import qualified Generated.Statements.FetchEventClipEvent
+import qualified Generated.Statements.CreateManyEventClipEvent
 import qualified Generated.Statements.RowDecoderAuditLog
 import qualified Generated.Statements.CreateAuditLog
 import qualified Generated.Statements.UpdateAuditLog

@@ -69,6 +69,7 @@ instance View EditView where
             {textFieldFor "password" "Password (blank = keep current)" ("" :: Text) "Stored encrypted; leave blank to retain existing value."}
             {textFieldFor "host" "Host IP" (fromMaybe "" camera.host) ""}
             {textFieldFor "port" "Port" (tshow camera.port) ""}
+            {textFieldFor "retentionHours" "Full-record retention (hours)" (tshow camera.retentionHours) "Event clips have their own per-rule retention"}
 
             <div class="field">
               <label>Codec</label>

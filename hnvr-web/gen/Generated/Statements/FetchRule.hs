@@ -35,7 +35,7 @@ statement :: Statement.Statement (Id' "rules") (Maybe Generated.ActualTypes.Rule
 statement = Statement.preparable sql encoder decoder
 
 sql :: Text
-sql = "SELECT id, camera_id, name, kind, geometry, classes, cooldown_ms, enabled, created_at, updated_at FROM rules WHERE id = $1 LIMIT 1"
+sql = "SELECT id, camera_id, name, kind, geometry, classes, cooldown_ms, clip_preroll_sec, clip_postroll_sec, clip_retention_hours, enabled, created_at, updated_at FROM rules WHERE id = $1 LIMIT 1"
 
 encoder :: Encoders.Params (Id' "rules")
 encoder = Encoders.param (Encoders.nonNullable Mapping.encoder)

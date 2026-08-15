@@ -43,7 +43,7 @@ import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
 import Generated.ActualTypes.PrimaryKeys
-data Rule' = Rule {id :: (Id' "rules"), cameraId :: UUID, name :: Text, kind :: RuleKind, geometry :: Data.Aeson.Value, classes :: [Int], cooldownMs :: Int, enabled :: Bool, createdAt :: UTCTime, updatedAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+data Rule' = Rule {id :: (Id' "rules"), cameraId :: UUID, name :: Text, kind :: RuleKind, geometry :: Data.Aeson.Value, classes :: [Int], cooldownMs :: Int, clipPrerollSec :: Int, clipPostrollSec :: Int, clipRetentionHours :: (Maybe Int), enabled :: Bool, createdAt :: UTCTime, updatedAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
 
 type Rule = Rule'
 
@@ -53,7 +53,7 @@ type instance GetModelByTableName "rules" = Rule
 
 instance IHP.ModelSupport.Table (Rule') where
     tableName = "rules"
-    columnNames = ["id","camera_id","name","kind","geometry","classes","cooldown_ms","enabled","created_at","updated_at"]
+    columnNames = ["id","camera_id","name","kind","geometry","classes","cooldown_ms","clip_preroll_sec","clip_postroll_sec","clip_retention_hours","enabled","created_at","updated_at"]
     primaryKeyColumnNames = ["id"]
 
 

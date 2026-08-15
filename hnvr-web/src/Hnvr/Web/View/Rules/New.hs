@@ -16,7 +16,7 @@ where
 import Data.Aeson (Value (..), encode)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BL
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Scientific (toRealFloat)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -92,6 +92,22 @@ ruleForm camera mRule actionUrl =
           <input class="input" id="cooldown_ms" name="cooldown_ms" type="number" min="0" step="500" value={cooldownVal} />
         </div>
         <div class="field">
+          <label><input type="checkbox" name="clip_enabled" checked={clipEnabledVal} /> record event clip</label>
+          <div class="hint">save a video clip (pre-roll + post-roll around the event) to the event store, kept for its own retention</div>
+        </div>
+        <div class="field">
+          <label for="clip_preroll_sec">Clip pre-roll (s)</label>
+          <input class="input" id="clip_preroll_sec" name="clip_preroll_sec" type="number" min="0" max="60" step="1" value={clipPreVal} />
+        </div>
+        <div class="field">
+          <label for="clip_postroll_sec">Clip post-roll (s)</label>
+          <input class="input" id="clip_postroll_sec" name="clip_postroll_sec" type="number" min="1" max="300" step="1" value={clipPostVal} />
+        </div>
+        <div class="field">
+          <label for="clip_retention_hours">Clip retention (hours)</label>
+          <input class="input" id="clip_retention_hours" name="clip_retention_hours" type="number" min="1" step="1" value={clipRetVal} />
+        </div>
+        <div class="field">
           <label><input type="checkbox" name="enabled" checked={enabledVal} /> enabled</label>
         </div>
         <div class="field">
@@ -120,6 +136,13 @@ ruleForm camera mRule actionUrl =
     cooldownVal :: Text
     cooldownVal = maybe "5000" (tshow . (.cooldownMs)) mRule
     enabledVal = maybe True (.enabled) mRule
+    clipEnabledVal = maybe False (isJust . (.clipRetentionHours)) mRule
+    clipPreVal :: Text
+    clipPreVal = maybe "5" (tshow . (.clipPrerollSec)) mRule
+    clipPostVal :: Text
+    clipPostVal = maybe "5" (tshow . (.clipPostrollSec)) mRule
+    clipRetVal :: Text
+    clipRetVal = maybe "168" (\r -> maybe "168" tshow r.clipRetentionHours) mRule
     classesVal :: Text
     classesVal = maybe "0,1,2,3,5,7" (\r -> T.intercalate "," (map tshow r.classes)) mRule
     geometryVal :: Text

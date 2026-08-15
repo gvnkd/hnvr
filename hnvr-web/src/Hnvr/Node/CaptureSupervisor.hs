@@ -113,6 +113,8 @@ import Hnvr.Cv.Tracker.Sort (Track (..), TrackId (..))
 import Hnvr.Nats.Bus (Bus)
 import qualified Hnvr.Nats.Bus as Bus
 import qualified Hnvr.Nats.Subjects as Subjects
+import Hnvr.Node.ClipRecorder (ClipState)
+import qualified Hnvr.Node.ClipRecorder as Clip
 import Hnvr.Storage.S3 (putObjectBytes)
 import Network.Minio (defaultPutObjectOptions, pooContentType)
 import qualified System.Directory as Dir
@@ -125,7 +127,9 @@ import Text.Read (readMaybe)
 data CaptureSupervisor = CaptureSupervisor
   { csConfig :: !CaptureConfig,
     csWorkers :: !(IORef (Map CameraId WorkerHandle)),
-    csAnalysis :: !(IORef (Map CameraId AnalysisHandle))
+    csAnalysis :: !(IORef (Map CameraId AnalysisHandle)),
+    -- | Event-clip recorder state (ring buffers + open clips).
+    csClipState :: !ClipState
   }
 
 -- | One per running camera. The @stopTVar@ is polled by the worker's
@@ -154,12 +158,14 @@ startCaptureSupervisor :: CaptureConfig -> IO CaptureSupervisor
 startCaptureSupervisor cfg = do
   ref <- newIORef Map.empty
   aRef <- newIORef Map.empty
+  clipState <- Clip.newClipState
   -- SpoolDrainer is process-wide (not per-camera) so it can clean up
   -- after camera reassignments too. Started here so it shares the
   -- supervisor's CaptureConfig (capS3, capBucket, capSpoolDir).
   startSpoolDrainer cfg
+  Clip.startClipTicker cfg clipState
   logInfo "CaptureSupervisor: started"
-  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef})
+  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csClipState = clipState})
 
 -- | Idempotent: starts a worker for the given camera. If a worker is
 -- already running for the same 'CameraId', it is stopped first (so
@@ -186,6 +192,12 @@ startCamera sup snap = do
   stopCamera sup (csId snap)
   stopTVar <- newTVarIO False
   relayPort <- fromMaybe "8554" <$> lookupEnv "HNVR_MEDIAMTX_RTSP_PORT"
+  -- Event-clip ring buffer: only when at least one rule on this camera
+  -- has clip recording enabled (clip_retention_hours set).
+  mClipBuf <-
+    case Clip.bufferWindowSec (csRules snap) of
+      Nothing -> pure Nothing
+      Just w -> Just <$> Clip.registerBuffer sup.csClipState (csId snap) w
   let relayUrl = "rtsp://localhost:" <> T.pack relayPort <> "/" <> csSlug snap
       camCfg =
         CameraConfig
@@ -193,7 +205,8 @@ startCamera sup snap = do
             ccSlug = csSlug snap,
             ccRtspUrl = relayUrl,
             ccTransport = TcpTransport,
-            ccRecordAudio = csRecordAudio snap
+            ccRecordAudio = csRecordAudio snap,
+            ccClipBuffer = mClipBuf
           }
       shouldStop = readTVarIO stopTVar
   a <- async (captureWorkerWithStop sup.csConfig camCfg shouldStop)
@@ -232,6 +245,7 @@ maybeStartAnalysis sup snap relayUrl = do
       let metrics = capMetrics sup.csConfig
           (analysisCfg, width, height) = analysisConfigFor fallbackScale snap relayUrl
           rules = mapMaybe projectRule (csRules snap)
+          clipRules = Clip.clipCfgs (csRules snap)
           fsCfg =
             FrameSourceConfig
               { fscAnalysis = analysisCfg,
@@ -252,7 +266,7 @@ maybeStartAnalysis sup snap relayUrl = do
             (T.pack modelFile)
             eps
             queue
-            (analysisSink sup snap rules rulesRef latest)
+            (analysisSink sup snap rules clipRules rulesRef latest)
       modifyIORef' sup.csAnalysis $
         Map.insert (csId snap) AnalysisHandle {ahSource = src, ahAnalyzer = ana, ahLatest = latest}
       logInfo ("CaptureSupervisor: analysis pair started for " <> csSlug snap <> " (model " <> csModelName snap <> ")")
@@ -288,20 +302,23 @@ analysisSink ::
   CaptureSupervisor ->
   CameraSnapshot ->
   [Rule] ->
+  M.Map Text Clip.ClipCfg ->
   IORef (M.Map (Text, Int) RuleState) ->
   TVar (Maybe (Frame, [Track])) ->
   Frame ->
   [Track] ->
   IO ()
-analysisSink sup snap rules rulesRef latest frame tracks = do
+analysisSink sup snap rules clipRules rulesRef latest frame tracks = do
   atomically (writeTVar latest (Just (frame, tracks)))
   evs <-
     atomicModifyIORef' rulesRef $ \st ->
       evalTracks st rules (frameWidth frame) (frameHeight frame) tracks (frameTimestamp frame)
+  forM_ evs $ \(_rule, _track, ev) ->
+    Clip.onRuleFired sup.csClipState (csId snap) (csSlug snap) clipRules (reRuleId ev) (reTs ev)
   case capBus sup.csConfig of
     Nothing -> pure ()
     Just bus ->
-      forM_ evs $ \(rule, track, ev) -> do
+      forM_ evs $ \(_rule, track, ev) -> do
         mThumb <- uploadThumbnail sup snap frame track ev
         Bus.publishJson bus Subjects.events (toCvEvent sup snap track ev frame mThumb)
 
@@ -407,6 +424,8 @@ readFallbackScale = do
 stopCamera :: CaptureSupervisor -> CameraId -> IO ()
 stopCamera sup camId = do
   stopAnalysisPair
+  Clip.closeCameraClip sup.csConfig sup.csClipState camId
+  Clip.unregisterCamera sup.csClipState camId
   mHandle <-
     atomicModifyIORef'
       sup.csWorkers

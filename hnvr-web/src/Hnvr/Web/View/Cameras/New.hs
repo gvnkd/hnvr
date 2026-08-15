@@ -53,6 +53,7 @@ instance View NewView where
             {textFieldFor "password" "Password (stored encrypted)" ("" :: Text) "AES-256-GCM at rest"}
             {textFieldFor "host" "Host IP" (fromMaybe "" camera.host) "Camera hostname or IP"}
             {textFieldFor "port" "Port" (tshow camera.port) "RTSP port (default 554)"}
+            {textFieldFor "retentionHours" "Full-record retention (hours)" (tshow camera.retentionHours) "Event clips have their own per-rule retention"}
 
             <div class="field">
               <label>Codec</label>

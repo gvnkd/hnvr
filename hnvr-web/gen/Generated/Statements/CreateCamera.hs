@@ -65,7 +65,7 @@ sql touchedFields returning =
             , if testBit touchedFields 19 then Just "analysis_fps" else Nothing
             , if testBit touchedFields 20 then Just "model_name" else Nothing
             , if testBit touchedFields 21 then Just "enabled" else Nothing
-            , if testBit touchedFields 22 then Just "retention_days" else Nothing
+            , if testBit touchedFields 22 then Just "retention_hours" else Nothing
             , Just "assigned_host"
             , if testBit touchedFields 24 then Just "manual_assign" else Nothing
             , if testBit touchedFields 25 then Just "created_at" else Nothing
@@ -73,7 +73,7 @@ sql touchedFields returning =
             ]
         columns = Text.intercalate ", " entries
         placeholders = Text.intercalate ", " ["$" <> Text.pack (show i) | i <- [1 .. length entries]]
-        returningClause = if returning then " RETURNING id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_days, assigned_host, manual_assign, created_at, updated_at" else ""
+        returningClause = if returning then " RETURNING id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, created_at, updated_at" else ""
     in if null entries
         then "INSERT INTO cameras DEFAULT VALUES" <> returningClause
         else "INSERT INTO cameras (" <> columns <> ") VALUES (" <> placeholders <> ")" <> returningClause
@@ -103,7 +103,7 @@ encoder touchedFields = mconcat $ catMaybes
     , if testBit touchedFields 19 then Just ((.analysisFps) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , if testBit touchedFields 20 then Just ((.modelName) >$< Encoders.param (Encoders.nonNullable Encoders.text)) else Nothing
     , if testBit touchedFields 21 then Just ((.enabled) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 22 then Just ((.retentionDays) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 22 then Just ((.retentionHours) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , Just ((.assignedHost) >$< Encoders.param (Encoders.nullable Encoders.text))
     , if testBit touchedFields 24 then Just ((.manualAssign) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
     , if testBit touchedFields 25 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing

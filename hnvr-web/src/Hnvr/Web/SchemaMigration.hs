@@ -79,6 +79,11 @@ auditLogSql = $(embedFile "migrations/0004-audit-log.sql")
 pendingDeleteSql :: ByteString
 pendingDeleteSql = $(embedFile "migrations/0006-pending-delete.sql")
 
+-- | Event video clips: cameras.retention_hours, per-rule clip config,
+-- @event_clips@ + @event_clip_events@ tables. See the file header.
+eventClipsSql :: ByteString
+eventClipsSql = $(embedFile "migrations/0007-event-clips.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -118,6 +123,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0006-pending-delete" pendingDeleteSql) True conn
     handleResult "0006-pending-delete" pendingRes
+    clipsRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0007-event-clips" eventClipsSql) True conn
+    handleResult "0007-event-clips" clipsRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

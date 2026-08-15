@@ -64,7 +64,10 @@ tests =
                         "y2" .= (1 :: Int)
                       ],
                   rsClasses = [0, 2],
-                  rsCooldownMs = 5000
+                  rsCooldownMs = 5000,
+                  rsClipPrerollSec = 5,
+                  rsClipPostrollSec = 10,
+                  rsClipRetentionHours = Just 168
                 }
         decode (encode rs) @?= Just rs,
       testCase "CameraSnapshot JSON roundtrip" $

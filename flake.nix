@@ -65,6 +65,16 @@
         cabal-test-quickcheck =
           libHs.dontCheck (libHs.doJailbreak (libHs.markUnbroken prev.cabal-test-quickcheck));
 
+        # minio-hs 1.7.0 sends `continuation_token` (underscore) where
+        # ListObjectsV2 requires `continuation-token` (hyphen) — MinIO
+        # ignores it and paginated listings loop page 1 forever, which
+        # OOM'd the leader on 2026-08-15 (RSS 13→47 GB in 3 h). Upstream
+        # is unmaintained (bug on master); use the vendored copy, patched
+        # with the continuation-token fix plus the same crypton-connection
+        # patches nixpkgs applies (minio-hs PR #191, commits 786cf188 +
+        # e2169892) so it builds against tls 2.x.
+        minio-hs = libHs.dontCheck (final.callCabal2nix "minio-hs" ./vendored/minio-hs { });
+
         # IHP codegen output (e.g. Generated/Statements/UpdateHost.hs) needs
         # the IsScalar.encoder signature from hasql-mapping 0.1.0.2; older
         # versions in nixpkgs don't have it. callHackageDirect bypasses the

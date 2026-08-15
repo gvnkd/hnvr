@@ -57,7 +57,7 @@ CREATE TABLE cameras (
     analysis_fps    INT NOT NULL DEFAULT 5,
     model_name      TEXT NOT NULL DEFAULT 'yolov8n-320',
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
-    retention_days  INT NOT NULL DEFAULT 7,
+    retention_hours INT NOT NULL DEFAULT 168,
     assigned_host   TEXT,
     manual_assign   BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -119,6 +119,9 @@ CREATE TABLE rules (
     geometry        JSONB NOT NULL,
     classes         INT[] NOT NULL DEFAULT ARRAY[0,1,2,3,5,7],
     cooldown_ms     INT NOT NULL DEFAULT 5000,
+    clip_preroll_sec  INT NOT NULL DEFAULT 5,
+    clip_postroll_sec INT NOT NULL DEFAULT 5,
+    clip_retention_hours INT,
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -156,6 +159,42 @@ CREATE INDEX events_ts_brin      ON events USING brin (ts);
 -- Partial indexes events_kind_idx + events_track_idx live only in
 -- migrations/0003-rules-events.sql — IHP's schema-compiler can't parse
 -- NOT IN / IS NOT NULL index predicates, and codegen doesn't need them.
+
+-- Event video clips: assembled node-side from the main fMP4 fragment
+-- stream when a rule with clip_retention_hours set fires. retention_hours
+-- is snapshotted from the rule at creation. pending_delete_at mirrors the
+-- segments tombstone pattern.
+CREATE TABLE event_clips (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id       UUID NOT NULL,
+    rule_id         UUID,
+    started_at      TIMESTAMP WITH TIME ZONE NOT NULL,
+    duration_sec    INT NOT NULL,
+    object_prefix   TEXT NOT NULL,
+    retention_hours INT NOT NULL,
+    pending_delete_at TIMESTAMP WITH TIME ZONE,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+    FOREIGN KEY (rule_id) REFERENCES rules(id) ON DELETE SET NULL
+);
+
+CREATE INDEX event_clips_cam_ts_idx ON event_clips (camera_id, started_at DESC);
+
+CREATE INDEX event_clips_pending_delete_idx ON event_clips (pending_delete_at)
+    WHERE pending_delete_at IS NOT NULL;
+
+-- Which events a clip covers (merged clips link multiple events).
+CREATE TABLE event_clip_events (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clip_id     UUID NOT NULL,
+    event_id    UUID NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (clip_id, event_id),
+    FOREIGN KEY (clip_id) REFERENCES event_clips(id) ON DELETE CASCADE,
+    FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+
+CREATE INDEX event_clip_events_event_idx ON event_clip_events (event_id);
 
 -- Phase 4: admin action audit log.
 CREATE TABLE audit_log (
