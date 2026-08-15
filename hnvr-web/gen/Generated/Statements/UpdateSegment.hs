@@ -51,12 +51,13 @@ sql touchedFields returning =
             , if testBit touchedFields 6 then Just "bytes" else Nothing
             , if testBit touchedFields 7 then Just "sha256" else Nothing
             , if testBit touchedFields 8 then Just "has_audio" else Nothing
-            , if testBit touchedFields 9 then Just "created_at" else Nothing
+            , if testBit touchedFields 9 then Just "pending_delete_at" else Nothing
+            , if testBit touchedFields 10 then Just "created_at" else Nothing
             ]
         setClauses = [col <> " = $" <> Text.pack (show i) | (i, col) <- zip [1..] setEntries]
         pkIdx = length setEntries + 1
         whereClause = \startIdx -> "id" <> " = $" <> Text.pack (show startIdx)
-        returningClause = if returning then " RETURNING id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, created_at" else ""
+        returningClause = if returning then " RETURNING id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, pending_delete_at, created_at" else ""
     in "UPDATE segments SET " <> Text.intercalate ", " setClauses <> " WHERE " <> whereClause pkIdx <> returningClause
 
 
@@ -70,7 +71,8 @@ encoder touchedFields = mconcat (catMaybes
     , if testBit touchedFields 6 then Just ((.bytes) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int8))) else Nothing
     , if testBit touchedFields 7 then Just ((.sha256) >$< Encoders.param (Encoders.nonNullable Encoders.text)) else Nothing
     , if testBit touchedFields 8 then Just ((.hasAudio) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 9 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 9 then Just ((.pendingDeleteAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 10 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ])
     <> ((.id) >$< Encoders.param (Encoders.nonNullable Mapping.encoder))
 

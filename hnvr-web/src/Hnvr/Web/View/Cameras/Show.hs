@@ -76,7 +76,7 @@ instance View ShowView where
           <form method="POST" action={testCryptoUrl}>
             <button class="btn" type="submit">Test password decryption</button>
           </form>
-          <p class="text-sm text-zinc-400 mt-2">
+          <p class="text-sm muted mt-2">
             Confirms the row's <span class="mono">password_enc</span> +
             <span class="mono">password_nonce</span> decrypt cleanly with the
             current <span class="mono">HNVR_DATA_KEY</span>. Catches the silent

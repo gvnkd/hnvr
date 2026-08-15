@@ -57,14 +57,19 @@ instance View IndexView where
       <div class="page-header">
         <div>
           <h1>Archive</h1>
-          <div class="subtitle">{total} recording(s) · segments grouped with 30s gap tolerance</div>
+          <div class="subtitle">{total} recording(s) · segments grouped with 30s gap tolerance · click a row to play</div>
         </div>
       </div>
 
       {noticeHtml}
 
-      <div class="card">
-        <form class="form" method="GET" action="/Archive">
+      <div class="card collapsible is-open" data-collapsible="1" data-collapse-id="archive-filters">
+        <button class="collapse-trigger" data-collapse-trigger="1" aria-expanded="true" type="button">
+          <span>Filters</span>
+          <span class="chevron">▾</span>
+        </button>
+        <div class="collapse-body"><div>
+        <form class="form p-4" method="GET" action="/Archive">
           <div class="field">
             <label>Camera</label>
             <select name="cameraId">
@@ -93,6 +98,7 @@ instance View IndexView where
             <a class="btn btn-ghost" href="/Archive">Reset</a>
           </div>
         </form>
+        </div></div>
       </div>
 
       {renderRows rows}
@@ -123,7 +129,11 @@ instance View IndexView where
       renderRows rs =
         [hsx|
           <div class="card">
-            <table class="table">
+            <div class="card-header">
+              <span>recordings</span>
+              <input class="table-filter" type="text" placeholder="filter…" data-table-filter="#archive-table" />
+            </div>
+            <table class="table" id="archive-table" data-sortable="1">
               <thead>
                 <tr>
                   <th>Camera</th>
@@ -131,8 +141,8 @@ instance View IndexView where
                   <th>Duration</th>
                   <th class="text-right">Size</th>
                   <th class="text-right">Segments</th>
-                  <th>Flags</th>
-                  <th class="text-right">Actions</th>
+                  <th data-no-sort="1">Flags</th>
+                  <th class="text-right" data-no-sort="1">Actions</th>
                 </tr>
               </thead>
               <tbody>{forEach rs renderRow}</tbody>
@@ -142,8 +152,8 @@ instance View IndexView where
 
       renderRow r =
         [hsx|
-          <tr>
-            <td class="mono text-zinc-100">{r.rrCameraSlug}</td>
+          <tr data-href={playUrl}>
+            <td class="mono t-strong">{r.rrCameraSlug}</td>
             <td class="mono">{fmtTs (r.rrStart)}</td>
             <td class="mono">{fmtDur (r.rrStart) (r.rrEnd)}</td>
             <td class="mono text-right">{fmtBytes (r.rrBytes)}</td>

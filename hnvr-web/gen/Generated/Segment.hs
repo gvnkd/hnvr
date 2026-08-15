@@ -59,8 +59,9 @@ instance FromRow Generated.ActualTypes.Segment where
         bytes <- field
         sha256 <- field
         hasAudio <- field
+        pendingDeleteAt <- field
         createdAt <- field
-        let theRecord = Generated.ActualTypes.Segment id cameraId startTs endTs hostId objectKey bytes sha256 hasAudio createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
+        let theRecord = Generated.ActualTypes.Segment id cameraId startTs endTs hostId objectKey bytes sha256 hasAudio pendingDeleteAt createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
         pure theRecord
 
 instance FromRowHasql Generated.ActualTypes.Segment where
@@ -112,7 +113,7 @@ updateRecordDiscardResultSegment model = do
 
 instance Record Generated.ActualTypes.Segment where
     {-# INLINE newRecord #-}
-    newRecord = Generated.ActualTypes.Segment def def def def def def def def False def  def
+    newRecord = Generated.ActualTypes.Segment def def def def def def def def False def def  def
 
 
 instance QueryBuilder.FilterPrimaryKey "segments" where
@@ -147,9 +148,12 @@ instance SetField "sha256" (Segment') Text where
 instance SetField "hasAudio" (Segment') Bool where
     {-# INLINE setField #-}
     setField newValue record = record { hasAudio = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 256 } }
+instance SetField "pendingDeleteAt" (Segment') (Maybe UTCTime) where
+    {-# INLINE setField #-}
+    setField newValue record = record { pendingDeleteAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 512 } }
 instance SetField "createdAt" (Segment') UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 512 } }
+    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1024 } }
 instance SetField "meta" (Segment') MetaBag where
     {-# INLINE setField #-}
     setField newValue record = record { meta = newValue }
@@ -180,9 +184,12 @@ instance UpdateField "sha256" (Segment') (Segment') Text Text where
 instance UpdateField "hasAudio" (Segment') (Segment') Bool Bool where
     {-# INLINE updateField #-}
     updateField newValue record = record { hasAudio = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 256 } }
+instance UpdateField "pendingDeleteAt" (Segment') (Segment') (Maybe UTCTime) (Maybe UTCTime) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { pendingDeleteAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 512 } }
 instance UpdateField "createdAt" (Segment') (Segment') UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 512 } }
+    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1024 } }
 instance UpdateField "meta" (Segment') (Segment') MetaBag MetaBag where
     {-# INLINE updateField #-}
     updateField newValue record = record { meta = newValue }
@@ -196,6 +203,7 @@ instance FieldBit "objectKey" (Segment') where fieldBit = 32
 instance FieldBit "bytes" (Segment') where fieldBit = 64
 instance FieldBit "sha256" (Segment') where fieldBit = 128
 instance FieldBit "hasAudio" (Segment') where fieldBit = 256
-instance FieldBit "createdAt" (Segment') where fieldBit = 512
+instance FieldBit "pendingDeleteAt" (Segment') where fieldBit = 512
+instance FieldBit "createdAt" (Segment') where fieldBit = 1024
 
 

@@ -23,10 +23,12 @@ where
 
 import qualified Control.Exception as E
 import Control.Monad (forM_, void, when)
-import Data.Aeson (object, (.=))
+import Data.Aeson (encode, object, (.=))
 import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, maybe)
 import qualified Data.Text as T
+import Data.Time.Clock (diffUTCTime, getCurrentTime)
+import Data.Time.Format.ISO8601 (iso8601Show)
 import Generated.Types
 import Hnvr.Capture.Worker (CaptureConfig (..))
 import Hnvr.Core.CameraSnapshot (CameraSnapshotBatch (..))
@@ -38,6 +40,7 @@ import Hnvr.Node.CaptureSupervisor (startCamera, startCaptureSupervisor)
 import Hnvr.Node.ConfigWatcher (startConfigWatcher)
 import Hnvr.Node.HealthReporter (startHealthReporter)
 import qualified Hnvr.Storage.S3 as S3
+import Hnvr.Web (version)
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.BusRegistry (busRegistry)
@@ -47,6 +50,7 @@ import Hnvr.Web.EventWriter (startEventWriter)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
 import Hnvr.Web.Metrics (ensureMetrics, startGpuPoller, startMetricsServer)
+import Hnvr.Web.PendingPurge (startPendingPurgeSweeper)
 import Hnvr.Web.RetentionSweeper (startRetentionSweeper)
 import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
 import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
@@ -83,9 +87,10 @@ config = do
   -- `buildFrameworkConfig` runs `appConfig >> ihpDefaultConfig` so our
   -- `option`s land before the defaults. Calling `option $ CustomMiddleware`
   -- twice silently drops the second one. Compose all custom WAI
-  -- middlewares here. Order: whep runs first (most-specific path prefix),
-  -- falls through to healthz, falls through to IHP.
-  option $ CustomMiddleware (debugStreamMiddleware . whepMiddleware . healthzMiddleware)
+  -- middlewares here. Order: debug-stream runs first (most-specific path
+  -- prefix), falls through to whep, /status, /healthz, then IHP.
+  statusMw <- liftIO mkStatusMiddleware
+  option $ CustomMiddleware (debugStreamMiddleware . whepMiddleware . statusMw . healthzMiddleware)
   option $ AuthMiddleware (authMiddleware @User)
   addInitializer connectNatsAndStartEventWriter
   addInitializer seedAdminUser
@@ -153,6 +158,11 @@ connectNatsAndStartEventWriter = do
   startRetentionSweeper
     `E.catch` \(e :: E.SomeException) ->
       logError ("leader: RetentionSweeper start failed: " <> cs (show e))
+  -- Verified-delete sweeper (tombstoned segments → S3 purge → row
+  -- DELETE). Same PG+S3-only profile as the retention sweep.
+  startPendingPurgeSweeper
+    `E.catch` \(e :: E.SomeException) ->
+      logError ("leader: PendingPurge sweeper start failed: " <> cs (show e))
   let defaultUri = "nats://nats:nats@localhost:4222"
   uri <- fromMaybe defaultUri <$> Env.lookupEnv "HNVR_NATS_URI"
   let connect' = do
@@ -224,3 +234,33 @@ healthzMiddleware app request respond
         [ ("Content-Type", "text/plain; charset=utf-8")
         ]
         "ok"
+
+-- | Build the @/status@ middleware: unauthenticated JSON system-status
+-- page carrying the package version (from hnvr-web.cabal via
+-- 'Hnvr.Web.version'), the host name (@HNVR_HOST@), process start time
+-- and uptime. Start time + host are captured once at boot; uptime is
+-- computed per request.
+mkStatusMiddleware :: IO Wai.Middleware
+mkStatusMiddleware = do
+  started <- getCurrentTime
+  host <- Env.lookupEnv "HNVR_HOST"
+  pure $ \app request respond ->
+    if Wai.rawPathInfo request == "/status"
+      then do
+        now <- getCurrentTime
+        let uptime = floor (diffUTCTime now started) :: Int
+            body =
+              encode
+                $ object
+                  [ "app" .= ("hnvr" :: Text),
+                    "version" .= version,
+                    "host" .= fmap T.pack host,
+                    "startedAt" .= iso8601Show started,
+                    "uptimeSeconds" .= uptime
+                  ]
+        respond
+          $ Wai.responseLBS
+            HTTP.status200
+            [("Content-Type", "application/json; charset=utf-8")]
+            body
+      else app request respond

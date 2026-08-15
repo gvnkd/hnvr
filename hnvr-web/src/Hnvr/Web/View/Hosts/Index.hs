@@ -36,10 +36,10 @@ instance View IndexView where
             <div class="card-header">
               <span class="flex items-center gap-2">
                 {ledFor h.lastHealthAt}
-                <span class="font-mono text-zinc-100">{h.id}</span>
+                <span class="font-mono t-strong">{h.id}</span>
                 {roleBadge h.isLeader}
               </span>
-              <span class="text-zinc-500">{fromMaybe "—" (fmap tshow h.lastHealthAt)}</span>
+              <span class="muted">{fromMaybe "—" (fmap tshow h.lastHealthAt)}</span>
             </div>
             <table class="table">
               <tbody>

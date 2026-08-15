@@ -3,8 +3,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
--- | /Events view: filter form + paginated event table with bbox
--- thumbnails and archive-player deep links (Phase 4).
+-- | /Events view: collapsible filter panel + sortable event table with
+-- animated (Ken Burns) bbox thumbnails, a click-to-zoom lightbox, and
+-- rows that deep-link into the archive player (Phase 4 + UI v2).
 module Hnvr.Web.View.Events.Index
   ( IndexView (..),
     EventRow (..),
@@ -55,13 +56,17 @@ instance View IndexView where
       <div class="page-header">
         <div>
           <h1>Events</h1>
-          <div class="subtitle">line crossing + zone intrusion (Phase 4)</div>
+          <div class="subtitle">line crossing + zone intrusion · click a row to replay</div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-body">
-          <form class="form" method="GET" action="/Events">
+      <div class="card collapsible is-open" data-collapsible="1" data-collapse-id="events-filters">
+        <button class="collapse-trigger" data-collapse-trigger="1" aria-expanded="true">
+          <span>Filters</span>
+          <span class="chevron">▾</span>
+        </button>
+        <div class="collapse-body"><div>
+          <form class="form p-4" method="GET" action="/Events">
             <div class="field">
               <label for="cameraId">Camera</label>
               <select class="input" id="cameraId" name="cameraId">
@@ -85,14 +90,18 @@ instance View IndexView where
             </div>
             <button class="btn btn-primary" type="submit">Filter</button>
           </form>
-        </div>
+        </div></div>
       </div>
 
       <div class="card mt-4">
-        <table class="table">
+        <div class="card-header">
+          <span>page {tshow page}</span>
+          <input class="table-filter" type="text" placeholder="filter rows…" data-table-filter="#events-table" />
+        </div>
+        <table class="table" id="events-table" data-sortable="1">
           <thead>
             <tr>
-              <th></th>
+              <th data-no-sort="1"></th>
               <th>Time (UTC)</th>
               <th>Camera</th>
               <th>Kind</th>
@@ -100,7 +109,7 @@ instance View IndexView where
               <th>Conf</th>
               <th>Track</th>
               <th>Rule</th>
-              <th></th>
+              <th data-no-sort="1"></th>
             </tr>
           </thead>
           <tbody>
@@ -110,6 +119,13 @@ instance View IndexView where
         <div class="card-body">
           {pagination}
         </div>
+      </div>
+
+      <div id="lightbox" class="lightbox" hidden>
+        <figure>
+          <img alt="event frame" />
+          <figcaption></figcaption>
+        </figure>
       </div>
     |]
     where
@@ -133,25 +149,33 @@ instance View IndexView where
 
       renderEvent (ev, mThumbUrl) =
         [hsx|
-        <tr>
-          <td>{thumb}</td>
+        <tr data-href={playUrl ev}>
+          <td>{thumb ev mThumbUrl}</td>
           <td class="mono">{fmtTs ev.erTs}</td>
-          <td class="font-mono">{ev.erCameraSlug}</td>
+          <td class="mono">{ev.erCameraSlug}</td>
           <td>{kindBadge ev.erKind}</td>
           <td>{className}</td>
           <td>{confText}</td>
-          <td class="font-mono">{trackText}</td>
+          <td class="mono">{trackText}</td>
           <td>{fromMaybe "—" ev.erRuleName}</td>
-          <td><a href={playUrl ev}>play</a></td>
+          <td><a class="btn btn-ghost btn-sm" href={playUrl ev}>play</a></td>
         </tr>
       |]
         where
-          thumb = case mThumbUrl of
-            Just url -> [hsx|<img src={url} style="width: 160px; border-radius: 4px;" alt="event thumbnail" />|]
-            Nothing -> [hsx|<span class="badge badge-mute">no image</span>|]
           className = maybe "—" cocoClassName ev.erClassId
           confText = maybe "—" (\c -> tshow (round (c * 100) :: Int) <> "%") ev.erConfidence
           trackText = maybe "—" tshow ev.erTrackId
+
+      thumb ev mThumbUrl = case mThumbUrl of
+        Just url ->
+          [hsx|
+            <span class="ev-thumb" data-full={url} data-caption={caption}>
+              <img src={url} alt="event thumbnail" />
+            </span>
+          |]
+          where
+            caption = ev.erCameraSlug <> " · " <> fmtTs ev.erTs <> " UTC"
+        Nothing -> [hsx|<span class="badge badge-mute">no image</span>|]
 
       kindBadge k
         | k == "line_crossed" = [hsx|<span class="badge badge-warn">line crossed</span>|]
@@ -179,7 +203,7 @@ instance View IndexView where
 
       pagination =
         [hsx|
-        <span class="text-sm text-zinc-400">page {tshow page}</span>
+        <span class="text-sm muted">page {tshow page}</span>
         {prevLink} {nextLink}
       |]
       prevLink

@@ -20,7 +20,7 @@ instance View IndexView where
       <div class="page-header">
         <div>
           <h1>Cameras</h1>
-          <div class="subtitle">{nCams} configured</div>
+          <div class="subtitle">{nCams} configured · click a row for details</div>
         </div>
         <div class="actions">
           <a class="btn btn-primary" href="/NewCamera">+ New Camera</a>
@@ -42,14 +42,18 @@ instance View IndexView where
       renderCameras cs =
         [hsx|
           <div class="card">
-            <table class="table">
+            <div class="card-header">
+              <span>sources</span>
+              <input class="table-filter" type="text" placeholder="filter…" data-table-filter="#cameras-table" />
+            </div>
+            <table class="table" id="cameras-table" data-sortable="1">
               <thead>
                 <tr>
                   <th>Slug</th>
                   <th>Name</th>
                   <th>Codec</th>
                   <th>Host</th>
-                  <th class="text-right">Actions</th>
+                  <th class="text-right" data-no-sort="1">Actions</th>
                 </tr>
               </thead>
               <tbody>{forEach cs renderCamera}</tbody>
@@ -59,8 +63,8 @@ instance View IndexView where
 
       renderCamera camera =
         [hsx|
-          <tr>
-            <td class="mono text-zinc-100">{camera.slug}</td>
+          <tr data-href={showUrl}>
+            <td class="mono t-strong">{camera.slug}</td>
             <td>{camera.name}</td>
             <td>{codecBadge camera.codec}</td>
             <td class="mono">{fromMaybe "—" camera.assignedHost}</td>

@@ -32,7 +32,7 @@ instance View FeedView where
     where
       emptyNote =
         if null events
-          then [hsx|<div class="text-sm text-zinc-400">no events yet</div>|]
+          then [hsx|<div class="text-sm muted">no events yet</div>|]
           else [hsx||]
       renderEvent ev =
         [hsx|
@@ -40,7 +40,7 @@ instance View FeedView where
           <span class="mono text-sm">{fmt ev.erTs}</span>
           {badge ev.erKind}
           <span class="text-sm">{cls}</span>
-          <span class="text-sm text-zinc-400">{conf}</span>
+          <span class="text-sm muted">{conf}</span>
         </div>
       |]
         where

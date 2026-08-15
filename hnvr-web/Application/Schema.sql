@@ -77,6 +77,7 @@ CREATE TABLE segments (
     bytes           BIGINT NOT NULL,
     sha256          TEXT NOT NULL,
     has_audio       BOOLEAN NOT NULL DEFAULT FALSE,
+    pending_delete_at TIMESTAMP WITH TIME ZONE,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
     FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE SET NULL,
@@ -84,6 +85,10 @@ CREATE TABLE segments (
 );
 
 CREATE INDEX segments_cam_start_idx ON segments (camera_id, start_ts DESC);
+
+-- Tombstoned rows awaiting verified S3 purge (migration 0006).
+CREATE INDEX segments_pending_delete_idx ON segments (pending_delete_at)
+    WHERE pending_delete_at IS NOT NULL;
 
 -- Phase 1 audit-fix: admin gate. IHP AuthSupport requires these exact column
 -- names: id, email, password_hash, locked_at, failed_login_attempts.

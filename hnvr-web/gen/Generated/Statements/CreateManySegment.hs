@@ -44,11 +44,11 @@ sql touchedFieldsList =
             let (g, offset') = valueGroup tf offset
             in (gs ++ [g], offset')
             ) ([], 1) touchedFieldsList
-    in "INSERT INTO segments (id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, created_at) VALUES "
+    in "INSERT INTO segments (id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, pending_delete_at, created_at) VALUES "
         <> Text.intercalate ", " valueGroups
-        <> " RETURNING id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, created_at"
+        <> " RETURNING id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, pending_delete_at, created_at"
   where
-    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, False), (5, False), (6, False), (7, False), (8, True), (9, True)]
+    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, False), (5, False), (6, False), (7, False), (8, True), (9, False), (10, True)]
     valueGroup tf offset =
         let step (parts, off) (bitIdx, hasDefault) =
                 if hasDefault && not (testBit tf bitIdx)
@@ -71,7 +71,8 @@ singleEncoder touchedFields = mconcat $ catMaybes
     , Just ((.bytes) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int8)))
     , Just ((.sha256) >$< Encoders.param (Encoders.nonNullable Encoders.text))
     , if testBit touchedFields 8 then Just ((.hasAudio) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 9 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , Just ((.pendingDeleteAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz))
+    , if testBit touchedFields 10 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 decoder :: Decoders.Result [Generated.ActualTypes.Segment]

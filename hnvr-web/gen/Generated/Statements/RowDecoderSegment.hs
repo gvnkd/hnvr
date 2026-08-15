@@ -44,5 +44,6 @@ rowDecoder = do
     bytes <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int8))
     sha256 <- Decoders.column (Decoders.nonNullable Decoders.text)
     hasAudio <- Decoders.column (Decoders.nonNullable Decoders.bool)
+    pendingDeleteAt <- Decoders.column (Decoders.nullable Decoders.timestamptz)
     createdAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
-    pure (let theRecord = Generated.ActualTypes.Segment id cameraId startTs endTs hostId objectKey bytes sha256 hasAudio createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)
+    pure (let theRecord = Generated.ActualTypes.Segment id cameraId startTs endTs hostId objectKey bytes sha256 hasAudio pendingDeleteAt createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)

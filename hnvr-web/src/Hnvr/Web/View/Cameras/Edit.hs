@@ -19,7 +19,7 @@ instance View EditView where
       [hsx|
       <div class="page-header">
         <div>
-          <h1>Edit · <span class="font-mono text-signal-info">{camera.slug}</span></h1>
+          <h1>Edit · <span class="font-mono t-accent">{camera.slug}</span></h1>
           <div class="subtitle">RTSP source configuration</div>
         </div>
         <div class="actions">
@@ -35,7 +35,7 @@ instance View EditView where
       <div class="card mt-4">
         <div class="card-header">Stream probe</div>
         <div class="card-body">
-          <p class="text-sm text-zinc-400 mb-4">
+          <p class="text-sm muted mb-4">
             Probe the main RTSP URL (and the sub URL when present) with
             <span class="mono">ffprobe</span> to fill codec + sub-stream
             fields automatically.

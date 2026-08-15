@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Entry point for the @hnvr-leader@ binary.
 --
 -- Runs on the RTX 4090 host only. Carries:
@@ -16,6 +18,8 @@
 -- leader-role + node-role initializers via 'Hnvr.Web.Config.config'.
 module Main (main) where
 
+import Hnvr.Core.Logging (logInfo)
+import Hnvr.Web (versionText)
 import Hnvr.Web.Config (config)
 import Hnvr.Web.FrontController ()
 import Hnvr.Web.SchemaMigration (runLeaderMigrations)
@@ -25,5 +29,6 @@ import qualified IHP.Server
 
 main :: IO ()
 main = do
+  logInfo ("starting hnvr-leader, " <> versionText)
   runLeaderMigrations
   IHP.Server.run config

@@ -16,9 +16,12 @@
 --   * 'PlaylistArchiveAction' — VOD m3u8 with presigned S3 GET URLs for
 --     the segments overlapping the requested window (design 05 §Archive
 --     playback: window validated ≤ 6 h; default = most recent 1 h).
---   * 'PurgeRecordingAction' — admin-only; deletes the window's S3
---     objects (best-effort) and segment rows, mirroring RetentionSweeper
---     semantics. Named "Purge", not "Delete": AutoRoute maps @Delete*@
+--   * 'PurgeRecordingAction' — admin-only; tombstones the window's
+--     segment rows (@pending_delete_at@, migration 0006) so they vanish
+--     from every read path immediately, then forks
+--     'Hnvr.Web.PendingPurge.forkCameraPurge': S3 objects are deleted,
+--     the window is verified empty, and only then are the rows hard-
+--     DELETEd. Named "Purge", not "Delete": AutoRoute maps @Delete*@
 --     constructors to HTTP DELETE only, and our plain POST forms don't
 --     load ihp.js's method-override helper (AssignCameraAction uses the
 --     same unprefixed-name POST pattern).
@@ -30,8 +33,6 @@ module Web.Controller.Archive
   )
 where
 
-import qualified Control.Concurrent.Async as Async
-import qualified Control.Exception as E
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..))
@@ -52,6 +53,7 @@ import Hnvr.Core.Playlist (renderEmptyPlaylist, renderVodPlaylist)
 import Hnvr.Core.Recording (Recording (..), Span (..), groupRecordings, recGaps)
 import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.Auth ()
+import Hnvr.Web.PendingPurge (forkCameraPurge)
 import Hnvr.Web.View.Archive.Index
 import Hnvr.Web.View.Archive.Player
 import IHP.ControllerPrelude
@@ -121,7 +123,10 @@ instance Controller ArchiveController where
     segments <- case matchingCamIds of
       Just [] -> pure [] -- search matched no camera
       _ -> do
-        let q0 = query @Segment |> orderByAsc #startTs
+        -- Tombstoned rows (pending verified S3 purge) are hidden from
+        -- the browser — the recording is "deleted" from the user's
+        -- point of view the moment the stamp lands.
+        let q0 = query @Segment |> filterWhere (#pendingDeleteAt, Nothing) |> orderByAsc #startTs
             q1 = maybe q0 (\f -> q0 |> filterWhereGreaterThan (#endTs, f)) mFrom
             q2 = maybe q1 (\t -> q1 |> filterWhereLessThanOrEqualTo (#startTs, t)) mTo
             q3 = maybe q2 (\ids -> q2 |> filterWhereIn (#cameraId, ids)) matchingCamIds
@@ -194,6 +199,7 @@ instance Controller ArchiveController where
         segments <-
           query @Segment
             |> filterWhere (#cameraId, cameraUuid)
+            |> filterWhere (#pendingDeleteAt, Nothing)
             |> filterWhereGreaterThan (#endTs, from)
             |> filterWhereLessThanOrEqualTo (#startTs, to)
             |> orderByAsc #startTs
@@ -239,28 +245,27 @@ instance Controller ArchiveController where
       else do
         case (nonemptyParam "purgeFrom" >>= parseWhen, nonemptyParam "purgeTo" >>= parseWhen) of
           (Just from, Just to) -> do
-            camera <- fetch purgeCameraId
-            -- Schedule the S3 + DB deletion in the background so the
-            -- user gets an immediate redirect. Sergey's 2026-08-12 report:
-            -- the form POST "kept pending forever" because purgeObjects
-            -- walks thousands of S3 keys sequentially (a single 2h
-            -- recording on his cameras produces 8k+ segments). Doing
-            -- this work in the request thread made the UI look hung.
-            -- The DB delete is also async-safe: the redirect re-queries
-            -- the table, so by the time /Archive re-renders the rows
-            -- are gone (or going).
-            --
-            -- Capture the IHP implicit-param contexts so the forked
-            -- thread can do DB work. ModelContext is a pool — sharing
-            -- across threads is its design.
-            let mc = ?modelContext
+            _camera <- fetch purgeCameraId
+            let cameraUuid = case purgeCameraId of Id u -> u :: UUID
+            -- TOMBSTONE, don't delete (migration 0006): stamping
+            -- pending_delete_at synchronously hides the recording from
+            -- every read path before the redirect re-renders — the
+            -- async-delete race Sergey hit on 2026-08-15 is gone by
+            -- construction. The hard DELETE happens in
+            -- Hnvr.Web.PendingPurge only AFTER the S3 purge is
+            -- verified empty; if the leader dies mid-purge, the
+            -- tombstoned rows survive and the 60s sweeper resumes the
+            -- batch (the failure that orphaned 98.6k objects that
+            -- same day). One UPDATE = one round-trip.
             _ <-
-              liftIO
-                $ Async.async
-                $ let ?modelContext = mc
-                   in purgeRecordingInBackground camera purgeCameraId from to
+              sqlExec
+                "UPDATE segments SET pending_delete_at = NOW() \
+                \ WHERE camera_id = ? AND end_ts > ? AND start_ts <= ? \
+                \   AND pending_delete_at IS NULL"
+                (cameraUuid, from, to)
+            liftIO (forkCameraPurge cameraUuid)
             setSuccessMessage
-              "Recording deletion scheduled — segments already hidden; S3 cleanup running in background"
+              "Recording hidden — DB rows are removed once S3 cleanup is verified"
           _ -> setErrorMessage "Purge requires valid from/to timestamps"
     redirectToPath returnTo
 
@@ -277,58 +282,6 @@ playlistWindowDefault = 3600
 noticeText :: BrowseNotice -> Maybe Text
 noticeText NoNotice = Nothing
 noticeText (BrowseClamped msg) = Just msg
-
--- | Background worker forked from 'PurgeRecordingAction'. Does the
--- actual S3 delete (potentially thousands of keys, slow) + DB row
--- delete. Runs in its own 'Async.async' so the request handler can
--- return immediately with a redirect.
---
--- All exceptions are swallowed and logged: the user already saw a
--- success flash, and a transient S3 hiccup shouldn't 500 the next
--- page load. RetentionSweeper will eventually converge either way
--- (it's the canonical S3-cleanup path).
-purgeRecordingInBackground ::
-  (?modelContext :: ModelContext) =>
-  Camera ->
-  Id Camera ->
-  UTCTime ->
-  UTCTime ->
-  IO ()
-purgeRecordingInBackground camera cameraId from to =
-  E.handle (\(e :: E.SomeException) -> putStrLn ("[purge] failed: " <> show e)) $ do
-    let cameraUuid = case cameraId of Id u -> u :: UUID
-    -- Fetch only the columns we need (object_key for S3 purge). Avoids
-    -- materialising thousands of full Segment records in memory when
-    -- the recording spans hours of capture.
-    segments <-
-      query @Segment
-        |> filterWhere (#cameraId, cameraUuid)
-        |> filterWhereGreaterThan (#endTs, from)
-        |> filterWhereLessThanOrEqualTo (#startTs, to)
-        |> fetch
-    mCfg <- liftIO readS3Config
-    nObjects <- case mCfg of
-      Nothing -> pure 0
-      Just cfg ->
-        liftIO (purgeObjects cfg camera.slug from to (map (.objectKey) segments))
-    -- Bulk DELETE: a single SQL statement instead of one-per-row
-    -- (deleteRecords). Sergey's 2h recordings rack up 8k+ segment
-    -- rows; calling deleteRecords on those issued 8k round-trips and
-    -- starved the connection pool, which made the cameras-crud test
-    -- (running right after the archive tests in the same suite) time
-    -- out on its login lookup. One DELETE = one round-trip.
-    let segCount = length segments
-    _ <-
-      sqlExec
-        "DELETE FROM segments WHERE camera_id = ? AND end_ts > ? AND start_ts <= ?"
-        (cameraUuid, from, to)
-    putStrLn
-      ( "[purge] "
-          <> show segCount
-          <> " segment row(s) deleted; "
-          <> show nObjects
-          <> " S3 delete(s) issued"
-      )
 
 -- | Playlist window (design 05 §Archive playback): explicit from/to
 -- validated to ≤ 6 h; otherwise the 1 h preceding the camera's most
@@ -353,6 +306,7 @@ resolvePlaylistWindow cameraUuid mFrom mTo =
       latest <-
         query @Segment
           |> filterWhere (#cameraId, cameraUuid)
+          |> filterWhere (#pendingDeleteAt, Nothing)
           |> orderByDesc #startTs
           |> limit 1
           |> fetchOneOrNothing
@@ -376,46 +330,6 @@ nonemptyParam name =
 -- 'id' and flags it "redundant" — go through @get #id@ instead.
 camUuid :: Camera -> UUID
 camUuid c = case c |> get #id of Id u -> u
-
--- | Delete every S3 object covering the window: row keys PLUS orphans
--- found by prefix listing. Orphans exist because legacy rows stored
--- second-precision keys while uploads used millisecond precision
--- (pre-fix worker, pitfall #25 class) — row-key deletes were silent
--- no-ops for those segments. The prefix pass lists
--- @\<slug\>/\<YYYY-MM-DD\>/@ per day in the window and deletes objects
--- whose key-embedded timestamp falls inside @[from, to]@, independent
--- of what the (possibly already-deleted) DB rows said.
-purgeObjects :: S3.S3Config -> Text -> UTCTime -> UTCTime -> [Text] -> IO Int
-purgeObjects cfg slug from to rowKeys = do
-  let ci = S3.connectInfo cfg
-      bucket = S3.s3cBucket cfg
-      days = enumFromTo (utctDay from) (utctDay to)
-  listed <- fmap concat $ forM days $ \d ->
-    S3.listObjectKeys ci bucket (slug <> "/" <> tshow d <> "/")
-      `E.catch` \(_ :: E.SomeException) -> pure []
-  let orphanKeys =
-        [ k
-        | k <- listed,
-          Just ts <- [parseKeyTimestamp slug k],
-          ts >= from && ts <= to
-        ]
-      keys = nub (rowKeys <> orphanKeys)
-  forM_ keys $ \k ->
-    S3.deleteObject ci bucket k
-      `E.catch` \(_ :: E.SomeException) -> pure ()
-  pure (length keys)
-
--- | Extract the capture timestamp from an object key
--- (@slug/2026-08-11/15-02-55[.442].mp4@). Returns Nothing for keys
--- that don't match the segment layout (e.g. @init.mp4@ — never
--- purged; future playlists still need it).
-parseKeyTimestamp :: Text -> Text -> Maybe UTCTime
-parseKeyTimestamp slug key = do
-  rest <- T.stripPrefix (slug <> "/") key
-  body <- T.stripSuffix ".mp4" rest
-  let s = T.unpack body
-  parseTimeM True defaultTimeLocale "%Y-%m-%d/%H-%M-%S%Q" s
-    <|> parseTimeM True defaultTimeLocale "%Y-%m-%d/%H-%M-%S" s
 
 -- ---- playlist rendering ---------------------------------------------
 

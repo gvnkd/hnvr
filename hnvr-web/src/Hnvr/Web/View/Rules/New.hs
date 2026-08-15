@@ -97,7 +97,7 @@ ruleForm camera mRule actionUrl =
         <div class="field">
           <label>Geometry — click on the frame</label>
           <div>
-            <canvas id="rule-canvas" width="960" height="540" style="max-width:100%; border:1px solid #3f3f46; cursor:crosshair;"></canvas>
+            <canvas id="rule-canvas" width="960" height="540" style="max-width:100%; border:1px solid var(--border-strong); border-radius: 10px; cursor:crosshair;"></canvas>
           </div>
           <div class="hint">line: 2 clicks · zone: N clicks then "finish polygon" · drag vertices to adjust · direction arrow = line a→b</div>
           <button class="btn" type="button" id="rule-finish">finish polygon</button>

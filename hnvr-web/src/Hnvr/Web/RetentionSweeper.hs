@@ -95,13 +95,16 @@ sweepCamera ::
 sweepCamera s3cfg conn (cid, slug, retentionDays) = do
   let ci = S3.connectInfo s3cfg
       bucket = S3.s3cBucket s3cfg
-  -- 1. Collect object_keys older than cutoff.
+  -- 1. Collect object_keys older than cutoff. Tombstoned rows
+  --    (pending_delete_at, migration 0006) are PendingPurge's job —
+  --    skip them here so the two sweepers don't double-walk S3.
   keys <-
     PG.query
       conn
       "SELECT object_key FROM segments \
       \ WHERE camera_id = ? \
-      \   AND end_ts < NOW() - (? * INTERVAL '1 day')"
+      \   AND end_ts < NOW() - (? * INTERVAL '1 day') \
+      \   AND pending_delete_at IS NULL"
       (cid, retentionDays)
   -- 2. Delete each from S3 (best-effort — log per-key failures but
   -- don't abort the sweep; the next pass retries).
@@ -114,13 +117,14 @@ sweepCamera s3cfg conn (cid, slug, retentionDays) = do
               <> ": "
               <> T.pack (show e)
           )
-  -- 3. Delete the segments rows.
+  -- 3. Delete the segments rows (same tombstone skip as step 1).
   n <-
     PG.execute
       conn
       "DELETE FROM segments \
       \ WHERE camera_id = ? \
-      \   AND end_ts < NOW() - (? * INTERVAL '1 day')"
+      \   AND end_ts < NOW() - (? * INTERVAL '1 day') \
+      \   AND pending_delete_at IS NULL"
       (cid, retentionDays)
   when (n > 0) $
     logInfo

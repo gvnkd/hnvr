@@ -52,11 +52,12 @@ sql touchedFields returning =
             , Just "bytes"
             , Just "sha256"
             , if testBit touchedFields 8 then Just "has_audio" else Nothing
-            , if testBit touchedFields 9 then Just "created_at" else Nothing
+            , Just "pending_delete_at"
+            , if testBit touchedFields 10 then Just "created_at" else Nothing
             ]
         columns = Text.intercalate ", " entries
         placeholders = Text.intercalate ", " ["$" <> Text.pack (show i) | i <- [1 .. length entries]]
-        returningClause = if returning then " RETURNING id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, created_at" else ""
+        returningClause = if returning then " RETURNING id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, pending_delete_at, created_at" else ""
     in if null entries
         then "INSERT INTO segments DEFAULT VALUES" <> returningClause
         else "INSERT INTO segments (" <> columns <> ") VALUES (" <> placeholders <> ")" <> returningClause
@@ -73,7 +74,8 @@ encoder touchedFields = mconcat $ catMaybes
     , Just ((.bytes) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int8)))
     , Just ((.sha256) >$< Encoders.param (Encoders.nonNullable Encoders.text))
     , if testBit touchedFields 8 then Just ((.hasAudio) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 9 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , Just ((.pendingDeleteAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz))
+    , if testBit touchedFields 10 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 

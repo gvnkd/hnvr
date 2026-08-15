@@ -74,6 +74,11 @@ rulesEventsSql = $(embedFile "migrations/0003-rules-events.sql")
 auditLogSql :: ByteString
 auditLogSql = $(embedFile "migrations/0004-audit-log.sql")
 
+-- | Tombstone column for verified recording deletion
+-- (@segments.pending_delete_at@ + partial index). See the file header.
+pendingDeleteSql :: ByteString
+pendingDeleteSql = $(embedFile "migrations/0006-pending-delete.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -109,6 +114,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0004-audit-log" auditLogSql) True conn
     handleResult "0004-audit-log" auditRes
+    pendingRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0006-pending-delete" pendingDeleteSql) True conn
+    handleResult "0006-pending-delete" pendingRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

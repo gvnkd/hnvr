@@ -4,6 +4,7 @@ module.exports = {
     "./src/Hnvr/Web/View/**/*.hs",
     "./src/Hnvr/Web/View/*.hs",
     "./static/src.css",
+    "./static/app.js",
   ],
   darkMode: "class",
   theme: {

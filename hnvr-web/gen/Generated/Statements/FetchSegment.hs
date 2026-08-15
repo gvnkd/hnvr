@@ -35,7 +35,7 @@ statement :: Statement.Statement (Id' "segments") (Maybe Generated.ActualTypes.S
 statement = Statement.preparable sql encoder decoder
 
 sql :: Text
-sql = "SELECT id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, created_at FROM segments WHERE id = $1 LIMIT 1"
+sql = "SELECT id, camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, has_audio, pending_delete_at, created_at FROM segments WHERE id = $1 LIMIT 1"
 
 encoder :: Encoders.Params (Id' "segments")
 encoder = Encoders.param (Encoders.nonNullable Mapping.encoder)

@@ -25,6 +25,57 @@
   fix (getBoundingClientRect) + draggable vertices; devenv MinIO now
   binds 0.0.0.0:9100 + `HNVR_S3_PUBLIC_ENDPOINT=http://192.168.0.156:9100`
   so remote browsers can fetch presigned thumbnails.
+  **Web UI v2 redesign (Aug 15 2026)**: full redesign landed (not yet
+  committed at write-time). CSS-vars theming (two themes: `midnight`
+  dark + `daylight` light, switched via sidebar dropdown, persisted in
+  localStorage `hnvr-theme`, pre-paint inline head script),
+  collapsible sidebar layout (was topnav), `/static/app.js` vanilla JS
+  (loaded WITHOUT defer in <head> so page-level inline scripts can use
+  `HNVR.*`), sortable+filterable tables, `tr[data-href]` clickable
+  rows, dashboard live wall (low-fps `/debug-frame/<uuid>` polling
+  with dual-img crossfade + IntersectionObserver gating + 404 backoff),
+  FLIP-animated fullscreen WHEP overlay (`HNVR.whep` shared with
+  /ShowLive), Ken Burns animated event thumbnails + lightbox,
+  collapsible filter panels (default OPEN — Playwright asserts form
+  inputs visible), `@view-transition` cross-document nav.
+  `hnvr-static` + module preStart now also ship `app.js`.
+  New Playwright `ui-v2.spec.ts` (6 specs). Full suite: 29 passed +
+  1 conditional skip.
+  **Tombstone (verified) recording deletion (Aug 15 2026, late —
+  v0.3.0.0)**: `segments.pending_delete_at` (migration 0006, wired
+  into SchemaMigration — 0005 was NEVER wired, stays manual).
+  PurgeRecordingAction stamps rows synchronously (all read paths
+  filter `pending_delete_at IS NULL` → recording vanishes on
+  redirect), forks `Hnvr.Web.PendingPurge.forkCameraPurge`: S3
+  delete (row keys + day-prefix orphans minus a live-row protect
+  set) → RE-LIST window → hard DELETE rows only when verified
+  empty. 60 s sweeper (90 s grace) resumes batches whose worker
+  died — the crash path that orphaned 98.6k objects. Verified both
+  paths live on :18002 (21-row click purge; 141-row stale-batch
+  resume). RetentionSweeper skips tombstoned rows. IHP schema
+  parser rejects `--` comments INSIDE CREATE TABLE column lists —
+  keep them outside. `S3.ConnectInfo` is NOT exported by
+  Hnvr.Storage.S3 — pass S3Config and call connectInfo inside.
+  Related same-day fixes: Layout now renders `renderFlashMessages`
+  (was never rendered anywhere — `setSuccessMessage` was invisible;
+  `.alert-success/.alert-danger` styles in src.css); dev MinIO hit
+  `XMinioStorageFull` (drive 100%) leaving 98.6k orphan objects /
+  41 GiB — cleaned via
+  `mc rm --recursive --force local/hnvr-recordings/<slug>/2026-08-14/`
+  (event thumbnails + init.mp4s kept; spool left for SpoolDrainer).
+  Current version: **0.3.0.0**.
+  **App versioning (Aug 15 2026)**: single source of truth is
+  `hnvr-web/hnvr-web.cabal` `version:` — bump on every feature/patch
+  (feature → 2nd component, fix → 3rd+). `Hnvr.Web.version` re-exports
+  it via `Paths_hnvr_web` (MUST be listed in the library's
+  `autogen-modules` + `other-modules` or the link fails with an
+  undefined closure). Surfaces: startup log line in LeaderMain/
+  NodeMain (`starting hnvr-leader, hnvr v0.2.0.0`), unauthenticated
+  `GET /status` JSON (`app/host/startedAt/uptimeSeconds/version`,
+  middleware in `Hnvr.Web.Config` composed into the single
+  CustomMiddleware option per pitfall #60), and a `v…` tag in the
+   sidebar footer. Current version: **0.3.0.0** (tombstone verified
+   recording deletion; 0.2.0.0 was UI v2 + versioning).
   Phase 2 audit-and-fix pass landed Aug 10 2026 (see
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
   that have been resolved; `.opencode/PHASE_AUDIT_REPORT_2.md` for the
@@ -1563,6 +1614,48 @@ ffprobe notes:
          `connectInfo`, browser presigns use `presignGetUrlWithConfig` /
          `presignConnectInfo`. NixOS module option:
          `services.hnvr.leader.s3PublicEndpoint`.
+
+    111. **Overlay components + `hidden` attribute** (Aug 15 2026, UI
+         v2) — author CSS `display: flex` on `.live-overlay`/`.lightbox`
+         beats the UA's `[hidden] { display: none }`, so a "hidden"
+         overlay invisibly covers the page and intercepts every click
+         (Playwright: "subtree intercepts pointer events"). Fix shipped
+         in src.css base layer: `[hidden] { display: none !important }`.
+
+    112. **HSX allows `data-*` / `aria-*` attributes** (Aug 15 2026) —
+         pitfall #43's whitelist has explicit prefixes: any attribute
+         starting `data-`, `aria-`, `hx-` parses. All app.js hooks are
+         `data-*`. Also: app.js must load WITHOUT `defer` in <head> —
+         body-level inline scripts (pitfall #63 splices) run BEFORE
+         deferred scripts, so `HNVR.whep` would be undefined.
+
+    113. **hlint flags `coerce h.id` as "Redundant id"** (Aug 15 2026,
+         extends pitfall #76) — in a where-binding `x = coerce h.id ::
+         Text`, hlint parses `h.id` as composition. Fix: `case h |> get
+         #id of Id t -> t` with `import IHP.ModelSupport (Id' (Id))`.
+         Also: pre-commit end-of-file-fixer rewrites the minified
+         `static/app.css` (no trailing newline) — excluded in flake.nix
+         preCommit hooks (`^hnvr-web/static/app\.css$`).
+
+    114. **backyard + low_ent WHEP return 400 in headless chromium**
+         (Aug 15 2026) — floor_2_5 live view works (201, "Live");
+         backyard and low_ent fail `WHEP POST ... 400` on BOTH /ShowLive
+         and the dashboard overlay, i.e. camera/mediamtx-side, not UI.
+         Not root-caused (possibly HEVC paths or stale mediamtx config).
+         Check `/v3/config/paths/get/<slug>` when touching live view.
+
+    115. **Stale `./result` leader + new app.css = broken mixed layout**
+         (Aug 15 2026, Sergey's "body shifted right" report) — a leader
+         started from `./result/bin/hnvr-leader` (pre-redesign binary,
+         Aug 14 store path) served OLD HTML while the dev server reads
+         `APP_STATIC=hnvr-web/static` from CWD = NEW app.css. Old
+         `.shell` was flex-column+topnav, new CSS is flex-row → the
+         page body rendered as a row item to the right of the unstyled
+         nav strip. Not a CSS bug. Rule: after ANY UI rebuild, the dev
+         leader must be restarted from `./result-web/bin/hnvr-leader`
+         (never `./result` — pitfall #83's overwrite trap), and
+         `pgrep -af 'hnvr-lead[e]r'` must show exactly one process
+         before trusting what the browser shows.
 
 ## Sergey's working style
 

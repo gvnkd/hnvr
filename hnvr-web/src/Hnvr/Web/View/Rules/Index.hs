@@ -34,12 +34,16 @@ instance View IndexView where
       <div class="page-header">
         <div>
           <h1>Rules</h1>
-          <div class="subtitle">line crossing + zone intrusion</div>
+          <div class="subtitle">line crossing + zone intrusion · click a row to edit</div>
         </div>
       </div>
 
       <div class="card">
-        <table class="table">
+        <div class="card-header">
+          <span>detection rules</span>
+          <input class="table-filter" type="text" placeholder="filter…" data-table-filter="#rules-table" />
+        </div>
+        <table class="table" id="rules-table" data-sortable="1">
           <thead>
             <tr>
               <th>Name</th>
@@ -48,7 +52,7 @@ instance View IndexView where
               <th>Classes</th>
               <th>Cooldown</th>
               <th>Enabled</th>
-              <th></th>
+              <th data-no-sort="1"></th>
             </tr>
           </thead>
           <tbody>
@@ -60,7 +64,7 @@ instance View IndexView where
     where
       renderRule rule =
         [hsx|
-        <tr>
+        <tr data-href={editUrl}>
           <td>{rule.name}</td>
           <td class="font-mono">{cameraSlug rule.cameraId}</td>
           <td>{kindBadge rule.kind}</td>

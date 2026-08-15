@@ -43,7 +43,7 @@ import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
 import Generated.ActualTypes.PrimaryKeys
-data Segment' = Segment {id :: (Id' "segments"), cameraId :: UUID, startTs :: UTCTime, endTs :: UTCTime, hostId :: (Maybe Text), objectKey :: Text, bytes :: Integer, sha256 :: Text, hasAudio :: Bool, createdAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+data Segment' = Segment {id :: (Id' "segments"), cameraId :: UUID, startTs :: UTCTime, endTs :: UTCTime, hostId :: (Maybe Text), objectKey :: Text, bytes :: Integer, sha256 :: Text, hasAudio :: Bool, pendingDeleteAt :: (Maybe UTCTime), createdAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
 
 type Segment = Segment'
 
@@ -53,7 +53,7 @@ type instance GetModelByTableName "segments" = Segment
 
 instance IHP.ModelSupport.Table (Segment') where
     tableName = "segments"
-    columnNames = ["id","camera_id","start_ts","end_ts","host_id","object_key","bytes","sha256","has_audio","created_at"]
+    columnNames = ["id","camera_id","start_ts","end_ts","host_id","object_key","bytes","sha256","has_audio","pending_delete_at","created_at"]
     primaryKeyColumnNames = ["id"]
 
 

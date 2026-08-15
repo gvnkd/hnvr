@@ -45,11 +45,13 @@ instance View ShowView where
       <div class="video-status">
         <span id="hnvr-live-led" class="led led-warn"></span>
         <span id="hnvr-live-status">Connecting…</span>
+        <span class="faint">·</span>
+        <button class="btn btn-ghost btn-sm" id="hnvr-live-fs">fullscreen</button>
       </div>
       <div class="card mt-4">
         <div class="card-header">Events</div>
         <div class="card-body" id="hnvr-live-feed">
-          <div class="text-sm text-zinc-400">loading…</div>
+          <div class="text-sm muted">loading…</div>
         </div>
       </div>
       {scriptTag}
@@ -80,43 +82,23 @@ feedJs cam =
     <> "}"
     <> "refreshFeed(); setInterval(refreshFeed, 5000);"
 
--- | Inline WHEP client. ~40 LOC vanilla JS. Talks to our /whep/<slug>
--- proxy which forwards to MediaMTX. Updates the status pill + LED
--- element based on connection state.
+-- | Inline WHEP bootstrap: delegates to the shared client in
+-- /static/app.js (HNVR.whep) and maps its state callbacks onto the
+-- status pill + LED. app.js is loaded in <head> (no defer) so the
+-- HNVR global exists by the time body-level page scripts run.
 whepJs :: Camera -> Text
 whepJs cam =
   "const video = document.getElementById('hnvr-live');"
     <> "const status = document.getElementById('hnvr-live-status');"
     <> "const led = document.getElementById('hnvr-live-led');"
     <> "function setLed(cls) { led.className = 'led ' + cls; }"
-    <> "const pc = new RTCPeerConnection();"
-    <> "pc.addTransceiver('video', { direction: 'recvonly' });"
-    <> "pc.addTransceiver('audio', { direction: 'recvonly' });"
-    <> "pc.ontrack = e => { video.srcObject = e.streams[0]; status.textContent = 'Live'; setLed('led-on'); };"
-    <> "pc.onconnectionstatechange = () => {"
-    <> "  if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {"
-    <> "    status.textContent = 'Reconnecting…'; setLed('led-warn');"
-    <> "  } else if (pc.connectionState === 'connected') {"
-    <> "    status.textContent = 'Live'; setLed('led-on');"
-    <> "  }"
-    <> "};"
-    <> "const whepUrl = '/whep/"
+    <> "HNVR.whep('"
     <> cam.slug
-    <> "';"
-    <> "pc.createOffer().then(o => pc.setLocalDescription(o)).then(() => {"
-    <> "  return new Promise(resolve => {"
-    <> "    if (pc.iceGatheringState === 'complete') resolve();"
-    <> "    else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };"
-    <> "  });"
-    <> "}).then(() => {"
-    <> "  return fetch(whepUrl, {"
-    <> "    method: 'POST',"
-    <> "    headers: { 'Content-Type': 'application/sdp' },"
-    <> "    body: pc.localDescription.sdp"
-    <> "  });"
-    <> "}).then(r => {"
-    <> "  if (!r.ok) throw new Error('WHEP POST failed: ' + r.status);"
-    <> "  return r.text();"
-    <> "}).then(answer => {"
-    <> "  pc.setRemoteDescription({ type: 'answer', sdp: answer });"
-    <> "}).catch(e => { status.textContent = 'Error: ' + e.message; setLed('led-off'); });"
+    <> "', video, function (state) {"
+    <> "  if (state === 'live') { status.textContent = 'Live'; setLed('led-on'); }"
+    <> "  else if (state === 'reconnecting') { status.textContent = 'Reconnecting…'; setLed('led-warn'); }"
+    <> "  else { status.textContent = 'Error: ' + state.replace(/^error:\\s*/, ''); setLed('led-off'); }"
+    <> "});"
+    <> "document.getElementById('hnvr-live-fs').addEventListener('click', function () {"
+    <> "  if (video.requestFullscreen) video.requestFullscreen();"
+    <> "});"

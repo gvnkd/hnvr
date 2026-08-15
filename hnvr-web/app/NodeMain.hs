@@ -43,6 +43,7 @@ import Hnvr.Node.CaptureSupervisor
 import Hnvr.Node.ConfigWatcher (startConfigWatcher)
 import Hnvr.Node.HealthReporter (startHealthReporter)
 import qualified Hnvr.Storage.S3 as S3
+import Hnvr.Web (versionText)
 import Hnvr.Web.Metrics (ensureMetrics, startGpuPoller, startMetricsServer)
 import qualified System.Environment as Env
 
@@ -55,6 +56,7 @@ snapshotTimeoutMicros = 5_000_000
 
 main :: IO ()
 main = do
+  logInfo ("starting hnvr-node, " <> versionText)
   let defaultUri = "nats://nats:nats@localhost:4222" :: Text
   (metricsStore, metrics) <- ensureMetrics
   startMetricsServer metricsStore

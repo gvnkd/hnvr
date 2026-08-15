@@ -118,6 +118,7 @@
             installPhase = ''
               mkdir -p $out
               cp static/app.css $out/app.css
+              cp static/app.js $out/app.js
             '';
           };
         in
@@ -282,6 +283,7 @@
           installPhase = ''
             mkdir -p $out
             cp static/app.css $out/app.css
+            cp static/app.js $out/app.js
           '';
         };
 
@@ -317,7 +319,9 @@
             nixpkgs-fmt.enable = true;
             end-of-file-fixer = {
               enable = true;
-              excludes = [ "^hnvr-web/gen/" "^vendored/" ];
+              # app.css is tailwind --minify output (no trailing newline);
+              # the devenv watcher regenerates it on every src.css edit.
+              excludes = [ "^hnvr-web/gen/" "^vendored/" "^hnvr-web/static/app\\.css$" ];
             };
             trim-trailing-whitespace = {
               enable = true;
