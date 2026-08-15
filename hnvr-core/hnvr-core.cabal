@@ -18,6 +18,7 @@ library
     Hnvr.Core.Id
     Hnvr.Core.Logging
     Hnvr.Core.Metrics
+    Hnvr.Core.Onvif
     Hnvr.Core.Playlist
     Hnvr.Core.Prelude
     Hnvr.Core.Recording
@@ -67,6 +68,7 @@ test-suite hnvr-core-test
     Hnvr.Core.GeometrySpec
     Hnvr.Core.IdSpec
     Hnvr.Core.MetricsSpec
+    Hnvr.Core.OnvifSpec
     Hnvr.Core.PlaylistSpec
     Hnvr.Core.RecordingSpec
     Hnvr.Core.SegmentSpec

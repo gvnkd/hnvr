@@ -10,6 +10,7 @@ import qualified Hnvr.Core.FrameSpec as FrameSpec
 import qualified Hnvr.Core.GeometrySpec as GeometrySpec
 import qualified Hnvr.Core.IdSpec as IdSpec
 import qualified Hnvr.Core.MetricsSpec as MetricsSpec
+import qualified Hnvr.Core.OnvifSpec as OnvifSpec
 import qualified Hnvr.Core.PlaylistSpec as PlaylistSpec
 import qualified Hnvr.Core.RecordingSpec as RecordingSpec
 import qualified Hnvr.Core.SegmentSpec as SegmentSpec
@@ -32,6 +33,7 @@ main =
         GeometrySpec.tests,
         IdSpec.tests,
         MetricsSpec.tests,
+        OnvifSpec.tests,
         PlaylistSpec.tests,
         RecordingSpec.tests,
         SegmentSpec.tests,

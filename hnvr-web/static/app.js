@@ -263,6 +263,10 @@
   };
 
   /* ── Dashboard camera wall: low-fps live frames ─────────────── */
+  function liveOverlayOpen() {
+    var o = document.getElementById("live-overlay");
+    return !!(o && !o.hidden);
+  }
   function initLiveFrames() {
     document.querySelectorAll(".cam-live[data-frame-url]").forEach(function (wrap) {
       var url = wrap.getAttribute("data-frame-url");
@@ -279,6 +283,11 @@
       }
       function tick() {
         if (!visible) return;
+        if (liveOverlayOpen()) {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(tick, 500);
+          return;
+        }
         var next = new Image();
         next.onload = function () {
           failures = 0;

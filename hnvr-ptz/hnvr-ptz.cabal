@@ -7,16 +7,39 @@ build-type:    Simple
 
 library
   exposed-modules:
+    Hnvr.Onvif.Client
     Hnvr.Ptz.Controller
     Hnvr.Ptz.Driver
     Hnvr.Ptz.Onvif
 
   build-depends:
-    , base        >=4.18 && <5
+    , base               >=4.18 && <5
+    , base64-bytestring
     , bytestring
+    , containers
+    , cryptonite
     , hnvr-core
     , hnvr-nats
+    , http-client
+    , http-types
+    , memory
     , text
+    , time
+    , xml-conduit
 
   hs-source-dirs:   src
+  default-language: Haskell2010
+
+test-suite hnvr-ptz-test
+  type:             exitcode-stdio-1.0
+  main-is:          Main.hs
+  hs-source-dirs:   test
+  build-depends:
+    , base
+    , bytestring
+    , hnvr-core
+    , hnvr-ptz
+    , tasty
+    , tasty-hunit
+
   default-language: Haskell2010
