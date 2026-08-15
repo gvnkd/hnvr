@@ -10,6 +10,13 @@
 -- per pitfall #2 / P0-1). The snapshot reply is the node's only source
 -- of truth for its initial worker set.
 --
+-- The responder is also the duplicate-worker arbiter
+-- ('Hnvr.Core.HostClaim'): the leader binary already runs the full
+-- node role for its own host, so a snapshot request for that host from
+-- anything NOT marked @leader: true@ in the request payload is denied
+-- (empty batch, @claimed: false@). Running @hnvr-node@ on the leader
+-- host was the 2026-08-15 double-record bug.
+--
 -- The query is small and indexed (@cameras_assigned_idx@ on
 -- @assigned_host WHERE enabled@); we re-run it per request rather than
 -- maintaining a leader-side cache. At 1 snapshot per node boot (and
@@ -22,7 +29,8 @@ where
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException, bracket, catch)
 import Control.Monad (forever)
-import Data.Aeson (Value, encode)
+import Data.Aeson (Value (..), decodeStrict, encode)
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BL
 import Data.List (foldl')
@@ -41,6 +49,7 @@ import Hnvr.Core.CameraSnapshot
     RuleSnapshot (..),
     transportFromText,
   )
+import Hnvr.Core.HostClaim (ClaimDecision (..), decideSnapshotClaim)
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Logging (logError, logInfo, logWarn)
 import Hnvr.Nats.Bus (Bus, Message (..))
@@ -63,8 +72,10 @@ startSnapshotResponder bus = do
           `catch` \(e :: SomeException) ->
             logError ("SnapshotResponder: handler failed: " <> T.pack (show e))
 
--- | Extract the target host from the subject, fetch assigned cameras,
--- encode as 'CameraSnapshotBatch', reply via the message's @replyTo@.
+-- | Extract the target host from the subject, arbitrate the claim
+-- ('decideSnapshotClaim' — an external node must never be granted the
+-- leader's own host), fetch assigned cameras, encode as
+-- 'CameraSnapshotBatch', reply via the message's @replyTo@.
 -- Silently drops messages with no @replyTo@ (malformed requester).
 handleRequest :: Bus -> Message -> IO ()
 handleRequest bus msg =
@@ -72,15 +83,36 @@ handleRequest bus msg =
     Nothing -> logWarn ("SnapshotResponder: no replyTo on " <> msgSubject msg <> ", dropping")
     Just replyTo -> do
       let host = lastDotToken (msgSubject msg)
-      cams <- fetchAssignedCameras host
-      let batch = CameraSnapshotBatch {csbCameras = cams}
-          payload = BL.toStrict (encode batch)
-      Bus.reply bus (Just replyTo) payload
-      logInfo ("SnapshotResponder: replied to " <> host <> " with " <> T.pack (show (length cams)) <> " camera(s)")
+      leaderHost <- maybe "hnvr-2" T.pack <$> Env.lookupEnv "HNVR_HOST"
+      case decideSnapshotClaim leaderHost (isLeaderRequest msg) host of
+        ClaimDeniedLeaderHost -> do
+          let payload = BL.toStrict (encode CameraSnapshotBatch {csbCameras = [], csbClaimed = False})
+          Bus.reply bus (Just replyTo) payload
+          logWarn
+            ( "SnapshotResponder: DENIED snapshot claim for leader host "
+                <> host
+                <> " (an hnvr-node on the leader host double-records every camera — kill it)"
+            )
+        ClaimGranted -> do
+          cams <- fetchAssignedCameras host
+          let batch = CameraSnapshotBatch {csbCameras = cams, csbClaimed = True}
+              payload = BL.toStrict (encode batch)
+          Bus.reply bus (Just replyTo) payload
+          logInfo ("SnapshotResponder: replied to " <> host <> " with " <> T.pack (show (length cams)) <> " camera(s)")
   where
     lastDotToken s = case T.breakOnEnd "." s of
       ("", _) -> s
       (_, t) -> t
+
+-- | The leader marks its own bootstrap request with @leader: true@.
+-- Anything undecodable is treated as external (deny-by-default for the
+-- leader host; spoofing is out of threat model on the LAN — this guards
+-- against the accidental double-run, not malice).
+isLeaderRequest :: Message -> Bool
+isLeaderRequest msg =
+  case decodeStrict (msgPayload msg) of
+    Just (Object o) -> KM.lookup "leader" o == Just (Bool True)
+    _ -> False
 
 -- | One-shot PG connection: SELECT id, slug, rtsp_url, rtsp_transport,
 -- record_audio, sub-stream fields, analysis_fps, model_name FROM cameras

@@ -4,7 +4,14 @@
 
 -- | Entry point for the @hnvr-node@ binary.
 --
--- Runs on every host (including the leader host, which spawns both binaries).
+-- Runs on WORKER hosts only. Do NOT run it on the leader host: the
+-- leader binary already embeds the full node role for its own
+-- @HNVR_HOST@ (@Hnvr.Web.Config.startNodeRoles@, per
+-- @01-architecture.md@ "leader = all of node + leader roles"). Running
+-- both was the 2026-08-15 double-record bug (duplicate fragments,
+-- 1–2 s playback jump-backs). The snapshot-claim handshake below
+-- ('Hnvr.Core.HostClaim') refuses to start workers in that case.
+--
 -- Carries:
 --
 --   * CaptureSupervisor (one CaptureWorker per assigned camera) — M1.
@@ -12,7 +19,8 @@
 --   * ConfigWatcher (subscribes @hnvr.commands.assign.>@,
 --     @hnvr.commands.control.<host>.>@, and
 --     @hnvr.config.cameras.>@; dispatches start/stop to the
---     CaptureSupervisor).
+--     CaptureSupervisor). Started ONLY after the snapshot claim is
+--     granted, so a denied node never reacts to assign broadcasts.
 --
 -- No HTTP server. No Postgres credentials (only NATS + S3 creds).
 -- Learns its initial camera set via a one-shot NATS request/reply to
@@ -67,11 +75,14 @@ main = do
     cfg <- buildCaptureConfig bus host metrics
     sup <- startCaptureSupervisor cfg
     startHealthReporter bus host
-    startConfigWatcher bus host sup
     logInfo ("node: connected to NATS: " <> uri)
-    bootstrapFromSnapshot bus host sup
-      `catch` \(e :: SomeException) ->
-        logError ("node: snapshot bootstrap failed (will rely on assign messages): " <> T.pack (show e))
+    -- Claim FIRST: the ConfigWatcher must not run before we own this
+    -- host, or a node accidentally started on the leader host would
+    -- react to assign broadcasts and double-record every camera.
+    batch <- claimHost bus host
+    startConfigWatcher bus host sup
+    logInfo ("node: snapshot reply contained " <> T.pack (show (length (csbCameras batch))) <> " camera(s)")
+    forM_ (csbCameras batch) (startCamera sup)
     void $ forever $ threadDelay 1_000_000_000
 
 -- | Construct the process-wide 'CaptureConfig' from environment.
@@ -91,23 +102,41 @@ buildCaptureConfig bus host metrics = do
         capMetrics = metrics
       }
 
--- | One-shot snapshot request to the leader. If we get a reply, spawn
--- a 'CaptureWorker' for each camera in the batch. If we don't (leader
--- down, snapshot responder not yet started, etc.), the node still
--- boots — subsequent @hnvr.commands.assign.<slug>@ messages will
--- populate the supervisor as the leader rebroadcasts assignments.
+-- | Request the snapshot/claim from the leader, retrying every 30 s
+-- until granted. Three non-granted outcomes:
 --
--- Note: this is called after 'startConfigWatcher' so any assign
--- messages that arrive between the snapshot reply and subsequent
--- updates are reconciled by the assign handler (idempotent
--- 'startCamera').
-bootstrapFromSnapshot :: Bus -> Text -> CaptureSupervisor -> IO ()
-bootstrapFromSnapshot bus host sup = do
-  let subject = commandSnapshot host
-      req = object ["host" .= host]
-  mBatch <- Bus.requestJson bus subject req snapshotTimeoutMicros
-  case mBatch :: Maybe CameraSnapshotBatch of
-    Nothing -> logInfo "node: no snapshot reply (leader down or timed out); will rely on assign messages"
-    Just batch -> do
-      logInfo ("node: snapshot reply contained " <> T.pack (show (length (csbCameras batch))) <> " camera(s)")
-      forM_ (csbCameras batch) (startCamera sup)
+--   * no reply (leader down, responder not yet started) — retry;
+--   * decode failure (leader older than the @claimed@ field — the node
+--     treats it as denied, safe direction: idle, never double-record);
+--   * explicit denial (@claimed: false@ — this host is owned by the
+--     leader's embedded worker; running hnvr-node here was the
+--     2026-08-15 double-record bug).
+--
+-- Retrying doubles as a liveness wait: the node starts working as soon
+-- as a leader comes up, without relying on missed assign broadcasts.
+claimHost :: Bus -> Text -> IO CameraSnapshotBatch
+claimHost bus host = go
+  where
+    subject = commandSnapshot host
+    req = object ["host" .= host]
+    go = do
+      mBatch <-
+        Bus.requestJson bus subject req snapshotTimeoutMicros
+          `catch` \(e :: SomeException) -> do
+            logError ("node: snapshot request failed: " <> T.pack (show e))
+            pure Nothing
+      case mBatch :: Maybe CameraSnapshotBatch of
+        Just batch
+          | csbClaimed batch -> pure batch
+          | otherwise -> do
+              logError
+                ( "node: snapshot claim DENIED for "
+                    <> host
+                    <> " — this host is owned by the leader's embedded worker; \
+                       \do not run hnvr-node on the leader host. Retrying in 30s."
+                )
+              retry
+        Nothing -> do
+          logInfo "node: no snapshot reply (leader down or pre-claim leader build); retrying in 30s"
+          retry
+    retry = threadDelay 30_000_000 >> go

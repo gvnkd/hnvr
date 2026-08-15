@@ -3,6 +3,32 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **Duplicate-capture bug + snapshot-claim guard (Aug 15 2026, late —
+> v0.4.0.1)**: Sergey reported 1–2 s playback jump-backs (live +
+> archive). Root cause: `hnvr-leader` embeds the full node role
+> (`Config.startNodeRoles`, "leader = all of node + leader roles") AND
+> a standalone `hnvr-node` was running on the same box with the same
+> `HNVR_HOST=hnvr-2` → two CaptureWorkers per camera → every fragment
+> uploaded twice (object keys 1–5 ms apart) → the archive playlist
+> served each second of video twice = the jump-back (deterministic,
+> same spot every replay). Guard shipped: `CameraSnapshotBatch` gained
+> `csbClaimed`; `SnapshotResponder` denies claims for the leader's own
+> host unless the request is marked `leader: true` (pure decision in
+> `Hnvr.Core.HostClaim`, cabal-tested); `NodeMain` now claims BEFORE
+> starting ConfigWatcher and retries every 30 s (also fixes the
+> boot-race pitfall — old "rely on assign messages" path is gone).
+> Deploy order: leader first — old leaders' replies lack `claimed`,
+> new nodes treat that as denied (safe: idle, never double-record).
+> **Retention verified working same evening**: hourly sweep deleted
+> 5516 rows + 5259 S3 objects for backyard alone; row-tracked objects
+> are swept correctly. "Nothing cleared from S3" was (a) orphans —
+> objects without DB rows are NOT swept by design (RetentionSweeper
+> header), 6318 stale 2026-08-14 orphans removed manually; (b) the dev
+> disk hitting 100% → MinIO `XMinioStorageFull` → PUTs spool (1.7 GB
+> backlog, drainer sheds over-cap). Side fix: vendored minio-hs
+> `deleteObject` now validates HTTP status (was: silent no-op on
+> 4xx/5xx — see pitfall #118).
+
 ## Identity
 
 - **Name**: HNVR — Haskell Network Video Recorder
@@ -95,8 +121,8 @@
   `XMinioStorageFull` (drive 100%) leaving 98.6k orphan objects /
   41 GiB — cleaned via
   `mc rm --recursive --force local/hnvr-recordings/<slug>/2026-08-14/`
-  (event thumbnails + init.mp4s kept; spool left for SpoolDrainer).
-  Current version: **0.3.0.0**.
+   (event thumbnails + init.mp4s kept; spool left for SpoolDrainer).
+   Current version: **0.4.0.1**.
   **App versioning (Aug 15 2026)**: single source of truth is
   `hnvr-web/hnvr-web.cabal` `version:` — bump on every feature/patch
   (feature → 2nd component, fix → 3rd+). `Hnvr.Web.version` re-exports
@@ -107,7 +133,9 @@
   `GET /status` JSON (`app/host/startedAt/uptimeSeconds/version`,
   middleware in `Hnvr.Web.Config` composed into the single
   CustomMiddleware option per pitfall #60), and a `v…` tag in the
-   sidebar footer. Current version: **0.3.0.0** (tombstone verified
+   sidebar footer. Current version: **0.4.0.1** (snapshot-claim guard
+   vs duplicate capture on the leader host + minio-hs delete status
+   check; 0.4.0.0 was event video clips; 0.3.0.0 was tombstone verified
    recording deletion; 0.2.0.0 was UI v2 + versioning).
   Phase 2 audit-and-fix pass landed Aug 10 2026 (see
   `.opencode/PHASE_AUDIT_REPORT.md` for the audit + ✅ badges on items
@@ -220,8 +248,12 @@ $LOOPBIN floor_2_5 tcp 'rtsp://192.168.0.197:554/user=admin&password=123456&chan
 # Run the binaries
 HNVR_NATS_URI="nats://nats:nats@localhost:4222" PORT=18001 \
   ./result/bin/hnvr-leader  # IHP app + NATS connect; /healthz on PORT
-HNVR_NATS_URI="nats://nats:nats@localhost:4222" HNVR_HOST=hnvr-2 \
-  ./result/bin/hnvr-node    # Connects to NATS, HealthReporter + ConfigWatcher
+# WARNING: do NOT run hnvr-node on the leader host — the leader binary
+# already embeds the node role (pitfall #117; the snapshot-claim guard
+# now refuses to start workers in that case). hnvr-node is for WORKER
+# hosts only:
+HNVR_NATS_URI="nats://nats:nats@<leader>:4222" HNVR_HOST=hnvr-1 \
+  ./result/bin/hnvr-node    # worker host: HealthReporter + ConfigWatcher
 # Prometheus metrics (both binaries; own warp, not IHP):
 #   HNVR_METRICS_PORT=9102 curl localhost:9102/metrics   # devenv: MinIO owns :9100
 
@@ -1643,9 +1675,39 @@ ffprobe notes:
          messages" — but AssignmentCoordinator only publishes ON
          CHANGE, so the node runs camera-less until something
          reassigns or the node restarts. No periodic retry exists.
-         Follow-up: node should re-request the snapshot on a timer
-         (or leader should republish assignments on a slow tick).
-         Workaround: restart the node once the leader is up.
+         **FIXED (Aug 15 2026, v0.4.0.1): NodeMain's `claimHost`
+         retries the snapshot request every 30 s until granted, and
+         the ConfigWatcher only starts after the grant.**
+
+    117. **Never run hnvr-node on the leader host** (Aug 15 2026, the
+         1–2 s playback jump-back bug) — the leader binary embeds the
+         full node role (`Config.startNodeRoles`), so a stray node
+         with the same `HNVR_HOST` double-records every camera: two
+         RTSP sessions, duplicate fragment uploads with object keys
+         1–5 ms apart, and the archive playlist (`orderByAsc startTs`)
+         serves each second of video twice → the player visibly jumps
+         back at every seam, deterministic per recording. The 2×
+         session count can also push consumer cams past their RTSP
+         session cap (pitfall #11), glitching the mediamtx source
+         session = the "live" jumps. Guard: snapshot-claim handshake
+         (`Hnvr.Core.HostClaim` + `csbClaimed`); a denied node idles
+         worker-less. Diag: `SELECT object_key, count(*) FROM segments
+         GROUP BY 1 HAVING count(*) > 1` — any rows = duplicate
+         recorder somewhere.
+
+    118. **minio-hs `executeRequest` never validates HTTP status**
+         (Aug 15 2026) — `httpLbs` only throws on connection errors,
+         so any 4xx/5xx response is returned as "success". Anything
+         that parses the body (list/put/stat) fails loudly downstream,
+         but `deleteObject` did `void $ executeRequest …` → failed
+         DELETEs were SILENT no-ops (retention sweeps appearing to
+         "not clear S3"). Patched in the vendored copy: 2xx + 404 = ok,
+         else throw `ServiceErr`. Related trap while debugging this:
+         heredoc ghci without `-XOverloadedStrings` type-errors the
+         string-literal line but still runs the remaining lines —
+         "DELETE_DONE" printed for a delete that never typechecked.
+         Verify library claims against `mc stat` / `mc admin trace`,
+         not against your own printf.
 
     110. **Presigned S3 URLs are signed for the endpoint host** (Aug 14
          2026) — archive playlists and event thumbnails leaked

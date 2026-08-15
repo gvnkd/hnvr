@@ -15,6 +15,7 @@ library
     Hnvr.Core.Event
     Hnvr.Core.Frame
     Hnvr.Core.Geometry
+    Hnvr.Core.HostClaim
     Hnvr.Core.Id
     Hnvr.Core.Logging
     Hnvr.Core.Metrics
@@ -66,6 +67,7 @@ test-suite hnvr-core-test
     Hnvr.Core.EventSpec
     Hnvr.Core.FrameSpec
     Hnvr.Core.GeometrySpec
+    Hnvr.Core.HostClaimSpec
     Hnvr.Core.IdSpec
     Hnvr.Core.MetricsSpec
     Hnvr.Core.OnvifSpec

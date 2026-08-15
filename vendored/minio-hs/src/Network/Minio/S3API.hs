@@ -108,7 +108,9 @@ module Network.Minio.S3API
 where
 
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Lib.Prelude
 import qualified Network.HTTP.Conduit as NC
 import qualified Network.HTTP.Types as HT
@@ -328,15 +330,29 @@ deleteBucket bucket =
         }
 
 -- | DELETE an object from the service.
+--
+-- hnvr patch (2026-08-15): 'executeRequest' performs no HTTP status
+-- validation, so a failed DELETE (4xx/5xx — e.g. a server at its
+-- free-space threshold) used to be a silent no-op and retention
+-- sweeps appeared to "not clear S3". Validate the status here: 2xx is
+-- success, 404 is treated as success (deleting an already-missing key
+-- is idempotent — the sweeper re-runs converge on it), anything else
+-- throws so callers' catch/log paths actually fire.
 deleteObject :: Bucket -> Object -> Minio ()
-deleteObject bucket object =
-  void $
+deleteObject bucket object = do
+  resp <-
     executeRequest $
       defaultS3ReqInfo
         { riMethod = HT.methodDelete,
           riBucket = Just bucket,
           riObject = Just object
         }
+  let st = HT.statusCode (NC.responseStatus resp)
+  unless (st < 300 || st == 404) $
+    throwIO $
+      ServiceErr
+        ("DeleteObject HTTP " <> T.pack (show st))
+        (T.decodeUtf8 (BL.toStrict (NC.responseBody resp)))
 
 -- | Create a new multipart upload.
 newMultipartUpload :: Bucket -> Object -> [HT.Header] -> Minio UploadId

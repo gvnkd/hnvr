@@ -132,14 +132,28 @@ data RuleSnapshot = RuleSnapshot
 -- | Wire shape of the snapshot reply. A list so we can extend with
 -- metadata (batch sequence number, leader id, etc.) without breaking
 -- clients that just want the camera list.
-newtype CameraSnapshotBatch = CameraSnapshotBatch
-  { csbCameras :: [CameraSnapshot]
+--
+-- @csbClaimed@ is the duplicate-worker guard: the leader denies the
+-- claim when an external node requests a snapshot for the leader's own
+-- host (the leader binary already runs the full node role for it — see
+-- @01-architecture.md@ "leader = all of node + leader roles"). A node
+-- that receives a denied batch must NOT start its ConfigWatcher or any
+-- capture workers; it retries until granted. Old leaders that don't
+-- emit the field fail the node's decode, which the node treats as
+-- denied (safe direction: idle, never double-record).
+data CameraSnapshotBatch = CameraSnapshotBatch
+  { csbCameras :: [CameraSnapshot],
+    csbClaimed :: !Bool
   }
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON CameraSnapshotBatch where
-  toJSON b = object ["cameras" .= csbCameras b]
+  toJSON b =
+    object
+      [ "cameras" .= csbCameras b,
+        "claimed" .= csbClaimed b
+      ]
 
 instance FromJSON CameraSnapshotBatch where
   parseJSON = withObject "CameraSnapshotBatch" $ \o ->
-    CameraSnapshotBatch <$> o .: "cameras"
+    CameraSnapshotBatch <$> o .: "cameras" <*> o .: "claimed"

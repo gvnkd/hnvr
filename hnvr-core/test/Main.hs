@@ -8,6 +8,7 @@ import qualified Hnvr.Core.CryptoSpec as CryptoSpec
 import qualified Hnvr.Core.EventSpec as EventSpec
 import qualified Hnvr.Core.FrameSpec as FrameSpec
 import qualified Hnvr.Core.GeometrySpec as GeometrySpec
+import qualified Hnvr.Core.HostClaimSpec as HostClaimSpec
 import qualified Hnvr.Core.IdSpec as IdSpec
 import qualified Hnvr.Core.MetricsSpec as MetricsSpec
 import qualified Hnvr.Core.OnvifSpec as OnvifSpec
@@ -31,6 +32,7 @@ main =
         EventSpec.tests,
         FrameSpec.tests,
         GeometrySpec.tests,
+        HostClaimSpec.tests,
         IdSpec.tests,
         MetricsSpec.tests,
         OnvifSpec.tests,

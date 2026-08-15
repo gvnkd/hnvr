@@ -213,7 +213,10 @@ startNodeRoles bus host = do
   writeIORef supervisorRegistry (Just sup)
   startConfigWatcher bus host sup
   let subject = commandSnapshot host
-      req = object ["host" .= host]
+      -- @leader: true@ marks this as the leader's own bootstrap so the
+      -- SnapshotResponder's duplicate-worker guard
+      -- ('Hnvr.Core.HostClaim') doesn't deny the claim for our own host.
+      req = object ["host" .= host, "leader" .= True]
   mBatch <- Timeout.timeout 5_000_000 (Bus.requestJson bus subject req 5_000_000)
   case mBatch :: Maybe (Maybe CameraSnapshotBatch) of
     Just (Just batch) -> do

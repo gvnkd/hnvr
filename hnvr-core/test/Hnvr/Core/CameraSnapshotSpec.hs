@@ -111,7 +111,8 @@ sampleBatch =
     { csbCameras =
         [ sampleSnapshot,
           sampleSnapshot {csSlug = "backyard", csTransport = UdpTransport}
-        ]
+        ],
+      csbClaimed = True
     }
 
 sampleUuid :: UUID
