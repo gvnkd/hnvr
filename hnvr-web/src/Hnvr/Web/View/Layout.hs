@@ -39,6 +39,7 @@ renderLayout inner =
           <span class="dot"></span>
           <span class="wordmark">HNVR</span>
         </a>
+        <div class="brand-version"><span class="badge badge-mute">v{version}</span></div>
         <div class="nav-section">Monitor</div>
         {navItem "/" "▦" "Dashboard" (currentPath == "/" || currentPath == "/Dashboard")}
         {navItem "/Events" "◈" "Events" (isPrefix "/Events")}

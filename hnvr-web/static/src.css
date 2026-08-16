@@ -197,6 +197,9 @@
     background-clip: text;
     color: transparent;
   }
+  .sidenav .brand-version {
+    @apply px-2 mb-1;
+  }
   .nav-section {
     @apply mt-4 mb-1 px-2;
     font-size: 10px;
@@ -241,6 +244,7 @@
   .shell.nav-collapsed .nav-item .nav-label,
   .shell.nav-collapsed .nav-section,
   .shell.nav-collapsed .brand .wordmark,
+  .shell.nav-collapsed .brand-version,
   .shell.nav-collapsed .version-tag,
   .shell.nav-collapsed .sidenav-foot-label {
     display: none;
@@ -1046,6 +1050,7 @@
   .shell.nav-collapsed .nav-item .nav-label,
   .shell.nav-collapsed .nav-section,
   .shell.nav-collapsed .brand .wordmark,
+  .shell.nav-collapsed .brand-version,
   .shell.nav-collapsed .version-tag,
   .shell.nav-collapsed .sidenav-foot-label {
     display: initial;
