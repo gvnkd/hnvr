@@ -196,16 +196,14 @@ in {
       wantedBy = [ "multi-user.target" ];
 
       environment = {
-        HNVR_HOST_ID          = name;
-        HNVR_ROLE             = "worker";
-        HNVR_NATS_URL         = "nats://127.0.0.1:4222";
-        HNVR_NATS_CREDS_FILE  = "@${config.sops.secrets.hnvr-nats-creds.path}";
+        HNVR_HOST             = name;
+        HNVR_NATS_URI         = "nats://nats:nats@127.0.0.1:4222";
         HNVR_S3_ENDPOINT      = "https://s3.example.internal";
         HNVR_S3_ACCESS_KEY    = "@${config.sops.secrets.hnvr-s3-access-key.path}";
         HNVR_S3_SECRET_KEY    = "@${config.sops.secrets.hnvr-s3-secret-key.path}";
         HNVR_EXEC_PROVIDERS   = execProviders;
-        HNVR_MODELS_DIR       = "${models}";
-        HNVR_ENGINES_DIR      = "${cfg.dataDir}/engines";
+        HNVR_MODEL_DIR        = "${models}";
+        HNVR_TRT_CACHE_DIR    = "${cfg.dataDir}/trt-cache";
       };
 
       path = with pkgs; [ ffmpeg_7-full onnxruntime cudaPackages.cudatoolkit ];
@@ -242,11 +240,9 @@ in {
       wantedBy = [ "multi-user.target" ];
 
       environment = {
-        HNVR_HOST_ID          = name;
-        HNVR_ROLE             = "leader";
-        HNVR_DB_URL           = "@${config.sops.secrets.hnvr-db-url.path}";
-        HNVR_NATS_URL         = "nats://127.0.0.1:4222";
-        HNVR_NATS_CREDS_FILE  = "@${config.sops.secrets.hnvr-nats-creds.path}";
+        HNVR_HOST             = name;
+        DATABASE_URL          = "@${config.sops.secrets.hnvr-db-url.path}";
+        HNVR_NATS_URI         = "nats://nats:nats@127.0.0.1:4222";
         HNVR_S3_ENDPOINT      = "https://s3.example.internal";
         # Browser-reachable endpoint for presigned archive/event URLs;
         # omit when HNVR_S3_ENDPOINT is already public.
@@ -254,8 +250,8 @@ in {
         HNVR_S3_ACCESS_KEY    = "@${config.sops.secrets.hnvr-s3-access-key.path}";
         HNVR_S3_SECRET_KEY    = "@${config.sops.secrets.hnvr-s3-secret-key.path}";
         HNVR_EXEC_PROVIDERS   = execProviders;
-        HNVR_MODELS_DIR       = "${models}";
-        HNVR_MEDIAMTX_CFG     = "/run/hnvr/mediamtx.yml";
+        HNVR_MODEL_DIR        = "${models}";
+        HNVR_MEDIAMTX_CONFIG_PATH = "/run/hnvr/mediamtx.yml";
         INITIAL_ADMIN_EMAIL   = cfg.initialAdminEmail;
         INITIAL_ADMIN_PASSWORD= "@${config.sops.secrets.initial-admin-pw.path}";
       };

@@ -14,7 +14,6 @@ import Hnvr.Nats.Subjects
     commandControl,
     commandPtz,
     configCameras,
-    configRules,
     events,
     health,
     leader,
@@ -56,11 +55,6 @@ tests =
               "config.cameras"
               "hnvr.config.cameras.cam-197"
               (configCameras "cam-197"),
-          testCase "configRules" $
-            assertEqual
-              "config.rules"
-              "hnvr.config.rules.cam-197"
-              (configRules "cam-197"),
           testCase "ptzStatus" $
             assertEqual
               "ptz.status"
@@ -93,7 +87,6 @@ tests =
                 commandPtz "x",
                 health "h",
                 configCameras "x",
-                configRules "x",
                 ptzStatus "x",
                 leader
               ]

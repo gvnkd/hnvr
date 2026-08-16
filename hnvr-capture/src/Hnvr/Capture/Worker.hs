@@ -34,6 +34,9 @@ module Hnvr.Capture.Worker
     captureWorker,
     captureWorkerWithStop,
 
+    -- * Observability
+    captureStateWire,
+
     -- * Internal helpers (exported for unit tests; do not use outside)
     transition,
     backoffDuration,
@@ -47,7 +50,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (concurrently)
-import Control.Concurrent.STM (TVar, atomically, modifyTVar')
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, writeTVar)
 import Control.Exception (SomeAsyncException (..), SomeException, catch, fromException, throwIO)
 import Control.Monad (foldM, unless, when)
 import Crypto.Hash (Digest, SHA256 (..), hash)
@@ -63,6 +66,7 @@ import Hnvr.Capture.Ffmpeg (RecordingConfig (..), Transport (..), audioArgs, rec
 import Hnvr.Capture.Fmp4 (Fmp4State, Fragment (..), feed, finish, initial)
 import Hnvr.Capture.RingBuffer (RingBuffer)
 import qualified Hnvr.Capture.RingBuffer as RB
+import Hnvr.Core.CameraStatus (CaptureStateWire (..))
 import Hnvr.Core.Id (CameraId, HostId, Sha256 (..))
 import qualified Hnvr.Core.Logging as Log
 import Hnvr.Core.Metrics (Metrics)
@@ -143,12 +147,21 @@ data CaptureState
 -- 'Stopped' via the 'captureWorkerWithStop' variant). Catches all
 -- exceptions inside @runOnce@ to keep the driver alive.
 captureWorker :: CaptureConfig -> CameraConfig -> IO ()
-captureWorker cfg cam = captureWorkerWithStop cfg cam (pure False)
+captureWorker cfg cam = do
+  stateVar <- newTVarIO Pending
+  captureWorkerWithStop cfg cam (pure False) stateVar
 
 -- | Like 'captureWorker' but polls the supplied @shouldStop@ IO action
 -- between state transitions; returns when it returns 'True'.
-captureWorkerWithStop :: CaptureConfig -> CameraConfig -> IO Bool -> IO ()
-captureWorkerWithStop cfg cam shouldStop = do
+--
+-- The @stateVar@ mirrors the worker's current 'CaptureState' (including
+-- 'Running', which the internal driver IORef never holds — @runOnce@
+-- blocks inside the 'Pending' transition). The CaptureSupervisor keeps
+-- one per camera so the HealthReporter can publish real per-camera
+-- states; before this, worker failures were log-only and the UI kept
+-- showing dead cameras as recording.
+captureWorkerWithStop :: CaptureConfig -> CameraConfig -> IO Bool -> TVar CaptureState -> IO ()
+captureWorkerWithStop cfg cam shouldStop stateVar = do
   stRef <- newIORef Pending
   recentRef <- newIORef ([] :: [UTCTime])
   logInfo cam "starting worker"
@@ -157,19 +170,35 @@ captureWorkerWithStop cfg cam shouldStop = do
     driver stRef recentRef = do
       stop <- shouldStop
       if stop
-        then logInfo cam "stop signal received; exiting"
+        then do
+          atomically (writeTVar stateVar Stopped)
+          logInfo cam "stop signal received; exiting"
         else do
           st <- readIORef stRef
-          next <- transition cfg cam recentRef st
+          next <- transition stateVar cfg cam recentRef st
           writeIORef stRef next
+          atomically (writeTVar stateVar next)
           driver stRef recentRef
 
+-- | Phase-only projection onto the health-payload wire format
+-- ('Hnvr.Core.CameraStatus').
+captureStateWire :: CaptureState -> CaptureStateWire
+captureStateWire = \case
+  Pending -> WPending
+  Running -> WRunning
+  Backoff _ _ -> WBackoff
+  FailedPermanent _ -> WFailed
+  Stopped -> WStopped
+
 -- | Single state-machine transition. Returns the next state. Side-effects
--- (ffmpeg spawn, backoff sleeps, etc.) happen here.
-transition :: CaptureConfig -> CameraConfig -> IORef [UTCTime] -> CaptureState -> IO CaptureState
-transition cfg cam recentRef = \case
+-- (ffmpeg spawn, backoff sleeps, etc.) happen here. Writes 'Running'
+-- into @stateVar@ while @runOnce@ blocks (the driver's own write after
+-- 'transition' returns only covers the non-blocking states).
+transition :: TVar CaptureState -> CaptureConfig -> CameraConfig -> IORef [UTCTime] -> CaptureState -> IO CaptureState
+transition stateVar cfg cam recentRef = \case
   Pending -> do
     logInfo cam "Pending → Running"
+    atomically (writeTVar stateVar Running)
     ec <-
       runOnce cfg cam `catch` \(e :: SomeException) -> do
         -- Cancellation must propagate — swallowing it would turn a

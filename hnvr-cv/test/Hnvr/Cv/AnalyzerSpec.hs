@@ -25,6 +25,7 @@ import Hnvr.Cv.Analyzer
     AnalyzerConfig (..),
     analyzeFrame,
     defaultAnalyzerConfig,
+    execProviderName,
     execProvidersFromEnv,
     parseExecProviders,
     withAnalyzer,
@@ -58,6 +59,16 @@ tests =
             parseExecProviders "" @?= Left "HNVR_EXEC_PROVIDERS: empty provider list",
           testCase "trailing comma tolerated" $
             parseExecProviders "cuda," @?= Right [CUDA]
+        ],
+      testGroup
+        "execProviderName"
+        [ testCase "canonical names" $ do
+            execProviderName CPU @?= "cpu"
+            execProviderName CUDA @?= "cuda"
+            execProviderName TensorRT @?= "tensorrt",
+          testCase "round-trips through parseExecProviders" $ do
+            let eps = [TensorRT, CUDA, CPU]
+            parseExecProviders (T.intercalate "," (map execProviderName eps)) @?= Right eps
         ],
       testCase "execProvidersFromEnv defaults to [CPU]" $ do
         unsetEnv "HNVR_EXEC_PROVIDERS"

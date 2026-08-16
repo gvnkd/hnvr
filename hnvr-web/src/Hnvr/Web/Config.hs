@@ -167,7 +167,10 @@ connectNatsAndStartEventWriter = do
         writeIORef busRegistry (Just bus)
         logInfo ("leader: connected to NATS: " <> cs (uri :: String))
         gated "HNVR_DISABLE_EVENTWRITER" (startEventWriter bus ?modelContext)
-        gated "HNVR_DISABLE_HEALTHCACHE" (void (startHealthCache bus))
+        -- Read once up front: the HealthCache needs it to stamp
+        -- is_leader, the node roles need it for the worker identity.
+        host <- maybe "hnvr-2" T.pack <$> Env.lookupEnv "HNVR_HOST"
+        gated "HNVR_DISABLE_HEALTHCACHE" (startHealthCache bus host)
         gated "HNVR_DISABLE_COORDINATOR" (startAssignmentCoordinator bus)
         gated "HNVR_DISABLE_BROADCASTER" (startConfigBroadcaster bus)
         -- Leader-only: respond to node snapshot requests so workers
@@ -176,7 +179,6 @@ connectNatsAndStartEventWriter = do
         -- Leader also runs the full node role (CaptureSupervisor +
         -- ConfigWatcher + HealthReporter) per @01-architecture.md:21@
         -- — "leader = all of node + leader roles".
-        host <- maybe "hnvr-2" T.pack <$> Env.lookupEnv "HNVR_HOST"
         gated "HNVR_DISABLE_NODEROLES" (startNodeRoles bus host)
         gated "HNVR_DISABLE_HEALTHREPORTER" (startHealthReporter bus host)
   connect' `E.catch` \(e :: E.SomeException) ->

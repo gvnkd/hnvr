@@ -243,7 +243,7 @@
           services.hnvr.nats.enable = true;
 
           systemd.services.hnvr-node = {
-            description = "HNVR worker (CaptureSupervisor stub lands in Phase 3)";
+            description = "HNVR worker (CaptureSupervisor + CV analysis)";
             after = [ "network.target" "hnvr-nats.service" ];
             wants = [ "hnvr-nats.service" ];
             wantedBy = [ "multi-user.target" ];

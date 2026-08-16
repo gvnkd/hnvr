@@ -67,9 +67,8 @@ So: **each host runs CaptureWorker + AnalyzerWorker as a co-located pair**, fram
 | `hnvr.commands.assign.<cam>` | Core (ephemeral) | Leader → all nodes | `{camera_id, host}` | Reassign a camera to a host |
 | `hnvr.commands.control.<host>.<cam>.<action>` | Core | Leader → host | `start\|stop\|restart` | Per-camera control |
 | `hnvr.commands.ptz.<cam>` | Core (ephemeral) | Web UI (leader) → host owning camera | `{command, args, source}` | PTZ op: continuous_move / stop / goto_preset / set_preset / remove_preset |
-| `hnvr.health.<host>` | Core (max-age 15s) | Node → all | `{host, cameras:[{slug,state,fps}], cpu, gpu, mem}` | Leader uses for status page; standby uses for failover |
+| `hnvr.health.<host>` | Core (max-age 15s) | Node → all | `{host, cameras:[{slug,state}], cpu_pct, gpu_model, exec_providers, gpu_mem_bytes, ram_bytes}` | Leader uses for status page; standby uses for failover |
 | `hnvr.config.cameras.<slug>` | Core | Leader → all | full `Camera` JSON | Broadcast on row change |
-| `hnvr.config.rules.<cam>` | Core | Leader → all | `[Rule]` JSON | Broadcast on row change |
 | `hnvr.ptz.status.<cam>` | Core (max-age 2s) | Host owning cam → all | `{state, position, last_command_at}` | Live UI reads for PTZ indicator |
 | `hnvr.leader` | JetStream KV, TTL 10s | Leader → all | `leader_id, since` | Lease; standby promotes on expiry |
 

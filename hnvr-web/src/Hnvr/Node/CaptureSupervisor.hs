@@ -40,6 +40,10 @@ module Hnvr.Node.CaptureSupervisor
     stopAllCameras,
     listCameras,
 
+    -- * Status
+    CameraStateInfo (..),
+    cameraStates,
+
     -- * Analysis (Phase 3)
     latestAnalysis,
     analysisTVar,
@@ -60,7 +64,7 @@ import Control.Concurrent.STM
     writeTVar,
   )
 import Control.Exception (SomeException, try)
-import Control.Monad (forM_, void)
+import Control.Monad (forM, forM_, void)
 import Data.Aeson (object, (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef
@@ -86,6 +90,7 @@ import Hnvr.Capture.SpoolDrainer (startSpoolDrainer)
 import Hnvr.Capture.Worker
   ( CameraConfig (..),
     CaptureConfig (..),
+    CaptureState (..),
     captureWorkerWithStop,
   )
 import Hnvr.Core.CameraSnapshot (CameraSnapshot (..))
@@ -135,10 +140,14 @@ data CaptureSupervisor = CaptureSupervisor
 -- | One per running camera. The @stopTVar@ is polled by the worker's
 -- driver loop; setting it to 'True' causes the next state-machine tick
 -- to return cleanly. The @async@ handle is waited on after stop so we
--- can reap zombie threads.
+-- can reap zombie threads. @whState@ mirrors the worker's
+-- 'CaptureState' — the HealthReporter publishes it so a dead camera
+-- stops showing as REC in the UI.
 data WorkerHandle = WorkerHandle
   { whStop :: !(TVar Bool),
-    whAsync :: !(Async ())
+    whAsync :: !(Async ()),
+    whSlug :: !Text,
+    whState :: !(TVar CaptureState)
   }
 
 -- | The Phase 3 analysis pair for one camera: frame source (analysis
@@ -209,8 +218,9 @@ startCamera sup snap = do
             ccClipBuffer = mClipBuf
           }
       shouldStop = readTVarIO stopTVar
-  a <- async (captureWorkerWithStop sup.csConfig camCfg shouldStop)
-  let handle = WorkerHandle {whStop = stopTVar, whAsync = a}
+  stateVar <- newTVarIO Pending
+  a <- async (captureWorkerWithStop sup.csConfig camCfg shouldStop stateVar)
+  let handle = WorkerHandle {whStop = stopTVar, whAsync = a, whSlug = csSlug snap, whState = stateVar}
   modifyIORef' sup.csWorkers (Map.insert (csId snap) handle)
   maybeStartAnalysis sup snap relayUrl
   logInfo ("CaptureSupervisor: started worker for " <> csSlug snap <> " via " <> relayUrl)
@@ -471,6 +481,20 @@ stopAllCameras sup = do
 -- 'HealthReporter' (Phase 3 fills in the camera list payload).
 listCameras :: CaptureSupervisor -> IO [CameraId]
 listCameras sup = Map.keys <$> readIORef sup.csWorkers
+
+-- | Per-camera slug + live worker state. The HealthReporter turns this
+-- into the @cameras@ array of the @hnvr.health.<host>@ payload.
+data CameraStateInfo = CameraStateInfo
+  { csiSlug :: !Text,
+    csiState :: !CaptureState
+  }
+
+cameraStates :: CaptureSupervisor -> IO [CameraStateInfo]
+cameraStates sup = do
+  m <- readIORef sup.csWorkers
+  forM (Map.elems m) $ \h -> do
+    st <- readTVarIO h.whState
+    pure (CameraStateInfo h.whSlug st)
 
 -- | Latest (frame, confirmed tracks) for a camera's analysis pair,
 -- if analysis is enabled and at least one frame has been processed.

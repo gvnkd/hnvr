@@ -3,6 +3,129 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **Stub/dead-field audit cleanup (Aug 16 2026 — v0.5.2.0)**: full-repo
+> audit found two more user-visible lies plus a pile of dead schema.
+> Fixed ALL of A+B class + C1:
+>   * **A1 is_leader**: never written → every host showed WORKER.
+>     HealthCache UPSERT now stamps `is_leader = (host = our HNVR_HOST)`
+>     every heartbeat (startHealthCache gained the leaderHost param;
+>     the write-only IORef/HealthSnapshot/readHealthCache deleted —
+>     zero consumers). Config.hs reads HNVR_HOST before startHealthCache.
+>   * **A2 HNVR_DB_URL**: module.nix sops fragment wrote HNVR_DB_URL but
+>     all code reads DATABASE_URL — renamed the fragment key; systemd
+>     EnvironmentFile overrides Environment=, so the secret wins over
+>     the static cfg.databaseUrl.
+>   * **Migration 0010-cleanup** (+ Schema.sql + codegen regen): drops
+>     cameras.rtsp_template/rtsp_sub_template/port + hosts.display_name;
+>     event_kind recreated without track_start/track_end/
+>     segment_written/system (zero emitters; events_kind_idx recreated
+>     plain). **0005-zone-motion.sql is now WIRED** into SchemaMigration
+>     (was manual-only — fresh-deploy trap); it replays as a no-op via
+>     ADD VALUE IF NOT EXISTS.
+>   * **B3**: Edit/New camera forms gained enabled / record_audio /
+>     use_substream_for_analysis checkboxes + analysis_fps number.
+>     Booleans are explicit `set` after fill (paramOrNothing=="on",
+>     Rules.hs pattern) — absent checkbox params leave IHP fill fields
+>     unchanged. Also removed assignedHost/manualAssign from both fill
+>     lists (no form inputs; IHP fill wipes absent Maybe params to NULL
+>     — was silently unassigning cameras on every Save, masked by the
+>     coordinator re-flipping).
+>   * **Surfaced**: archive rows show Host badges (distinct per group)
+>     + first-segment sha256 tooltip (Span gained spHostId/spSha256);
+>     events table shows Host + Bbox columns + linked-segment tooltip
+>     (fetchEventRows now 14 fields); drift table shows first_seen_at.
+>   * **Wired**: events.payload = full CvEvent JSON;
+>     events.segment_ts via insert-time scalar subquery + 60 s backfill
+>     loop in EventWriter (segment rows lag rule fires by ~2 s);
+>     users.last_login_at via IHP AuthSupport `beforeLogin` hook (runs
+>     ONLY after password verification — confirmed in IHP source);
+>     audit_log.payload written at all call sites + NEW /AuditLog
+>     admin page (Web.Controller.AuditLog, latest 200, sidebar "Audit").
+>     `audit` gained a `Maybe Value` payload param.
+>   * **C1**: HealthReporter sends real cpu_pct (/proc/stat delta
+>     between 5 s ticks), ram_bytes (/proc/meminfo used), gpu_mem_bytes
+>     (nvidia-smi VRAM sum; Maybe → null on GPU-less hosts, no 0-lie).
+>   * **Small**: updated_at bumped in UpdateCamera + UpdateRule actions;
+>     configRules subject dropped (superseded by full-snapshot assign);
+>     07-deployment.md env table rewritten to real var names
+>     (HNVR_HOST/HNVR_NATS_URI/HNVR_MODEL_DIR/HNVR_TRT_CACHE_DIR/
+>     DATABASE_URL/HNVR_MEDIAMTX_CONFIG_PATH); flake.nix Phase-3-stub
+>     comment fixed.
+>   * **Pitfall #122**: IHP `sqlExec` (hasql ToSnippetParams) caps at
+>     10 params — wider INSERTs need the pg-simple one-shot-connection
+>     pattern (fetchEventRows-style) with `(a,b,…) :. (c,…)` from
+>     Database.PostgreSQL.Simple.Types. `:.` lives in .Types, NOT
+>     .ToRow. aeson `encodePretty` is the aeson-pretty PACKAGE (not a
+>     dep) — use plain encode. parseMaybe is Data.Aeson.Types.
+>   * **Flaky test watch**: hnvr-cv Preprocess property "scaled dims
+>     fit the target and keep aspect" failed once in a combined run,
+>     then passed 4/4 standalone — rare QuickCheck edge, not from this
+>     batch; revisit if it recurs.
+>   * New pitfall for checkboxes: see B3 above (fill + absent Maybe =
+>     NULL wipe).
+
+> **Dead-camera UI lies fixed (Aug 16 2026 — v0.5.1.0)**: Sergey reported
+> an unavailable camera still showed online + REC + last frame. Three
+> root causes, three fixes. (1) REC was static HTML —
+> `View/Dashboard/Index.hs`, `View/Live/Show.hs`, `View/Cameras/Show.hs`
+> now render it only when the camera's resolved status is CSRecording
+> (other states get STARTING/RECONNECTING/FAILED/HOST DOWN/STOPPED/
+> UNASSIGNED/DISABLED badges; new `.badge-danger` in src.css). (2)
+> `/debug-frame` served the stale `ahLatest` TVar with 200 forever →
+> now 503s when `frameTimestamp` is >5 s old (`DebugStream.hs`
+> maxFrameAgeSeconds); the app.js poller already mapped errors to the
+> "no signal" placeholder. (3) Worker state was log-only →
+> `captureWorkerWithStop` gained a `TVar CaptureState` param
+> (transition writes Running before the blocking runOnce; WorkerSpec
+> updated), CaptureSupervisor stores it in WorkerHandle (new
+> `cameraStates`), HealthReporter publishes `cameras:
+> [{slug,state}]` (was `[]` stub) reading the supervisor via
+> `SupervisorRegistry` — **NodeMain now also writes the registry**
+> (previously leader-only). Pure contract lives in
+> `Hnvr.Core.CameraStatus` (CaptureStateWire text encoding,
+> CameraHealth JSON, resolveCameraStatus table — 18 cabal tests);
+> web-side projection `Hnvr.Web.CameraStatus.cameraStatusFor` (15 s
+> heartbeat window, assigned-host row missing = host down). WHEP
+> client rewritten (`app.js` HNVR.whep): real reconnect with 2→30 s
+> backoff forever, 10 s connect timeout (answer but no ontrack = dead
+> source behind live mediamtx path), getStats framesReceived watchdog
+> (6 s stall → re-offer); new "connecting" state — ShowLive inline JS
+> maps it explicitly. `get` is `IHP.HaskellSupport.get`, NOT
+> IHP.ModelSupport (GHC-61689). hnvr-web sets NoFieldSelectors —
+> cross-module record access needs OverloadedRecordDot + dot syntax.
+> Built clean; **deploy pending: live leader still runs 0.5.0.x**.
+> **Follow-ups same day**: analysis frameSourceLoop backoff cap 30s →
+> 5s (`FrameSource.hs` — 1/2/4/5s; recording worker backoff
+> unchanged). Live-wall badge staleness fix: badges were server-rendered
+> once, so a recovered camera kept FAILED (and a freshly-dead one kept
+> REC) until reload — now the single `.cam-badge-status` badge is
+> JS-owned after page load: `initLiveFrames` rewrites it to REC on
+> signal / NO SIGNAL on loss via change-only `setBadge` writes (an
+> earlier badge-pair + CSS-swap variant rendered REC twice when a
+> stale app.css lacked the swap rules — don't reintroduce it).
+> **Nav toggle into the sidebar**: the ☰ button lived in the topbar —
+> on mobile (≤900px off-canvas drawer) the drawer overlapped it, so
+> the menu couldn't be closed. Now it's the sidebar's first child,
+> absolutely positioned top-right (`src.css .sidenav .nav-toggle`);
+> on mobile it peeks out at `right: -2.5rem` when the drawer is hidden
+> and sits inside at `right: 0.625rem` when open.
+> **GPU column fix (v0.5.1.1)**: hosts.gpu_model was always NULL —
+> reporter hardcoded `"stub"` AND HealthCache's UPSERT never wrote the
+> column. Now `detectGpuModel` (typed-process nvidia-smi
+> `--query-gpu=name`, once at reporter start, Nothing on failure) and
+> persistHostHealth lifts gpu_model out of the payload into the column.
+> **exec_providers + host liveness (v0.5.1.2)**: exec_providers column
+> showed the schema default ['cpu'] for every host (same unwired-stub
+> class as gpu_model) — reporter now publishes the real EP list
+> (`execProviderName`/`execProvidersFromEnv`, once at startup) and
+> HealthCache persists it; both gpu_model + exec_providers writes are
+> COALESCE-guarded so an older-build reporter can't wipe newer values.
+> Host display liveness: `hostDisplayLive` (5 min window) in
+> Hnvr.Web.CameraStatus, used by the dashboard host LED and /Hosts
+> (LED off + DISCONNECTED badge + "N of M live" subtitle) — was:
+> `Just lastHealthAt` = green forever, so yesterday's hnvr-1 row
+> looked alive. Distinct from the 15 s assignment window on purpose.
+
 > **OpenIPC FLASH DONE, low_ent (Aug 16 2026, ~11:00–11:35)**: coupler
 > DVRIP flash succeeded (Ret 515; camera dark ~4 min, booted DHCP
 > .184). Post-flash: coupler default SSH password is **`12345`** (not

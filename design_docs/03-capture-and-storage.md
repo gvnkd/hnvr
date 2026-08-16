@@ -235,15 +235,14 @@ cameras (
   name            TEXT NOT NULL,
   -- main stream (authoritative for recording)
   rtsp_url        TEXT NOT NULL,                -- full URL with creds
-  rtsp_template   TEXT,
+  -- rtsp_template / port dropped in v0.5.2.0 (migration 0010): templates
+  -- never had form inputs; port had no logic consumer.
   host            INET,
-  port            INT DEFAULT 554,
   username        TEXT,
   password        TEXT,                         -- stored encrypted
   codec           TEXT,                         -- 'hevc' / 'h264' (informational)
   -- sub-stream (authoritative for analysis)
   rtsp_sub_url    TEXT,                         -- NULL = main with -vf scale
-  rtsp_sub_template TEXT,
   use_substream_for_analysis BOOL DEFAULT TRUE,
   substream_codec TEXT DEFAULT 'h264',
   substream_width INT,                          -- informational, probed at startup
@@ -259,7 +258,7 @@ cameras (
 )
 ```
 
-`rtsp_url` is the source of truth for the recording path; if `rtsp_template` is set we render it from `host`/`port`/`username`/`password` and store on save. Same pattern for `rtsp_sub_url` / `rtsp_sub_template` (workers never build URLs).
+`rtsp_url` is the source of truth for the recording path (the `rtsp_template` rendering idea was dropped in v0.5.2.0 — workers never build URLs).
 
 **Sub-stream URL discovery (manual in v1, ONVIF in post-v1)**:
 - Probe with `ffprobe 'rtsp://...?stream=SubStream'` and `stream=1` to find the working scheme.

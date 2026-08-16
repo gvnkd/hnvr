@@ -21,8 +21,10 @@ module Web.Controller.Cameras
   )
 where
 
+import Data.Aeson (object, (.=))
 import Data.Text (Text)
 import qualified Data.Text as Text
+import Data.Time.Clock (getCurrentTime)
 import Data.UUID (UUID)
 import Generated.Types
 import Hnvr.Web.Audit (audit)
@@ -108,6 +110,8 @@ instance Controller CamerasController where
   action ShowCameraAction {cameraId} = do
     camera <- fetch cameraId
     drifts <- query @CameraDrift |> filterWhere (#cameraId, camUuid camera) |> fetch
+    hosts <- query @Host |> fetch
+    now <- liftIO getCurrentTime
     render ShowView {..}
   action NewCameraAction = do
     let camera = newRecord @Camera
@@ -119,26 +123,32 @@ instance Controller CamerasController where
   action CreateCameraAction = do
     let camera0 =
           newRecord @Camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "recordAudio", "analysisFps", "modelName", "enabled", "retentionHours", "assignedHost", "manualAssign"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours"]
         plaintext = paramOrDefault ("" :: Text) "password"
     (enc, nonce) <- liftIO (encryptPassword plaintext)
     let camera =
           camera0
             |> set #passwordEnc (Just enc)
             |> set #passwordNonce (Just nonce)
+            |> set #enabled (checkboxOn "enabled")
+            |> set #recordAudio (checkboxOn "recordAudio")
+            |> set #useSubstreamForAnalysis (checkboxOn "useSubstreamForAnalysis")
     if camera |> isValid
       then do
         camera <- camera |> createRecord
-        audit currentUserUuid "camera.create" "camera" (Just (camUuid camera))
+        audit currentUserUuid "camera.create" "camera" (Just (camUuid camera)) (Just (object ["slug" .= camera.slug]))
         setSuccessMessage "Camera created"
         redirectTo ShowCameraAction {cameraId = camera |> get #id}
       else render NewView {..}
+    where
+      checkboxOn name = paramOrNothing @Text name == Just "on"
   action UpdateCameraAction {cameraId} = do
     camera <- fetch cameraId
     let camera' =
           camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "recordAudio", "analysisFps", "modelName", "enabled", "retentionHours", "assignedHost", "manualAssign", "onvifPort", "mgmtProto", "mainVideoEncoding", "mainVideoWidth", "mainVideoHeight", "mainVideoFps", "mainVideoBitrateKbps", "mainVideoGovLength", "subVideoEncoding", "subVideoWidth", "subVideoHeight", "subVideoFps", "subVideoBitrateKbps", "subVideoGovLength", "audioEncoding", "audioBitrateKbps", "audioSampleRateKhz"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours", "onvifPort", "mgmtProto", "mainVideoEncoding", "mainVideoWidth", "mainVideoHeight", "mainVideoFps", "mainVideoBitrateKbps", "mainVideoGovLength", "subVideoEncoding", "subVideoWidth", "subVideoHeight", "subVideoFps", "subVideoBitrateKbps", "subVideoGovLength", "audioEncoding", "audioBitrateKbps", "audioSampleRateKhz"]
         plaintext = paramOrNothing "password" :: Maybe Text
+    now <- liftIO getCurrentTime
     camera'' <- case plaintext of
       Nothing -> pure camera'
       Just "" -> pure camera'
@@ -149,10 +159,16 @@ instance Controller CamerasController where
               |> set #passwordEnc (Just enc)
               |> set #passwordNonce (Just nonce)
           )
-    if camera'' |> isValid
+    let camera2 =
+          camera''
+            |> set #enabled (checkboxOn "enabled")
+            |> set #recordAudio (checkboxOn "recordAudio")
+            |> set #useSubstreamForAnalysis (checkboxOn "useSubstreamForAnalysis")
+            |> set #updatedAt now
+    if camera2 |> isValid
       then do
-        camera''' <- camera'' |> updateRecord
-        audit currentUserUuid "camera.update" "camera" (Just (camUuid camera'''))
+        camera''' <- camera2 |> updateRecord
+        audit currentUserUuid "camera.update" "camera" (Just (camUuid camera''')) (Just (object ["slug" .= camera'''.slug]))
         pushResult <- liftIO (pushOnvif camera''')
         case pushResult of
           Nothing -> setSuccessMessage "Camera updated"
@@ -162,12 +178,14 @@ instance Controller CamerasController where
             setSuccessMessage ("Camera updated; ONVIF: " <> summary)
         redirectTo ShowCameraAction {cameraId = camera''' |> get #id}
       else do
-        formOptions <- liftIO (fetchOpts camera'')
-        render EditView {camera = camera'', formOptions}
+        formOptions <- liftIO (fetchOpts camera2)
+        render EditView {camera = camera2, formOptions}
+    where
+      checkboxOn name = paramOrNothing @Text name == Just "on"
   action DeleteCameraAction {cameraId} = do
     camera <- fetch cameraId
     deleteRecord camera
-    audit currentUserUuid "camera.delete" "camera" (Just (camUuid camera))
+    audit currentUserUuid "camera.delete" "camera" (Just (camUuid camera)) (Just (object ["slug" .= camera.slug]))
     setSuccessMessage "Camera deleted"
     redirectTo CamerasAction
 
@@ -219,7 +237,7 @@ instance Controller CamerasController where
               then set #assignedHost Nothing . set #manualAssign False
               else set #assignedHost (Just hostParam) . set #manualAssign True
     camera'' <- camera' |> updateRecord
-    audit currentUserUuid "camera.assign" "camera" (Just (camUuid camera''))
+    audit currentUserUuid "camera.assign" "camera" (Just (camUuid camera'')) (Just (object ["slug" .= camera''.slug, "assigned_host" .= hostParam]))
     setSuccessMessage
       $ if cleared
         then "Assignment cleared (auto mode)"

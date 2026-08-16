@@ -1,4 +1,5 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Per-camera analysis pipeline glue (design_docs/04-cv-pipeline.md
@@ -23,6 +24,7 @@ module Hnvr.Cv.Analyzer
     withAnalyzer,
     analyzeFrame,
     parseExecProviders,
+    execProviderName,
     execProvidersFromEnv,
   )
 where
@@ -142,6 +144,14 @@ parseExecProviders input =
       "tensorrt" -> Right TensorRT
       "trt" -> Right TensorRT
       other -> Left ("HNVR_EXEC_PROVIDERS: unknown execution provider " <> other)
+
+-- | Canonical lowercase name — the inverse of the 'parseExecProviders'
+-- tokens. Used by the HealthReporter to publish the active EP list.
+execProviderName :: ExecutionProvider -> Text
+execProviderName = \case
+  CPU -> "cpu"
+  CUDA -> "cuda"
+  TensorRT -> "tensorrt"
 
 -- | Read @HNVR_EXEC_PROVIDERS@; defaults to @[CPU]@ when unset (the
 -- NixOS module sets per-host defaults — @cuda,cpu@ on hnvr-1,

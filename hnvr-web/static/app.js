@@ -210,54 +210,134 @@
   }
 
   /* ── Shared WHEP client (dashboard overlay + /ShowLive) ─────── */
+  /* Reconnecting client: exponential backoff re-offer on connection
+   * failure, plus two liveness watchdogs — a connect timeout (no
+   * ontrack within 10 s of the SDP answer, e.g. camera dead at the
+   * source while the mediamtx path still accepts WHEP) and a
+   * frame-arrival watchdog (getStats inbound-rtp framesReceived must
+   * keep increasing; a frozen counter means the browser is rendering
+   * the last decoded frame of a dead camera).
+   *
+   * States reported via onState: "connecting", "live",
+   * "reconnecting", "error: <msg>". Reconnects are attempted forever
+   * until close() — a camera that comes back must resume on its own. */
   HNVR.whep = function (slug, video, onState) {
-    var pc = new RTCPeerConnection();
-    pc.addTransceiver("video", { direction: "recvonly" });
-    pc.addTransceiver("audio", { direction: "recvonly" });
-    pc.ontrack = function (e) {
-      video.srcObject = e.streams[0];
-      onState("live");
-    };
-    pc.onconnectionstatechange = function () {
-      if (pc.connectionState === "failed" || pc.connectionState === "disconnected")
-        onState("reconnecting");
-      else if (pc.connectionState === "connected") onState("live");
-    };
-    pc.createOffer()
-      .then(function (o) {
-        return pc.setLocalDescription(o);
-      })
-      .then(function () {
-        return new Promise(function (resolve) {
-          if (pc.iceGatheringState === "complete") resolve();
-          else
-            pc.onicegatheringstatechange = function () {
-              if (pc.iceGatheringState === "complete") resolve();
-            };
+    var pc = null;
+    var closed = false;
+    var attempts = 0;
+    var retryTimer = null;
+    var watchdogTimer = null;
+    var connectTimer = null;
+    var lastFrames = -1;
+    var lastFrameAt = 0;
+
+    function backoffMs() {
+      // 2s, 4s, 8s, 16s, 30s, 30s, …
+      return Math.min(30000, 1000 * Math.pow(2, Math.min(attempts, 5)));
+    }
+    function clearTimers() {
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+      if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+    }
+    function teardown() {
+      clearTimers();
+      if (pc) {
+        try { pc.close(); } catch (e) {}
+        pc = null;
+      }
+    }
+    function scheduleReconnect() {
+      if (closed) return;
+      teardown();
+      attempts++;
+      onState("reconnecting");
+      retryTimer = setTimeout(connect, backoffMs());
+    }
+    function startWatchdog() {
+      lastFrames = -1;
+      lastFrameAt = Date.now();
+      watchdogTimer = setInterval(function () {
+        if (!pc || pc.connectionState !== "connected") return;
+        pc.getStats()
+          .then(function (stats) {
+            var frames = null;
+            stats.forEach(function (r) {
+              if (r.type === "inbound-rtp" && (r.kind === "video" || r.mediaType === "video"))
+                frames = (frames || 0) + (r.framesReceived || 0);
+            });
+            if (frames === null) return; // stats unavailable — don't kill a good stream
+            if (frames !== lastFrames) {
+              lastFrames = frames;
+              lastFrameAt = Date.now();
+            } else if (Date.now() - lastFrameAt > 6000) {
+              scheduleReconnect();
+            }
+          })
+          .catch(function () {});
+      }, 2000);
+    }
+    function connect() {
+      if (closed) return;
+      teardown();
+      onState("connecting");
+      pc = new RTCPeerConnection();
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+      pc.ontrack = function (e) {
+        video.srcObject = e.streams[0];
+        attempts = 0;
+        if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+        onState("live");
+        startWatchdog();
+      };
+      pc.onconnectionstatechange = function () {
+        if (pc.connectionState === "failed" || pc.connectionState === "disconnected")
+          scheduleReconnect();
+        else if (pc.connectionState === "connected") onState("live");
+      };
+      pc.createOffer()
+        .then(function (o) {
+          return pc.setLocalDescription(o);
+        })
+        .then(function () {
+          return new Promise(function (resolve) {
+            if (pc.iceGatheringState === "complete") resolve();
+            else
+              pc.onicegatheringstatechange = function () {
+                if (pc.iceGatheringState === "complete") resolve();
+              };
+          });
+        })
+        .then(function () {
+          return fetch("/whep/" + slug, {
+            method: "POST",
+            headers: { "Content-Type": "application/sdp" },
+            body: pc.localDescription.sdp,
+          });
+        })
+        .then(function (r) {
+          if (!r.ok) throw new Error("WHEP POST failed: " + r.status);
+          return r.text();
+        })
+        .then(function (answer) {
+          pc.setRemoteDescription({ type: "answer", sdp: answer });
+          // Answer accepted but media may never arrive (dead camera
+          // behind a live mediamtx path). Re-offer if no track in 10 s.
+          connectTimer = setTimeout(scheduleReconnect, 10000);
+        })
+        .catch(function (e) {
+          if (closed) return;
+          onState("error: " + e.message);
+          attempts++;
+          retryTimer = setTimeout(connect, backoffMs());
         });
-      })
-      .then(function () {
-        return fetch("/whep/" + slug, {
-          method: "POST",
-          headers: { "Content-Type": "application/sdp" },
-          body: pc.localDescription.sdp,
-        });
-      })
-      .then(function (r) {
-        if (!r.ok) throw new Error("WHEP POST failed: " + r.status);
-        return r.text();
-      })
-      .then(function (answer) {
-        pc.setRemoteDescription({ type: "answer", sdp: answer });
-      })
-      .catch(function (e) {
-        onState("error: " + e.message);
-      });
+    }
+    connect();
     return {
       close: function () {
-        try {
-          pc.close();
-        } catch (e) {}
+        closed = true;
+        teardown();
       },
     };
   };
@@ -272,10 +352,27 @@
       var url = wrap.getAttribute("data-frame-url");
       var imgs = wrap.querySelectorAll("img");
       if (imgs.length < 2) return;
+      var statusBadge = wrap.querySelector(".cam-badge-status");
       var front = 0;
       var visible = false;
       var timer = null;
       var failures = 0;
+      var badgeMode = null; // null = server-rendered state still shown
+
+      // The badge is JS-owned once polling starts: the server-rendered
+      // text reflects page-load state and can't track liveness.
+      // Change-only writes — no DOM churn on every 2 s tick.
+      function setBadge(mode) {
+        if (!statusBadge || mode === badgeMode) return;
+        badgeMode = mode;
+        if (mode === "live") {
+          statusBadge.className = "badge badge-rec cam-badge-status";
+          statusBadge.innerHTML = '<span class="led led-rec"></span>REC';
+        } else {
+          statusBadge.className = "badge badge-danger cam-badge-status";
+          statusBadge.textContent = "NO SIGNAL";
+        }
+      }
 
       function interval() {
         // Back off hard when the frame endpoint 404s (analysis off).
@@ -297,11 +394,13 @@
           back.classList.add("is-front");
           front = 1 - front;
           wrap.classList.add("has-signal");
+          setBadge("live");
           schedule();
         };
         next.onerror = function () {
           failures++;
           wrap.classList.remove("has-signal");
+          setBadge("down");
           schedule();
         };
         next.src = url + (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now();

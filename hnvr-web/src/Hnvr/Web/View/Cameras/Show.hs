@@ -5,13 +5,18 @@
 
 module Hnvr.Web.View.Cameras.Show (ShowView (..)) where
 
+import Data.Time.Clock (UTCTime)
 import Generated.Types
+import Hnvr.Core.CameraStatus (CameraStatus (..))
+import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
 data ShowView = ShowView
   { camera :: Camera,
-    drifts :: [CameraDrift]
+    drifts :: [CameraDrift],
+    hosts :: [Host],
+    now :: UTCTime
   }
 
 instance View ShowView where
@@ -21,8 +26,9 @@ instance View ShowView where
       <div class="page-header">
         <div>
           <h1>
-            <span class="led led-rec"></span>
+            <span class={hdrLedClass}></span>
             <span class="font-mono">{camera.slug}</span>
+            {statusBadge}
           </h1>
           <div class="subtitle">{camera.name} · {codecBadge camera.codec}</div>
         </div>
@@ -43,7 +49,6 @@ instance View ShowView where
             {kvRow "RTSP transport" camera.rtspTransport}
             {kvRow "RTSP (sub)" (fromMaybe "—" camera.rtspSubUrl)}
             {kvRow "Host" (fromMaybe "—" camera.host)}
-            {kvRow "Port" (tshow camera.port)}
             {kvRow "Codec" (codecBadge camera.codec)}
             {kvRow "Substream codec" (tshow camera.substreamCodec)}
             {kvRow "Substream res" (tshow camera.substreamWidth <> "×" <> tshow camera.substreamHeight)}
@@ -124,7 +129,7 @@ instance View ShowView where
             <div class="card-header">ONVIF drift <span class="badge badge-warn">{tshow (length ds)}</span></div>
             <table class="table">
               <thead>
-                <tr><th>Config</th><th>Field</th><th>Desired</th><th>Observed</th><th>Last seen</th></tr>
+                <tr><th>Config</th><th>Field</th><th>Desired</th><th>Observed</th><th>First seen</th><th>Last seen</th></tr>
               </thead>
               <tbody>{forEach ds renderDriftRow}</tbody>
             </table>
@@ -138,6 +143,7 @@ instance View ShowView where
             <td class="mono">{d.fieldName}</td>
             <td class="mono">{d.desired}</td>
             <td class="mono">{d.observed}</td>
+            <td class="mono">{tshow d.firstSeenAt}</td>
             <td class="mono">{tshow d.lastSeenAt}</td>
           </tr>
         |]
@@ -145,3 +151,17 @@ instance View ShowView where
       codecBadge Unknown = [hsx|<span class="badge badge-mute">UNKNOWN</span>|]
       codecBadge H264 = [hsx|<span class="badge badge-info">H264</span>|]
       codecBadge Hevc = [hsx|<span class="badge badge-warn">HEVC</span>|]
+
+      camStatus = cameraStatusFor hosts now camera
+      hdrLedClass = case camStatus of
+        CSRecording -> "led led-rec" :: Text
+        _ -> "led led-off"
+      statusBadge = case camStatus of
+        CSRecording -> mempty
+        CSStarting -> [hsx|<span class="badge badge-warn">STARTING</span>|]
+        CSReconnecting -> [hsx|<span class="badge badge-warn">RECONNECTING</span>|]
+        CSFailed -> [hsx|<span class="badge badge-danger">FAILED</span>|]
+        CSHostDown -> [hsx|<span class="badge badge-danger">HOST DOWN</span>|]
+        CSNotRunning -> [hsx|<span class="badge badge-mute">STOPPED</span>|]
+        CSUnassigned -> [hsx|<span class="badge badge-mute">UNASSIGNED</span>|]
+        CSDisabled -> [hsx|<span class="badge badge-mute">DISABLED</span>|]

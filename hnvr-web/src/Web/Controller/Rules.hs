@@ -29,12 +29,13 @@ module Web.Controller.Rules
   )
 where
 
-import Data.Aeson (decode, object)
+import Data.Aeson (decode, object, (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import Data.Time.Clock (getCurrentTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import Generated.Types
@@ -78,7 +79,7 @@ instance Controller RulesController where
     camera <- fetch (param @(Id Camera) "camera_id")
     let rule = buildRuleFromParams (newRecord @Rule |> set #cameraId (camUuidOf camera))
     rule' <- rule |> createRecord
-    audit currentUserUuid "rule.create" "rule" (Just (ruleUuid rule'))
+    audit currentUserUuid "rule.create" "rule" (Just (ruleUuid rule')) (Just (object ["name" .= rule'.name, "camera_slug" .= camera.slug]))
     publishRuleRefresh camera
     setSuccessMessage "Rule created"
     redirectTo EditRuleAction {ruleId = rule' |> get #id}
@@ -88,8 +89,9 @@ instance Controller RulesController where
     render EditView {..}
   action UpdateRuleAction {ruleId} = do
     rule <- fetch ruleId
-    rule' <- buildRuleFromParams rule |> updateRecord
-    audit currentUserUuid "rule.update" "rule" (Just (ruleUuid rule'))
+    now <- liftIO getCurrentTime
+    rule' <- (buildRuleFromParams rule |> set #updatedAt now) |> updateRecord
+    audit currentUserUuid "rule.update" "rule" (Just (ruleUuid rule')) (Just (object ["name" .= rule'.name]))
     camera <- fetch (Id rule.cameraId :: Id Camera)
     publishRuleRefresh camera
     setSuccessMessage "Rule updated"
@@ -98,7 +100,7 @@ instance Controller RulesController where
     rule <- fetch ruleId
     camera <- fetch (Id rule.cameraId :: Id Camera)
     deleteRecord rule
-    audit currentUserUuid "rule.delete" "rule" (Just (ruleUuid rule))
+    audit currentUserUuid "rule.delete" "rule" (Just (ruleUuid rule)) (Just (object ["name" .= rule.name]))
     publishRuleRefresh camera
     setSuccessMessage "Rule deleted"
     redirectTo RulesAction

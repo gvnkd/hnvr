@@ -365,7 +365,7 @@ When an admin edits a camera or a rule:
    - `ConfigBroadcaster`: publishes `hnvr.config.cameras.<slug>` JSON to NATS.
    - `AssignmentCoordinator`: if `assigned_host` changed, publishes `hnvr.commands.assign.<slug>`.
 4. Each host's `ConfigWatcher` (NATS subscriber) updates its in-memory `IORef (Map CameraId Camera)`; the affected `CaptureSupervisor` starts/stops/restarts the worker.
-5. Rules updates are similar via `hnvr.config.rules.<cam>` — pure data refresh on the analyzer's `IORef`.
+5. Rules updates republish the camera's full assign payload (`hnvr.commands.assign.<slug>`) — the owning host restarts the analysis pair with the fresh rule set. (The once-planned `hnvr.config.rules.<cam>` subject was dropped in v0.5.2.0 — never implemented, superseded by the full-snapshot assign.)
 
 No service restart needed for routine config changes.
 

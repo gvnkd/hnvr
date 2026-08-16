@@ -9,6 +9,7 @@
 -- specifically for these tests.
 module Hnvr.Capture.WorkerSpec (tests) where
 
+import Control.Concurrent.STM (newTVarIO)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock
@@ -89,17 +90,19 @@ tests =
         "transition (dead RTSP endpoint)"
         [ testCase "Pending → Backoff 1 on ffmpeg exit" $ do
             ref <- newIORef []
-            st <- transition cfg deadCam ref Pending
+            stVar <- newTVarIO Pending
+            st <- transition stVar cfg deadCam ref Pending
             case st of
               Backoff 1 _ -> pure ()
               other -> assertBool ("expected Backoff 1, got " <> show other) False,
           testCase "5 restarts within 60s → FailedPermanent" $ do
             ref <- newIORef []
+            stVar <- newTVarIO Pending
             let drive :: Int -> IO CaptureState
                 drive 0 = pure (error "unreached")
-                drive 1 = transition cfg deadCam ref Pending
+                drive 1 = transition stVar cfg deadCam ref Pending
                 drive k = do
-                  st <- transition cfg deadCam ref Pending
+                  st <- transition stVar cfg deadCam ref Pending
                   case st of
                     Backoff _ _ -> drive (k - 1)
                     other -> pure other
@@ -109,14 +112,16 @@ tests =
               other -> assertBool ("expected FailedPermanent, got " <> show other) False,
           testCase "Backoff with elapsed nextAt → Pending" $ do
             ref <- newIORef []
+            stVar <- newTVarIO Pending
             now <- getCurrentTime
-            st <- transition cfg deadCam ref (Backoff 3 (addUTCTime (-1) now))
+            st <- transition stVar cfg deadCam ref (Backoff 3 (addUTCTime (-1) now))
             st @?= Pending,
           testCase "FailedPermanent cooldown elapsed → Pending + restart budget reset" $ do
             ref <- newIORef []
+            stVar <- newTVarIO Pending
             now <- getCurrentTime
             writeIORef ref [now, now]
-            st <- transition cfg deadCam ref (FailedPermanent (addUTCTime (-1) now))
+            st <- transition stVar cfg deadCam ref (FailedPermanent (addUTCTime (-1) now))
             st @?= Pending
             kept <- readIORef ref
             kept @?= []

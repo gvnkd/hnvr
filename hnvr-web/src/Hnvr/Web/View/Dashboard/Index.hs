@@ -5,14 +5,18 @@
 
 module Hnvr.Web.View.Dashboard.Index (IndexView (..)) where
 
+import Data.Time.Clock (UTCTime)
 import Generated.Types
+import Hnvr.Core.CameraStatus (CameraStatus (..))
+import Hnvr.Web.CameraStatus (cameraStatusFor, hostDisplayLive)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
 data IndexView = IndexView
   { cameras :: [Camera],
-    hosts :: [Host]
+    hosts :: [Host],
+    now :: UTCTime
   }
 
 instance View IndexView where
@@ -83,8 +87,8 @@ instance View IndexView where
         where
           hostIdText = case h |> get #id of Id t -> t
       healthLedFor mh
-        | Just _ <- mh = [hsx|<span class="led led-on" title="reporting"></span>|]
-        | otherwise = [hsx|<span class="led led-off" title="never seen"></span>|]
+        | hostDisplayLive now mh = [hsx|<span class="led led-on" title="reporting"></span>|]
+        | otherwise = [hsx|<span class="led led-off" title="disconnected — last health >5 min ago"></span>|]
       roleBadgeFor True = [hsx|<span class="badge badge-info">LEADER</span>|]
       roleBadgeFor False = [hsx|<span class="badge badge-mute">WORKER</span>|]
 
@@ -103,6 +107,23 @@ instance View IndexView where
           archiveUrl = "/PlayerArchive?cameraId=" <> cid
           debugUrl = "/DebugCamera?cameraId=" <> cid
           hostLabel = fromMaybe "unassigned" cam.assignedHost
+          -- REC only while the assigned host reports this camera's
+          -- worker as Running; anything else gets an explicit status
+          -- badge (was: unconditional static REC, even for dead
+          -- cameras). After page load the badge is JS-owned: the
+          -- frame poller rewrites it to REC on signal and to
+          -- NO SIGNAL on loss (change-only writes in app.js
+          -- initLiveFrames) — a server-rendered badge can't track
+          -- liveness on its own.
+          statusBadge = case cameraStatusFor hosts now cam of
+            CSRecording -> [hsx|<span class="badge badge-rec cam-badge-status"><span class="led led-rec"></span>REC</span>|]
+            CSStarting -> [hsx|<span class="badge badge-warn cam-badge-status">STARTING</span>|]
+            CSReconnecting -> [hsx|<span class="badge badge-warn cam-badge-status">RECONNECTING</span>|]
+            CSFailed -> [hsx|<span class="badge badge-danger cam-badge-status">FAILED</span>|]
+            CSHostDown -> [hsx|<span class="badge badge-danger cam-badge-status">HOST DOWN</span>|]
+            CSNotRunning -> [hsx|<span class="badge badge-mute cam-badge-status">STOPPED</span>|]
+            CSUnassigned -> [hsx|<span class="badge badge-mute cam-badge-status">UNASSIGNED</span>|]
+            CSDisabled -> [hsx|<span class="badge badge-mute cam-badge-status">DISABLED</span>|]
           card =
             [hsx|
               <div class="cam-card" data-slug={cam.slug} title="Click for live view">
@@ -111,7 +132,7 @@ instance View IndexView where
                   <img alt="" />
                   <div class="scanline"></div>
                   <div class="cam-flags">
-                    <span class="badge badge-rec"><span class="led led-rec"></span>REC</span>
+                    {statusBadge}
                     <span class="badge badge-mute">{hostLabel}</span>
                   </div>
                   <div class="cam-placeholder">

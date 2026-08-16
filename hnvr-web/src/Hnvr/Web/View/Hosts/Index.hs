@@ -6,13 +6,17 @@
 module Hnvr.Web.View.Hosts.Index (IndexView (..)) where
 
 import Data.Coerce (coerce)
+import qualified Data.Text as T
+import Data.Time.Clock (UTCTime)
 import Generated.Types
+import Hnvr.Web.CameraStatus (hostDisplayLive)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
 data IndexView = IndexView
   { hosts :: [Host],
-    cameras :: [Camera]
+    cameras :: [Camera],
+    now :: UTCTime
   }
 
 instance View IndexView where
@@ -22,13 +26,14 @@ instance View IndexView where
       <div class="page-header">
         <div>
           <h1>Hosts</h1>
-          <div class="subtitle">{nHosts} reporting · leader + workers</div>
+          <div class="subtitle">{nLive} of {nHosts} live · leader + workers</div>
         </div>
       </div>
       {forEach hosts (renderHost cameras)}
     |]
     where
       nHosts = tshow (length hosts) :: Text
+      nLive = tshow (length (filter (\h -> hostDisplayLive now h.lastHealthAt) hosts)) :: Text
 
       renderHost cams h =
         [hsx|
@@ -38,13 +43,14 @@ instance View IndexView where
                 {ledFor h.lastHealthAt}
                 <span class="font-mono t-strong">{h.id}</span>
                 {roleBadge h.isLeader}
+                {connBadge h.lastHealthAt}
               </span>
               <span class="muted">{fromMaybe "—" (fmap tshow h.lastHealthAt)}</span>
             </div>
             <table class="table">
               <tbody>
                 {kvRow "GPU" (fromMaybe "—" h.gpuModel)}
-                {kvRow "Exec providers" (tshow h.execProviders)}
+                {kvRow "Exec providers" (T.intercalate ", " h.execProviders)}
                 {kvRow "Last health" (fromMaybe "—" (fmap tshow h.lastHealthAt))}
               </tbody>
             </table>
@@ -56,8 +62,11 @@ instance View IndexView where
         |]
         where
           ledFor mh
-            | Just _ <- mh = [hsx|<span class="led led-on"></span>|]
-            | otherwise = [hsx|<span class="led led-off"></span>|]
+            | hostDisplayLive now mh = [hsx|<span class="led led-on" title="reporting"></span>|]
+            | otherwise = [hsx|<span class="led led-off" title="disconnected — last health >5 min ago"></span>|]
+          connBadge mh
+            | hostDisplayLive now mh = mempty
+            | otherwise = [hsx|<span class="badge badge-danger">DISCONNECTED</span>|]
           roleBadge True = [hsx|<span class="badge badge-info">LEADER</span>|]
           roleBadge False = [hsx|<span class="badge badge-mute">WORKER</span>|]
           kvRow k v =

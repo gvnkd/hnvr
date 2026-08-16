@@ -244,7 +244,7 @@ in
             "HNVR_S3_ACCESS_KEY=hnvr-s3-access-key" \
             "HNVR_S3_SECRET_KEY=hnvr-s3-secret-key" \
             "HNVR_S3_BUCKET=hnvr-s3-bucket" \
-            "HNVR_DB_URL=hnvr-db-url" \
+            "DATABASE_URL=hnvr-db-url" \
             "INITIAL_ADMIN_EMAIL=initial-admin-email" \
             "INITIAL_ADMIN_PASSWORD=initial-admin-password"; do
           key=''${kv%%=*}
@@ -270,7 +270,7 @@ in
             "HNVR_S3_ACCESS_KEY"
             "HNVR_S3_SECRET_KEY"
             "HNVR_S3_BUCKET"
-            "HNVR_DB_URL"
+            "DATABASE_URL"
             "INITIAL_ADMIN_EMAIL"
             "INITIAL_ADMIN_PASSWORD"
           ]

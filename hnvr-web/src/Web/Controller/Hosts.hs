@@ -10,6 +10,7 @@ module Web.Controller.Hosts
   )
 where
 
+import Data.Time.Clock (getCurrentTime)
 import Generated.Types
 import Hnvr.Web.View.Hosts.Index
 import IHP.ControllerPrelude
@@ -30,4 +31,5 @@ instance Controller HostsController where
       query @Camera
         |> filterWhere (#enabled, True)
         |> fetch
+    now <- liftIO getCurrentTime
     render IndexView {..}

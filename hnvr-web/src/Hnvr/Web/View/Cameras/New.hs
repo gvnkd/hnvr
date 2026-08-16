@@ -52,8 +52,15 @@ instance View NewView where
             {textFieldFor "username" "Username" (fromMaybe "" camera.username) "RTSP credentials"}
             {textFieldFor "password" "Password (stored encrypted)" ("" :: Text) "AES-256-GCM at rest"}
             {textFieldFor "host" "Host IP" (fromMaybe "" camera.host) "Camera hostname or IP"}
-            {textFieldFor "port" "Port" (tshow camera.port) "RTSP port (default 554)"}
             {textFieldFor "retentionHours" "Full-record retention (hours)" (tshow camera.retentionHours) "Event clips have their own per-rule retention"}
+
+            <div class="field">
+              <label>Capture &amp; analysis</label>
+              <label><input type="checkbox" name="enabled" checked={camera.enabled} /> enabled (record + analyze)</label>
+              <label><input type="checkbox" name="recordAudio" checked={camera.recordAudio} /> record audio track (.m4a alongside video)</label>
+              <label><input type="checkbox" name="useSubstreamForAnalysis" checked={camera.useSubstreamForAnalysis} /> use sub-stream for CV analysis</label>
+            </div>
+            {intField "analysisFps" "Analysis FPS" camera.analysisFps "Frames per second through the detector (1–15)"}
 
             <div class="field">
               <label>Analysis model</label>
@@ -76,6 +83,15 @@ instance View NewView where
           <div class="field">
             <label>{label'}</label>
             <input class="input" type="text" name={name'} value={value'} />
+            <div class="hint">{hint'}</div>
+          </div>
+        |]
+
+      intField name' label' value' hint' =
+        [hsx|
+          <div class="field">
+            <label>{label'}</label>
+            <input class="input" type="number" name={name'} value={tshow value'} min="1" max="30" />
             <div class="hint">{hint'}</div>
           </div>
         |]

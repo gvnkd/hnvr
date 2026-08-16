@@ -32,6 +32,7 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (SomeException, catch)
 import Control.Monad (forM_, forever, void)
 import Data.Aeson (object, (.=))
+import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, maybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -53,6 +54,7 @@ import Hnvr.Node.HealthReporter (startHealthReporter)
 import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web (versionText)
 import Hnvr.Web.Metrics (ensureMetrics, startGpuPoller, startMetricsServer)
+import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
 import qualified System.Environment as Env
 
 -- | One-shot snapshot-request timeout (microseconds). Leader is
@@ -74,6 +76,9 @@ main = do
     host <- maybe "hnvr-1" T.pack <$> Env.lookupEnv "HNVR_HOST"
     cfg <- buildCaptureConfig bus host metrics
     sup <- startCaptureSupervisor cfg
+    -- Publish to the process-wide registry so the HealthReporter can
+    -- include real per-camera worker states in its payload.
+    writeIORef supervisorRegistry (Just sup)
     startHealthReporter bus host
     logInfo ("node: connected to NATS: " <> uri)
     -- Claim FIRST: the ConfigWatcher must not run before we own this

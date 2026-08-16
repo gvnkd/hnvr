@@ -73,8 +73,15 @@ instance View EditView where
             {textFieldFor "username" "Username" (fromMaybe "" camera.username) ""}
             {textFieldFor "password" "Password (blank = keep current)" ("" :: Text) "Stored encrypted; leave blank to retain existing value."}
             {textFieldFor "host" "Host IP" (fromMaybe "" camera.host) ""}
-            {textFieldFor "port" "Port" (tshow camera.port) ""}
             {textFieldFor "retentionHours" "Full-record retention (hours)" (tshow camera.retentionHours) "Event clips have their own per-rule retention"}
+
+            <div class="field">
+              <label>Capture &amp; analysis</label>
+              <label><input type="checkbox" name="enabled" checked={camera.enabled} /> enabled (record + analyze)</label>
+              <label><input type="checkbox" name="recordAudio" checked={camera.recordAudio} /> record audio track (.m4a alongside video)</label>
+              <label><input type="checkbox" name="useSubstreamForAnalysis" checked={camera.useSubstreamForAnalysis} /> use sub-stream for CV analysis</label>
+            </div>
+            {intFieldFor "analysisFps" "Analysis FPS" (Just camera.analysisFps) "Frames per second through the detector (1–15)"}
 
             <div class="field">
               <label>Analysis model</label>

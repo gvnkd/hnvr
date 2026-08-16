@@ -17,6 +17,7 @@ module Web.Controller.Events
 where
 
 import Control.Exception (bracket)
+import Data.Aeson (Value)
 import qualified Data.ByteString.Char8 as BSC
 import Data.Int (Int32)
 import Data.Maybe (fromMaybe)
@@ -98,7 +99,8 @@ fetchEventRows mCam mKind mFrom mTo page = do
         \       (SELECT ec.id FROM event_clip_events ce \
         \         JOIN event_clips ec ON ec.id = ce.clip_id \
         \        WHERE ce.event_id = e.id AND ec.pending_delete_at IS NULL \
-        \        LIMIT 1) \
+        \        LIMIT 1), \
+        \       e.host_id, e.bbox, e.segment_ts \
         \FROM events e \
         \JOIN cameras c ON c.id = e.camera_id \
         \LEFT JOIN rules r ON r.id = e.rule_id \
@@ -121,7 +123,7 @@ fetchEventRows mCam mKind mFrom mTo page = do
         )
   pure (map toRow rows)
   where
-    toRow (EventRowQ eid ts kind classId trackId conf thumb slug camUuid ruleName clipId) =
+    toRow (EventRowQ eid ts kind classId trackId conf thumb slug camUuid ruleName clipId hostId bbox segmentTs) =
       EventRow
         { erId = eid,
           erTs = ts,
@@ -133,12 +135,14 @@ fetchEventRows mCam mKind mFrom mTo page = do
           erCameraSlug = slug,
           erCameraUuid = camUuid,
           erRuleName = ruleName,
-          erClipId = clipId
+          erClipId = clipId,
+          erHostId = hostId,
+          erBbox = bbox,
+          erSegmentTs = segmentTs
         }
 
--- | Raw query row for 'fetchEventRows'. 11 fields exceed
--- postgresql-simple's tuple 'FromRow' instances, so we decode field by
--- field.
+-- | Raw query row for 'fetchEventRows'. Exceeds postgresql-simple's
+-- tuple 'FromRow' instances, so we decode field by field.
 data EventRowQ
   = EventRowQ
       !UUID
@@ -152,11 +156,17 @@ data EventRowQ
       !UUID
       !(Maybe Text)
       !(Maybe UUID)
+      !(Maybe Text)
+      !(Maybe Value)
+      !(Maybe UTCTime)
 
 instance FromRow EventRowQ where
   fromRow =
     EventRowQ
       <$> field
+      <*> field
+      <*> field
+      <*> field
       <*> field
       <*> field
       <*> field

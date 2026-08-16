@@ -12,6 +12,9 @@ module Hnvr.Web.View.Events.Index
   )
 where
 
+import Data.Aeson (Value)
+import qualified Data.Aeson as Aeson
+import Data.Aeson.Types (parseMaybe)
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -22,6 +25,7 @@ import Generated.Types
 import Hnvr.Cv.Decode (cocoClassName)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
+import Numeric (showFFloat)
 
 -- | One event row joined with its camera slug + rule name (built by
 -- the controller's SQL; the same split as Archive's RecordingRow).
@@ -38,7 +42,15 @@ data EventRow = EventRow
     erRuleName :: Maybe Text,
     -- | Live event clip covering this event, if one exists
     -- (separated event video store).
-    erClipId :: Maybe UUID
+    erClipId :: Maybe UUID,
+    -- | Host that detected the event (events.host_id).
+    erHostId :: Maybe Text,
+    -- | Normalized bbox JSON @{x,y,w,h}@ (also burned into the
+    -- thumbnail; rendered as text for precision).
+    erBbox :: Maybe Value,
+    -- | Covering archive segment start (events.segment_ts), when the
+    -- EventWriter's backfill has resolved it.
+    erSegmentTs :: Maybe UTCTime
   }
 
 data IndexView = IndexView
@@ -112,6 +124,8 @@ instance View IndexView where
               <th>Conf</th>
               <th>Track</th>
               <th>Rule</th>
+              <th>Host</th>
+              <th>Bbox</th>
               <th data-no-sort="1"></th>
             </tr>
           </thead>
@@ -161,6 +175,8 @@ instance View IndexView where
           <td>{confText}</td>
           <td class="mono">{trackText}</td>
           <td>{fromMaybe "—" ev.erRuleName}</td>
+          <td class="mono">{fromMaybe "—" ev.erHostId}</td>
+          <td class="mono">{bboxText ev.erBbox}</td>
           <td>{clipCell ev}</td>
         </tr>
       |]
@@ -169,16 +185,32 @@ instance View IndexView where
           confText = maybe "—" (\c -> tshow (round (c * 100) :: Int) <> "%") ev.erConfidence
           trackText = maybe "—" tshow ev.erTrackId
 
+      -- \| @{x,y,w,h}@ normalized → "x,y w×h" at 2 decimal places.
+      bboxText :: Maybe Value -> Text
+      bboxText Nothing = "—"
+      bboxText (Just v) = case parseMaybe parse v of
+        Nothing -> "—"
+        Just (x, y, w, h) ->
+          T.intercalate "," [f x, f y] <> " " <> f w <> "×" <> f h
+        where
+          parse = Aeson.withObject "bbox" $ \o ->
+            (,,,) <$> o Aeson..: "x" <*> o Aeson..: "y" <*> o Aeson..: "w" <*> o Aeson..: "h"
+          f :: Double -> Text
+          f d = T.pack (showFFloat (Just 2) d "")
+
       -- Clip play button when the event is covered by an event clip,
       -- plus the classic archive deep-link (30 s window).
       clipCell ev =
         [hsx|
           <span class="row-actions">
             {clipBtn}
-            <a class="btn btn-ghost btn-sm" href={playUrl ev}>archive</a>
+            <a class="btn btn-ghost btn-sm" href={playUrl ev} title={segTitle}>archive</a>
           </span>
         |]
         where
+          segTitle = case ev.erSegmentTs of
+            Just s -> "linked segment: " <> fmtTs s
+            Nothing -> "no linked segment"
           clipBtn = case ev.erClipId of
             Just cid ->
               [hsx|<a class="btn btn-primary btn-sm" href={clipUrl}>▶ clip</a>|]

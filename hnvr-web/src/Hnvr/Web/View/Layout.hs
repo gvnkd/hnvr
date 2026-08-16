@@ -35,6 +35,7 @@ renderLayout inner =
   <body>
     <div class="shell">
       <aside class="sidenav">
+        <button class="icon-btn nav-toggle" data-nav-toggle="1" aria-label="Toggle navigation" title="Toggle navigation">☰</button>
         <a href="/" class="brand">
           <span class="dot"></span>
           <span class="wordmark">HNVR</span>
@@ -50,6 +51,7 @@ renderLayout inner =
         <div class="nav-section">System</div>
         {navItem "/Stats" "▥" "Stats" (isPrefix "/Stats")}
         {navItem "/Hosts" "⬡" "Hosts" (isPrefix "/Hosts")}
+        {navItem "/AuditLog" "≣" "Audit" (isPrefix "/AuditLog")}
         <span class="spacer"></span>
         <div class="sidenav-footer">
           {themeMenu}
@@ -59,7 +61,6 @@ renderLayout inner =
       </aside>
       <div class="content">
         <header class="topbar">
-          <button class="icon-btn" data-nav-toggle="1" aria-label="Toggle navigation" title="Toggle navigation">☰</button>
           <span class="clock"></span>
         </header>
         <main class="main">{renderFlashMessages}{inner}</main>

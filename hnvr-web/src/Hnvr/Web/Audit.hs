@@ -11,16 +11,21 @@ module Hnvr.Web.Audit
 where
 
 import qualified Control.Exception as E
+import Data.Aeson (Value, encode)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TLE
 import Data.UUID (UUID)
 import Hnvr.Core.Logging (logError)
 import IHP.ModelSupport (ModelContext, sqlExec)
 
 -- | Record one audit row. @action@ is dotted (@rule.create@),
 -- @targetType@ the table-ish noun (@rule@, @camera@), @targetId@ the
--- affected row's UUID when there is one. The user id is passed in by
--- the controller (it owns the request context).
+-- affected row's UUID when there is one, @payload@ an optional JSON
+-- context blob (slug, changed fields, etc. — rendered on /AuditLog).
+-- The user id is passed in by the controller (it owns the request
+-- context).
 audit ::
   (?modelContext :: ModelContext) =>
   -- | Acting user's UUID ('Nothing' when unauthenticated — shouldn't
@@ -29,14 +34,18 @@ audit ::
   Text ->
   Text ->
   Maybe UUID ->
+  Maybe Value ->
   IO ()
-audit userUuid action targetType targetId = do
+audit userUuid action targetType targetId payload = do
+  -- hasql maps ByteString to bytea (no auto-cast to jsonb) — encode to
+  -- Text and cast inline, same as HealthCache's persistHostHealth.
+  let payloadText = TL.toStrict . TLE.decodeUtf8 . encode <$> payload
   r <-
     E.try $
       sqlExec
-        "INSERT INTO audit_log (user_id, action, target_type, target_id) \
-        \VALUES (?, ?, ?, ?)"
-        (userUuid, action, targetType, targetId)
+        "INSERT INTO audit_log (user_id, action, target_type, target_id, payload) \
+        \VALUES (?, ?, ?, ?, ?::jsonb)"
+        (userUuid, action, targetType, targetId, payloadText)
   case r of
     Right _ -> pure ()
     Left (e :: E.SomeException) ->

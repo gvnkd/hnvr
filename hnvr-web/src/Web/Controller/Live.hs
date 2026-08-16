@@ -12,6 +12,7 @@ module Web.Controller.Live
   )
 where
 
+import Data.Time.Clock (getCurrentTime)
 import Generated.Types
 import Hnvr.Web.View.Live.Show
 import IHP.ControllerPrelude
@@ -25,4 +26,6 @@ instance AutoRoute LiveController
 instance Controller LiveController where
   action ShowLiveAction {cameraId} = do
     camera <- fetch cameraId
+    hosts <- query @Host |> fetch
+    now <- liftIO getCurrentTime
     render ShowView {..}

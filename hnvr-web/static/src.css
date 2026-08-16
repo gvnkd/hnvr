@@ -310,6 +310,16 @@
     border-color: var(--border);
   }
 
+  /* Nav toggle lives INSIDE the sidebar (top-right of the brand row)
+   * — in the topbar it got overlapped by the off-canvas drawer on
+   * mobile, leaving no way to close the menu. */
+  .sidenav .nav-toggle {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.625rem;
+    z-index: 50;
+  }
+
   /* ── Dropdown toggle menus ───────────────────────────────────── */
   .dropdown {
     @apply relative;
@@ -701,6 +711,7 @@
   }
   .badge-ok    { background: var(--ok-soft);   border-color: color-mix(in srgb, var(--ok) 35%, transparent);   color: var(--ok); }
   .badge-rec   { background: var(--rec-soft);  border-color: color-mix(in srgb, var(--rec) 35%, transparent);  color: var(--rec); }
+  .badge-danger { background: var(--rec-soft); border-color: color-mix(in srgb, var(--rec) 35%, transparent);  color: var(--rec); }
   .badge-warn  { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, transparent); color: var(--warn); }
   .badge-info  { background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 35%, transparent); color: var(--info); }
   .badge-mute  { background: var(--panel-2);   border-color: var(--border); color: var(--text-dim); }
@@ -1042,6 +1053,20 @@
     transform: translateX(-100%);
     transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
     box-shadow: var(--shadow-pop);
+  }
+  /* Drawer hidden → the toggle peeks out at the screen's left edge;
+   * drawer open → it sits inside the drawer's top-right corner. Either
+   * way it's never covered by the drawer itself. */
+  .sidenav .nav-toggle {
+    right: -2.5rem;
+    background: var(--panel);
+    border-color: var(--border);
+    box-shadow: var(--shadow-pop);
+    transition: right 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .shell.nav-collapsed .sidenav .nav-toggle {
+    right: 0.625rem;
+    box-shadow: none;
   }
   .shell.nav-collapsed .sidenav {
     width: 232px;

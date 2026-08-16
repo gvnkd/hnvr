@@ -11,6 +11,7 @@ import IHP.FrameworkConfig (RootApplication (..))
 import IHP.Job.Types (Worker (..))
 import IHP.RouterSupport (FrontController (..), parseRoute, startPage)
 import Web.Controller.Archive (ArchiveController (..))
+import Web.Controller.AuditLog (AuditLogController (..))
 import Web.Controller.Cameras (CamerasController (..))
 import Web.Controller.Dashboard (DashboardController (..))
 import Web.Controller.Debug (DebugController (..))
@@ -36,7 +37,8 @@ instance FrontController RootApplication where
       parseRoute @EventsController,
       parseRoute @EventClipsController,
       parseRoute @RulesController,
-      parseRoute @StatsController
+      parseRoute @StatsController,
+      parseRoute @AuditLogController
     ]
 
 instance Worker RootApplication where

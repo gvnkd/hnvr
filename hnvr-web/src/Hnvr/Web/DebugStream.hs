@@ -24,6 +24,7 @@ import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (readIORef)
 import qualified Data.Text.Encoding as TE
+import Data.Time.Clock (NominalDiffTime, diffUTCTime, getCurrentTime)
 import qualified Data.UUID as UUID
 import Hnvr.Core.Frame (Frame (..))
 import Hnvr.Core.Id (CameraId (..))
@@ -56,7 +57,10 @@ debugStreamMiddleware app req respond =
 
     -- One-shot PNG of the latest frame (no track overlay — the rules
     -- canvas draws its own geometry on top). 404 until the first
-    -- frame lands.
+    -- frame lands. 503 when the cached frame is stale: the analysis
+    -- TVar is never cleared on ffmpeg death, so without the age check
+    -- a dead camera kept serving its last frame with a 200 and the
+    -- dashboard wall showed it as live forever.
     handleStill uuidTxt =
       case UUID.fromText uuidTxt of
         Nothing -> respond (text status404 "malformed camera id")
@@ -68,13 +72,22 @@ debugStreamMiddleware app req respond =
               mLatest <- latestAnalysis sup (CameraId uuid)
               case mLatest of
                 Nothing -> respond (text status404 "no frame yet")
-                Just (frame, _tracks) ->
-                  respond
-                    ( responseLBS
-                        status200
-                        [("Content-Type", "image/png"), ("Cache-Control", "no-cache")]
-                        (renderDebugPng frame [])
-                    )
+                Just (frame, _tracks) -> do
+                  now <- getCurrentTime
+                  if diffUTCTime now (frameTimestamp frame) > maxFrameAgeSeconds
+                    then respond (text status503 "stale frame — camera unavailable")
+                    else
+                      respond
+                        ( responseLBS
+                            status200
+                            [("Content-Type", "image/png"), ("Cache-Control", "no-cache")]
+                            (renderDebugPng frame [])
+                        )
+
+    -- Frames arrive at analysis_fps (>= 1/s on any sane config); 5 s
+    -- without a fresh frame means the source is dead.
+    maxFrameAgeSeconds :: NominalDiffTime
+    maxFrameAgeSeconds = 5
 
     text st msg =
       responseLBS st [("Content-Type", "text/plain")] (BL.fromStrict (TE.encodeUtf8 msg))

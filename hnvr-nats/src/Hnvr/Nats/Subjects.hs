@@ -15,7 +15,6 @@ module Hnvr.Nats.Subjects
     commandSnapshot,
     health,
     configCameras,
-    configRules,
     ptzStatus,
     leader,
   )
@@ -58,10 +57,6 @@ health host = "hnvr.health." <> host
 -- | @hnvr.config.cameras.<slug>@ — leader → all (broadcast on row change).
 configCameras :: Text -> Text
 configCameras slug = "hnvr.config.cameras." <> slug
-
--- | @hnvr.config.rules.<cam>@ — leader → all (broadcast on row change).
-configRules :: Text -> Text
-configRules cam = "hnvr.config.rules." <> cam
 
 -- | @hnvr.ptz.status.<cam>@ — host owning cam → all. Max-age 2s.
 ptzStatus :: Text -> Text

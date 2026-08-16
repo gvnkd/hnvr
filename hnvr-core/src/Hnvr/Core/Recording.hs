@@ -45,7 +45,13 @@ data Span = Span
     spEnd :: !UTCTime,
     spBytes :: !Word64,
     spHasAudio :: !Bool,
-    spObjectKey :: !Text
+    spObjectKey :: !Text,
+    -- | Capturing host (segments.host_id). 'Nothing' on rows written
+    -- before the column existed / after host removal.
+    spHostId :: !(Maybe Text),
+    -- | Hex sha256 of the fragment bytes (segments.sha256) — surfaced
+    -- in the archive UI for integrity cross-checks against S3.
+    spSha256 :: !Text
   }
   deriving stock (Eq, Show)
 

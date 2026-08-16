@@ -74,6 +74,14 @@ rulesEventsSql = $(embedFile "migrations/0003-rules-events.sql")
 auditLogSql :: ByteString
 auditLogSql = $(embedFile "migrations/0004-audit-log.sql")
 
+-- | zone_motion enum values on rule_kind + event_kind. Was manual-only
+-- until Aug 2026 (fresh deploys silently lacked the values); ADD VALUE
+-- IF NOT EXISTS makes replay on already-patched DBs a no-op. PG 12+
+-- allows ADD VALUE inside the migration transaction as long as the new
+-- value is unused in it.
+zoneMotionSql :: ByteString
+zoneMotionSql = $(embedFile "migrations/0005-zone-motion.sql")
+
 -- | Tombstone column for verified recording deletion
 -- (@segments.pending_delete_at@ + partial index). See the file header.
 pendingDeleteSql :: ByteString
@@ -92,6 +100,11 @@ onvifConfigSyncSql = $(embedFile "migrations/0008-onvif-config-sync.sql")
 -- | Management protocol selector (onvif|dvrip) on cameras.
 mgmtProtoSql :: ByteString
 mgmtProtoSql = $(embedFile "migrations/0009-mgmt-proto.sql")
+
+-- | Dead schema cleanup: drop never-read/never-written columns, prune
+-- zero-emitter event_kind values. See the file header.
+cleanupSql :: ByteString
+cleanupSql = $(embedFile "migrations/0010-cleanup.sql")
 
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
@@ -128,6 +141,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0004-audit-log" auditLogSql) True conn
     handleResult "0004-audit-log" auditRes
+    zoneRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0005-zone-motion" zoneMotionSql) True conn
+    handleResult "0005-zone-motion" zoneRes
     pendingRes <-
       runMigration $
         MigrationContext (MigrationScript "0006-pending-delete" pendingDeleteSql) True conn
@@ -144,6 +161,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0009-mgmt-proto" mgmtProtoSql) True conn
     handleResult "0009-mgmt-proto" mgmtRes
+    cleanupRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0010-cleanup" cleanupSql) True conn
+    handleResult "0010-cleanup" cleanupRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

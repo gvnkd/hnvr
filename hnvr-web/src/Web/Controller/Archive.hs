@@ -33,8 +33,9 @@ module Web.Controller.Archive
   )
 where
 
+import Data.List (nub)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, UTCTime (..), addUTCTime, diffUTCTime, getCurrentTime)
@@ -156,7 +157,9 @@ instance Controller ArchiveController where
             spEnd = s.endTs,
             spBytes = fromIntegral s.bytes,
             spHasAudio = s.hasAudio,
-            spObjectKey = s.objectKey
+            spObjectKey = s.objectKey,
+            spHostId = s.hostId,
+            spSha256 = s.sha256
           }
       toRow slugs r =
         let camUuid = case recSpans r of
@@ -170,7 +173,11 @@ instance Controller ArchiveController where
                 rrSegments = length (recSpans r),
                 rrBytes = sum (map spBytes (recSpans r)),
                 rrHasAudio = any spHasAudio (recSpans r),
-                rrGapCount = length (recGaps gapMin r)
+                rrGapCount = length (recGaps gapMin r),
+                rrHosts = nub (mapMaybe spHostId (recSpans r)),
+                rrFirstSha = case recSpans r of
+                  (s : _) -> spSha256 s
+                  [] -> ""
               }
   action PlayerArchiveAction {cameraId} = do
     camera <- fetch cameraId

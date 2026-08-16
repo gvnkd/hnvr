@@ -14,7 +14,7 @@
 -- trips the camera into disconnects, pitfall #11 class).
 --
 -- 'frameSourceLoop' adds the same exponential-backoff supervision as
--- the recording worker (1s → 30s cap): ffmpeg exits on RTSP hiccups,
+-- the recording worker (1s → 5s cap): ffmpeg exits on RTSP hiccups,
 -- we restart and the queue consumer just sees a gap.
 module Hnvr.Capture.FrameSource
   ( FrameSourceConfig (..),
@@ -122,7 +122,9 @@ runFrameSource cfg q = do
         readLoop h frameSize rest
 
 -- | Supervised frame source: restart ffmpeg on exit with exponential
--- backoff (1s doubling to a 30s cap), logging through the standard
+-- backoff (1s doubling to a 5s cap — analysis is best-effort CV, not
+-- recording; a dead camera should retry briskly so recovery shows up
+-- fast on the dashboard), logging through the standard
 -- 'Hnvr.Core.Logging' channel. Runs forever — cancel the enclosing
 -- async to stop. Async exceptions (cancellation) are rethrown, never
 -- swallowed: catching 'AsyncCancelled' here would respawn ffmpeg on
@@ -132,7 +134,7 @@ frameSourceLoop cfg q = go (0 :: Int)
   where
     go failures = do
       ec <- try (runFrameSource cfg q)
-      let delayUs = min 30_000_000 (1_000_000 * (2 ^ min failures 5))
+      let delayUs = min 5_000_000 (1_000_000 * (2 ^ min failures 5))
       case ec of
         Right ExitSuccess ->
           logWarn (fscTag cfg <> ": analysis ffmpeg exited cleanly; restarting in " <> tshow delayUs)

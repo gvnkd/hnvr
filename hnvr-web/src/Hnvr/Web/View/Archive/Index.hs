@@ -31,7 +31,11 @@ data RecordingRow = RecordingRow
     rrSegments :: Int,
     rrBytes :: Word64,
     rrHasAudio :: Bool,
-    rrGapCount :: Int
+    rrGapCount :: Int,
+    -- | Distinct capturing hosts across the group's segments.
+    rrHosts :: [Text],
+    -- | sha256 of the group's first segment (integrity cross-check).
+    rrFirstSha :: Text
   }
 
 data IndexView = IndexView
@@ -139,6 +143,7 @@ instance View IndexView where
                   <th>Camera</th>
                   <th>Start (UTC)</th>
                   <th>Duration</th>
+                  <th>Host</th>
                   <th class="text-right">Size</th>
                   <th class="text-right">Segments</th>
                   <th data-no-sort="1">Flags</th>
@@ -156,8 +161,9 @@ instance View IndexView where
             <td class="mono t-strong">{r.rrCameraSlug}</td>
             <td class="mono">{fmtTs (r.rrStart)}</td>
             <td class="mono">{fmtDur (r.rrStart) (r.rrEnd)}</td>
+            <td>{hostBadges}</td>
             <td class="mono text-right">{fmtBytes (r.rrBytes)}</td>
-            <td class="mono text-right">{tshow (r.rrSegments)}</td>
+            <td class="mono text-right" title={shaTitle}>{tshow (r.rrSegments)}</td>
             <td>
               {audioBadge}
               {gapsBadge}
@@ -180,6 +186,13 @@ instance View IndexView where
             if r.rrHasAudio
               then [hsx|<span class="badge badge-info">audio</span>|]
               else [hsx||]
+          -- Distinct capturing hosts for the group (>1 = a failover
+          -- happened mid-recording). First segment's sha256 rides as
+          -- the Segments cell tooltip for S3 integrity cross-checks.
+          hostBadges = case r.rrHosts of
+            [] -> [hsx|<span class="muted">—</span>|]
+            hs -> forEach hs (\h -> [hsx|<span class="badge badge-mute">{h}</span>|])
+          shaTitle = "first segment sha256: " <> r.rrFirstSha
           gapsBadge =
             if r.rrGapCount > 0
               then [hsx|<span class="badge badge-warn">{tshow (r.rrGapCount)} gap(s)</span>|]

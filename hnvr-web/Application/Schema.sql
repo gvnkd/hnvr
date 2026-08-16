@@ -23,7 +23,6 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE hosts (
     id              TEXT PRIMARY KEY,
-    display_name    TEXT NOT NULL,
     gpu_model       TEXT,
     exec_providers  TEXT[] NOT NULL DEFAULT ARRAY['cpu'],
     is_leader       BOOLEAN NOT NULL DEFAULT FALSE,
@@ -39,16 +38,13 @@ CREATE TABLE cameras (
     slug            TEXT NOT NULL UNIQUE,
     name            TEXT NOT NULL,
     rtsp_url        TEXT NOT NULL,
-    rtsp_template   TEXT,
     rtsp_transport  TEXT NOT NULL DEFAULT 'tcp',
     host            TEXT,
-    port            INT NOT NULL DEFAULT 554,
     username        TEXT,
     password_enc    BYTEA,
     password_nonce  BYTEA,
     codec           codec_kind NOT NULL DEFAULT 'unknown',
     rtsp_sub_url    TEXT,
-    rtsp_sub_template TEXT,
     use_substream_for_analysis BOOLEAN NOT NULL DEFAULT TRUE,
     substream_codec codec_kind NOT NULL DEFAULT 'h264',
     substream_width INT,
@@ -163,8 +159,7 @@ CREATE TABLE rules (
 CREATE INDEX rules_camera_idx ON rules (camera_id) WHERE enabled;
 
 CREATE TYPE event_kind AS ENUM
-    ('line_crossed', 'zone_enter', 'zone_exit', 'zone_inside',
-     'zone_motion', 'track_start', 'track_end', 'segment_written', 'system');
+    ('line_crossed', 'zone_enter', 'zone_exit', 'zone_inside', 'zone_motion');
 
 CREATE TABLE events (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -188,9 +183,10 @@ CREATE TABLE events (
 
 CREATE INDEX events_cam_ts_idx   ON events (camera_id, ts DESC);
 CREATE INDEX events_ts_brin      ON events USING brin (ts);
--- Partial indexes events_kind_idx + events_track_idx live only in
--- migrations/0003-rules-events.sql — IHP's schema-compiler can't parse
--- NOT IN / IS NOT NULL index predicates, and codegen doesn't need them.
+-- events_track_idx (partial) lives only in migrations/0003-rules-events.sql
+-- — IHP's schema-compiler can't parse IS NOT NULL index predicates, and
+-- codegen doesn't need it. events_kind_idx was partial there too until
+-- 0010-cleanup pruned the dead event_kind values and recreated it plain.
 
 -- Event video clips: assembled node-side from the main fMP4 fragment
 -- stream when a rule with clip_retention_hours set fires. retention_hours

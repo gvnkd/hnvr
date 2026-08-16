@@ -11,6 +11,7 @@ module Web.Controller.Dashboard
   )
 where
 
+import Data.Time.Clock (getCurrentTime)
 import Generated.Types
 import Hnvr.Web.View.Dashboard.Index
 import IHP.ControllerPrelude
@@ -31,4 +32,5 @@ instance Controller DashboardController where
       query @Host
         |> orderByAsc #id
         |> fetch
+    now <- liftIO getCurrentTime
     render IndexView {..}

@@ -110,7 +110,9 @@ mkSpanCam cam off dur =
       spEnd = baseT (off + dur),
       spBytes = 100,
       spHasAudio = False,
-      spObjectKey = "cam/k.mp4"
+      spObjectKey = "cam/k.mp4",
+      spHostId = Just "hnvr-2",
+      spSha256 = "deadbeef"
     }
 
 -- | Generate plausible segment streams: 1s spans with realistic jitter
@@ -132,7 +134,9 @@ instance Arbitrary SpansInput where
                   spEnd = addUTCTime (fromIntegral (t + 1)) base,
                   spBytes = 100,
                   spHasAudio = False,
-                  spObjectKey = "cam/k.mp4"
+                  spObjectKey = "cam/k.mp4",
+                  spHostId = Just "hnvr-2",
+                  spSha256 = "deadbeef"
                 }
          in s : mkSpans (t + 1 + g) gs
 

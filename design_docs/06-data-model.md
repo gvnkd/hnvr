@@ -35,10 +35,10 @@ CREATE TABLE users (
 -- =========================================================
 CREATE TABLE hosts (
     id              TEXT PRIMARY KEY,                            -- 'hnvr-1', 'hnvr-2'
-    display_name    TEXT NOT NULL,
-    gpu_model       TEXT,                                        -- 'RTX 4090', 'GTX 1070'
-    exec_providers  TEXT[] NOT NULL DEFAULT ARRAY['cpu'],         -- ['tensorrt','cuda','cpu']
-    is_leader       BOOLEAN NOT NULL DEFAULT FALSE,
+    -- display_name dropped in v0.5.2.0 (0010): was written as a copy of id, never read
+    gpu_model       TEXT,                                        -- 'RTX 4090', 'GTX 1070' (from nvidia-smi via health payload)
+    exec_providers  TEXT[] NOT NULL DEFAULT ARRAY['cpu'],         -- ['tensorrt','cuda','cpu'] (from health payload)
+    is_leader       BOOLEAN NOT NULL DEFAULT FALSE,              -- stamped by the leader's HealthCache UPSERT
     last_health_at  TIMESTAMP WITH TIME ZONE,
     health_json     JSONB,                                       -- last hnvr.health payload
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
@@ -53,17 +53,17 @@ CREATE TABLE cameras (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     slug            TEXT NOT NULL UNIQUE,                       -- 'cam-196'
     name            TEXT NOT NULL,
-    -- connection (rtsp_url is authoritative; rendered from template on save)
+    -- connection (rtsp_url is authoritative)
+    -- rtsp_template/port dropped in v0.5.2.0 (0010): templates never had
+    -- form inputs (wiped NULL on every Save); port had no logic consumer.
     rtsp_url        TEXT NOT NULL,
-    rtsp_template   TEXT,
     host            INET,
-    port            INT NOT NULL DEFAULT 554,
     username        TEXT,
     password_enc    BYTEA,                                       -- AES-256-GCM ciphertext
     password_nonce  BYTEA,                                       -- GCM nonce
     -- sub-stream (lower-res stream used for analysis; saves 4K HEVC decode)
     rtsp_sub_url    TEXT,                                         -- NULL = fall back to rtsp_url with -vf scale
-    rtsp_sub_template TEXT,
+    -- rtsp_sub_template dropped in v0.5.2.0 (0010), same reason as rtsp_template
     use_substream_for_analysis BOOLEAN NOT NULL DEFAULT TRUE,
     substream_codec codec_kind NOT NULL DEFAULT 'h264',          -- typically h264 even when main is hevc
     substream_width INT  CHECK (substream_width  BETWEEN 64 AND 1920),
@@ -151,12 +151,11 @@ CREATE INDEX segments_start_ts_brin ON segments USING brin (start_ts);
 -- =========================================================
 -- Events
 -- =========================================================
+-- v0.5.2.0 (migration 0010): track_start/track_end/segment_written/system
+-- were pruned — zero emitters ever existed; segment_written envelopes go
+-- to the segments table, not events. zone_motion was added in 0005.
 CREATE TYPE event_kind AS ENUM
-    ('line_crossed', 'zone_enter', 'zone_exit', 'zone_inside',
-     'track_start', 'track_end',
-     'segment_written',                              -- non-CV: capture pipeline
-     'system'                                        -- gap detected, recorder restart, etc.
-    );
+    ('line_crossed', 'zone_enter', 'zone_exit', 'zone_inside', 'zone_motion');
 
 CREATE TABLE events (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -177,7 +176,7 @@ CREATE TABLE events (
 );
 CREATE INDEX events_cam_ts_idx   ON events (camera_id, ts DESC);
 CREATE INDEX events_ts_brin      ON events USING brin (ts);
-CREATE INDEX events_kind_idx     ON events (kind, ts DESC) WHERE kind NOT IN ('system', 'segment_written');
+CREATE INDEX events_kind_idx     ON events (kind, ts DESC);  -- plain since 0010 (was: WHERE kind NOT IN ('system','segment_written'))
 CREATE INDEX events_track_idx    ON events (camera_id, track_id, ts DESC)
                                   WHERE track_id IS NOT NULL;
 

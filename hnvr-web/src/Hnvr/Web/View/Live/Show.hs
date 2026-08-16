@@ -13,12 +13,17 @@
 --   4. setRemoteDescription → ontrack fires → attach to <video>.
 module Hnvr.Web.View.Live.Show (ShowView (..)) where
 
+import Data.Time.Clock (UTCTime)
 import Generated.Types
+import Hnvr.Core.CameraStatus (CameraStatus (..))
+import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-newtype ShowView = ShowView
-  { camera :: Camera
+data ShowView = ShowView
+  { camera :: Camera,
+    hosts :: [Host],
+    now :: UTCTime
   }
 
 instance View ShowView where
@@ -28,8 +33,9 @@ instance View ShowView where
       <div class="page-header">
         <div>
           <h1>
-            <span class="led led-rec"></span>
+            <span id="hnvr-live-hdr-led" class={hdrLedClass}></span>
             Live · <span class="font-mono">{camera.slug}</span>
+            {offlineBadge}
           </h1>
           <div class="subtitle">WebRTC via WHEP · {fromMaybe "—" camera.assignedHost}</div>
         </div>
@@ -58,6 +64,21 @@ instance View ShowView where
     |]
     where
       archiveUrl = "/PlayerArchive?cameraId=" <> tshow (camera |> get #id)
+      camStatus = cameraStatusFor hosts now camera
+      -- Initial header LED from the server-known worker state; the WHEP
+      -- client takes over once the page's WebRTC session negotiates.
+      hdrLedClass = case camStatus of
+        CSRecording -> "led led-rec" :: Text
+        _ -> "led led-off"
+      offlineBadge = case camStatus of
+        CSRecording -> mempty
+        CSStarting -> [hsx|<span class="badge badge-warn">STARTING</span>|]
+        CSReconnecting -> [hsx|<span class="badge badge-warn">RECONNECTING</span>|]
+        CSFailed -> [hsx|<span class="badge badge-danger">FAILED</span>|]
+        CSHostDown -> [hsx|<span class="badge badge-danger">HOST DOWN</span>|]
+        CSNotRunning -> [hsx|<span class="badge badge-mute">STOPPED</span>|]
+        CSUnassigned -> [hsx|<span class="badge badge-mute">UNASSIGNED</span>|]
+        CSDisabled -> [hsx|<span class="badge badge-mute">DISABLED</span>|]
       -- IHP HSX deliberately does NOT splice {…} inside <script> tags
       -- (parser treats script/style bodies as pre-escaped text so that
       -- CSS like `h1 { color:red }` doesn't get re-parsed). Build the
@@ -84,20 +105,23 @@ feedJs cam =
 
 -- | Inline WHEP bootstrap: delegates to the shared client in
 -- /static/app.js (HNVR.whep) and maps its state callbacks onto the
--- status pill + LED. app.js is loaded in <head> (no defer) so the
--- HNVR global exists by the time body-level page scripts run.
+-- status pill + both LEDs (header LED doubles as the REC indicator).
+-- app.js is loaded in <head> (no defer) so the HNVR global exists by
+-- the time body-level page scripts run.
 whepJs :: Camera -> Text
 whepJs cam =
   "const video = document.getElementById('hnvr-live');"
     <> "const status = document.getElementById('hnvr-live-status');"
     <> "const led = document.getElementById('hnvr-live-led');"
-    <> "function setLed(cls) { led.className = 'led ' + cls; }"
+    <> "const hdrLed = document.getElementById('hnvr-live-hdr-led');"
+    <> "function setLeds(pillCls, hdrCls) { led.className = 'led ' + pillCls; hdrLed.className = 'led ' + hdrCls; }"
     <> "HNVR.whep('"
     <> cam.slug
     <> "', video, function (state) {"
-    <> "  if (state === 'live') { status.textContent = 'Live'; setLed('led-on'); }"
-    <> "  else if (state === 'reconnecting') { status.textContent = 'Reconnecting…'; setLed('led-warn'); }"
-    <> "  else { status.textContent = 'Error: ' + state.replace(/^error:\\s*/, ''); setLed('led-off'); }"
+    <> "  if (state === 'live') { status.textContent = 'Live'; setLeds('led-on', 'led-rec'); }"
+    <> "  else if (state === 'reconnecting') { status.textContent = 'Reconnecting…'; setLeds('led-warn', 'led-warn'); }"
+    <> "  else if (state === 'connecting') { status.textContent = 'Connecting…'; setLeds('led-warn', 'led-warn'); }"
+    <> "  else { status.textContent = 'Error: ' + state.replace(/^error:\\s*/, ''); setLeds('led-off', 'led-off'); }"
     <> "});"
     <> "document.getElementById('hnvr-live-fs').addEventListener('click', function () {"
     <> "  if (video.requestFullscreen) video.requestFullscreen();"

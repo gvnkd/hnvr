@@ -10,6 +10,7 @@ library
     Hnvr.Core.ArchiveBrowser
     Hnvr.Core.Assignment
     Hnvr.Core.CameraSnapshot
+    Hnvr.Core.CameraStatus
     Hnvr.Core.Clip
     Hnvr.Core.Crypto
     Hnvr.Core.Dvrip
@@ -63,6 +64,7 @@ test-suite hnvr-core-test
     Hnvr.Core.ArchiveBrowserSpec
     Hnvr.Core.AssignmentSpec
     Hnvr.Core.CameraSnapshotSpec
+    Hnvr.Core.CameraStatusSpec
     Hnvr.Core.ClipSpec
     Hnvr.Core.CryptoSpec
     Hnvr.Core.DvripSpec

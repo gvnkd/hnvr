@@ -2,31 +2,21 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | Leader-side HealthCache.
+-- | Leader-side health consumer.
 --
--- Subscribes to @hnvr.health.>@ on the leader's NATS bus and maintains
--- an in-memory @IORef (Map HostId Health)@. The IORef is currently
--- write-only — the original plan (Phase 2 Slice 5/6) was to have the
--- @/hosts@ dashboard and @AssignmentCoordinator@ read from it for O(1)
--- access. In practice both consumers query Postgres directly:
+-- Subscribes to @hnvr.health.>@ on the leader's NATS bus and writes the
+-- latest health to the @hosts@ table on every message (single UPSERT
+-- per heartbeat, ~0.2 QPS at 5 s heartbeat × 2 hosts). The DB row is
+-- the source of truth for the /Hosts page, the dashboard host panel,
+-- per-camera status resolution ('Hnvr.Web.CameraStatus') and the
+-- AssignmentCoordinator's host-down detection.
 --
---   * @Controller/Hosts.hs@ runs `query @Host |> fetch` per request.
---   * @AssignmentCoordinator.healthyHosts@ runs a `sqlQuery` for
---     `last_health_at >= NOW() - INTERVAL '15 seconds'`.
---
--- The IORef is kept around as a future optimisation target (Phase 6
--- operational hardening can wire it as a read-through cache). For now
--- it's just a sink that gets updated on every heartbeat.
---
--- Also writes the latest health to the @hosts@ table on every message
--- (single UPSERT per heartbeat, ~0.2 QPS at 5 s heartbeat × 2 hosts).
--- The DB row is the actual source of truth for cross-process restart
--- scenarios; the IORef is the (currently unused) hot read path.
+-- The UPSERT also stamps @is_leader@: this consumer only runs on the
+-- leader, so the reporting host is the leader iff it equals our own
+-- @HNVR_HOST@. (Before Aug 2026 nothing ever wrote is_leader and every
+-- host rendered as WORKER.)
 module Hnvr.Web.HealthCache
   ( startHealthCache,
-    HealthCache,
-    readHealthCache,
-    HealthSnapshot (..),
   )
 where
 
@@ -36,9 +26,6 @@ import Control.Monad (forever, void)
 import Data.Aeson (FromJSON, encode)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.IORef
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
@@ -49,64 +36,67 @@ import Hnvr.Nats.Bus (Bus, Message (..), Subscription)
 import qualified Hnvr.Nats.Bus as Bus
 import IHP.ModelSupport (ModelContext, sqlExec)
 
--- | Opaque handle holding the live snapshot.
-newtype HealthCache = HealthCache (IORef HealthSnapshot)
-
--- | Map host → latest health JSON + receive timestamp.
-type HealthSnapshot = Map.Map Text Aeson.Value
-
--- | Read the current snapshot. Cheap — IORef read.
-readHealthCache :: HealthCache -> IO HealthSnapshot
-readHealthCache (HealthCache ref) = readIORef ref
-
--- | Spawn the HealthCache in a background async. Returns a handle
--- immediately. The handle is shared via the leader's app context once
--- Slice 6 needs it in controllers.
-startHealthCache :: (?modelContext :: ModelContext) => Bus -> IO HealthCache
-startHealthCache bus = do
-  ref <- newIORef Map.empty
+-- | Spawn the health consumer in a background async. @leaderHost@ is
+-- this process's own @HNVR_HOST@ — used to stamp @is_leader@.
+startHealthCache :: (?modelContext :: ModelContext) => Bus -> Text -> IO ()
+startHealthCache bus leaderHost = do
   sub <- Bus.subscribe bus "hnvr.health.>"
-  _ <- async (drain sub ref)
+  _ <- async (drain sub)
   logInfo "HealthCache: subscribed to hnvr.health.>"
-  pure (HealthCache ref)
-
-drain :: (?modelContext :: ModelContext) => Subscription -> IORef HealthSnapshot -> IO ()
-drain sub ref = forever $ do
-  msg <- Bus.readMessage sub
-  case Aeson.decodeStrict' (msgPayload msg) :: Maybe Aeson.Value of
-    Just v ->
-      handleHealth msg v ref `catch` \(e :: SomeException) ->
-        logError ("HealthCache: handle failed: " <> T.pack (show e))
-    Nothing -> pure ()
-
--- | Parse host from the subject (@hnvr.health.<host>@), update IORef,
--- write-through to DB.
-handleHealth :: (?modelContext :: ModelContext) => Message -> Aeson.Value -> IORef HealthSnapshot -> IO ()
-handleHealth msg v ref = do
-  let subj = msgSubject msg
-      host = T.drop (T.length "hnvr.health.") subj
-  now <- getCurrentTime
-  -- Augment the payload with leader-receive timestamp for staleness check.
-  let v' = case v of
-        Aeson.Object o -> Aeson.Object (KeyMap.insert "received_at" (Aeson.String (T.pack (show now))) o)
-        _ -> v
-  atomicModifyIORef' ref (\m -> (Map.insert host v' m, ()))
-  persistHostHealth host v'
+  where
+    drain sub = forever $ do
+      msg <- Bus.readMessage sub
+      case Aeson.decodeStrict' (msgPayload msg) :: Maybe Aeson.Value of
+        Just v ->
+          handleHealth msg v `catch` \(e :: SomeException) ->
+            logError ("HealthCache: handle failed: " <> T.pack (show e))
+        Nothing -> pure ()
+    handleHealth msg v = do
+      let subj = msgSubject msg
+          host = T.drop (T.length "hnvr.health.") subj
+      now <- getCurrentTime
+      -- Augment the payload with leader-receive timestamp for staleness
+      -- checks by JSON consumers.
+      let v' = case v of
+            Aeson.Object o -> Aeson.Object (KeyMap.insert "received_at" (Aeson.String (T.pack (show now))) o)
+            _ -> v
+      persistHostHealth leaderHost host v'
 
 -- | UPSERT into hosts table. Uses @sqlExec@ with raw SQL because IHP's
 -- @updateRecord@ requires fetching first; this is a fire-and-forget
 -- write. The hosts table may not have a row for this host yet (auto-
--- create on first heartbeat).
-persistHostHealth :: (?modelContext :: ModelContext) => Text -> Aeson.Value -> IO ()
-persistHostHealth host v = do
+-- create on first heartbeat). @gpu_model@ and @exec_providers@ are
+-- lifted out of the payload into their own columns (dashboard + /Hosts
+-- render them directly). Both are COALESCE-guarded: a reporter running
+-- an older build (no such payload keys) must not wipe values a newer
+-- reporter wrote.
+persistHostHealth :: (?modelContext :: ModelContext) => Text -> Text -> Aeson.Value -> IO ()
+persistHostHealth leaderHost host v = do
   -- Encode to Text and let PG cast on the way in (?::jsonb). hasql maps
   -- ByteString to bytea which won't auto-cast to jsonb.
   let jsonText = TL.toStrict (TLE.decodeUtf8 (encode v))
+      gpuModel = case v of
+        Aeson.Object o -> case KeyMap.lookup "gpu_model" o of
+          Just (Aeson.String t) -> Just t
+          _ -> Nothing
+        _ -> Nothing
+      execProviders :: Maybe [Text]
+      execProviders = case v of
+        Aeson.Object o -> case KeyMap.lookup "exec_providers" o of
+          Just pv -> case Aeson.fromJSON pv of
+            Aeson.Success eps -> Just eps
+            Aeson.Error _ -> Nothing
+          Nothing -> Nothing
+        _ -> Nothing
+      isLeader = host == leaderHost
   void $
     sqlExec
-      "INSERT INTO hosts (id, display_name, last_health_at, health_json) \
-      \ VALUES (?, ?, NOW(), ?::jsonb) \
+      "INSERT INTO hosts (id, last_health_at, health_json, gpu_model, exec_providers, is_leader) \
+      \ VALUES (?, NOW(), ?::jsonb, ?, COALESCE(?, ARRAY['cpu']::text[]), ?) \
       \ ON CONFLICT (id) DO UPDATE SET \
       \   last_health_at = NOW(), \
-      \   health_json = EXCLUDED.health_json"
-      (host, host, jsonText)
+      \   health_json = EXCLUDED.health_json, \
+      \   gpu_model = COALESCE(?, hosts.gpu_model), \
+      \   exec_providers = COALESCE(?, hosts.exec_providers), \
+      \   is_leader = EXCLUDED.is_leader"
+      (host, jsonText, gpuModel, execProviders, isLeader, gpuModel, execProviders)

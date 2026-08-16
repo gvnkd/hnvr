@@ -1,4 +1,5 @@
 {-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -22,15 +23,22 @@ module Hnvr.Web.EventWriter
   )
 where
 
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException, catch)
+import Control.Exception (SomeException, bracket, catch)
 import Control.Monad (forever, void)
-import Data.Aeson (FromJSON, decode)
+import Data.Aeson (FromJSON, decode, encode, toJSON)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BL
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TLE
 import Data.UUID (UUID)
+import qualified Database.PostgreSQL.Simple as PG
+import Database.PostgreSQL.Simple.Types ((:.) (..))
 import Hnvr.Core.Event (ClipReady (..), CvEvent (..))
 import Hnvr.Core.Id (CameraId (..), HostId (..), sha256ToHex)
 import Hnvr.Core.Logging (logError, logInfo)
@@ -39,6 +47,7 @@ import Hnvr.Nats.Bus (Bus, Message (..), Subscription)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (events)
 import IHP.ModelSupport (ModelContext, sqlExec)
+import qualified System.Environment as Env
 
 -- | Spawn the EventWriter drain loop in a background 'async'. Returns
 -- immediately after subscribing. The async lives for the lifetime of the
@@ -50,7 +59,33 @@ startEventWriter bus mc = do
   sub <- Bus.subscribe bus events
   let ?modelContext = mc
   _ <- async (drainLoop sub)
+  _ <- async segmentTsBackfillLoop
   logInfo "EventWriter: subscribed to hnvr.events"
+
+-- | Best-effort backfill of @events.segment_ts@. The immediate scalar
+-- subquery in 'insertCvEvent' usually misses: the covering segment row
+-- is only written after its fragment closes (up to ~2 s later), while
+-- the event fires in real time. Re-resolve recent NULL rows every
+-- minute; rows whose camera genuinely wasn't recording age out of the
+-- 1-day window and stay NULL.
+segmentTsBackfillLoop :: (?modelContext :: ModelContext) => IO ()
+segmentTsBackfillLoop = forever $ do
+  threadDelay 60_000_000
+  void
+    ( sqlExec
+        "UPDATE events e SET segment_ts = \
+        \  (SELECT s.start_ts FROM segments s \
+        \    WHERE s.camera_id = e.camera_id \
+        \      AND s.start_ts <= e.ts AND s.end_ts >= e.ts \
+        \      AND s.pending_delete_at IS NULL \
+        \    ORDER BY s.start_ts DESC LIMIT 1) \
+        \WHERE e.segment_ts IS NULL \
+        \  AND e.ts < NOW() - INTERVAL '15 seconds' \
+        \  AND e.ts > NOW() - INTERVAL '1 day'"
+        ()
+    )
+    `catch` \(e :: SomeException) ->
+      logError ("EventWriter: segment_ts backfill failed: " <> T.pack (show e))
 
 drainLoop :: (?modelContext :: ModelContext) => Subscription -> IO ()
 drainLoop sub = forever $ do
@@ -117,26 +152,50 @@ insertClipReady cr = do
       (crObjectPrefix cr, unCameraId (crCamera cr) :: UUID)
 
 -- | Insert a CV event (line_crossed / zone_*) into the @events@ table.
--- @segment_ts@ is left NULL in this slice.
-insertCvEvent :: (?modelContext :: ModelContext) => CvEvent -> IO ()
-insertCvEvent ev =
+-- @segment_ts@ links the event to the covering archive segment
+-- (best-effort: usually NULL at insert time because the segment row
+-- lags the fragment close — 'segmentTsBackfillLoop' re-resolves it
+-- within a minute). @payload@ stores the full 'CvEvent' JSON envelope.
+--
+-- Uses a one-shot postgresql-simple connection (like
+-- 'Web.Controller.Events.fetchEventRows'): the 14-param INSERT exceeds
+-- IHP sqlExec's ToSnippetParams arity.
+insertCvEvent :: CvEvent -> IO ()
+insertCvEvent ev = do
+  dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
   void $
-    sqlExec
-      "INSERT INTO events \
-      \  (camera_id, rule_id, ts, kind, class_id, track_id, confidence, \
-      \   bbox, thumbnail_key, host_id, created_at) \
-      \ VALUES (?, ?::uuid, ?, ?::event_kind, ?, ?, ?, ?::jsonb, ?, ?, NOW())"
-      ( unCameraId (ceCamera ev) :: UUID,
-        ceRuleId ev,
-        ceTs ev,
-        ceKind ev,
-        ceClassId ev,
-        ceTrackId ev,
-        ceConfidence ev,
-        ceBbox ev,
-        ceThumbnailKey ev,
-        unHostId (ceHost ev) :: Text
-      )
+    bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn ->
+      PG.execute
+        conn
+        "INSERT INTO events \
+        \  (camera_id, rule_id, ts, kind, class_id, track_id, confidence, \
+        \   bbox, thumbnail_key, host_id, segment_ts, payload, created_at) \
+        \ VALUES (?, ?::uuid, ?, ?::event_kind, ?, ?, ?, ?::jsonb, ?, ?, \
+        \  (SELECT s.start_ts FROM segments s \
+        \    WHERE s.camera_id = ? AND s.start_ts <= ? AND s.end_ts >= ? \
+        \      AND s.pending_delete_at IS NULL \
+        \    ORDER BY s.start_ts DESC LIMIT 1), \
+        \  ?::jsonb, NOW())"
+        ( ( unCameraId (ceCamera ev) :: UUID,
+            ceRuleId ev,
+            ceTs ev,
+            ceKind ev,
+            ceClassId ev,
+            ceTrackId ev,
+            ceConfidence ev,
+            ceBbox ev,
+            ceThumbnailKey ev,
+            unHostId (ceHost ev) :: Text
+          )
+            :. ( unCameraId (ceCamera ev) :: UUID,
+                 ceTs ev,
+                 ceTs ev,
+                 TL.toStrict (TLE.decodeUtf8 (encode (toJSON ev)))
+               )
+        )
+
+defaultDbUrl :: String
+defaultDbUrl = "postgresql:///hnvr?host=/run/postgresql"
 
 -- | Insert a 'SegmentWritten' row idempotently.
 --
