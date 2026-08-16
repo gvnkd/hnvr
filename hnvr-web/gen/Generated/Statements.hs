@@ -10,6 +10,11 @@ module Generated.Statements (
     module Generated.Statements.UpdateCamera,
     module Generated.Statements.FetchCamera,
     module Generated.Statements.CreateManyCamera,
+    module Generated.Statements.RowDecoderCameraDrift,
+    module Generated.Statements.CreateCameraDrift,
+    module Generated.Statements.UpdateCameraDrift,
+    module Generated.Statements.FetchCameraDrift,
+    module Generated.Statements.CreateManyCameraDrift,
     module Generated.Statements.RowDecoderSegment,
     module Generated.Statements.CreateSegment,
     module Generated.Statements.UpdateSegment,
@@ -56,6 +61,11 @@ import qualified Generated.Statements.CreateCamera
 import qualified Generated.Statements.UpdateCamera
 import qualified Generated.Statements.FetchCamera
 import qualified Generated.Statements.CreateManyCamera
+import qualified Generated.Statements.RowDecoderCameraDrift
+import qualified Generated.Statements.CreateCameraDrift
+import qualified Generated.Statements.UpdateCameraDrift
+import qualified Generated.Statements.FetchCameraDrift
+import qualified Generated.Statements.CreateManyCameraDrift
 import qualified Generated.Statements.RowDecoderSegment
 import qualified Generated.Statements.CreateSegment
 import qualified Generated.Statements.UpdateSegment

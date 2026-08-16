@@ -44,11 +44,11 @@ sql touchedFieldsList =
             let (g, offset') = valueGroup tf offset
             in (gs ++ [g], offset')
             ) ([], 1) touchedFieldsList
-    in "INSERT INTO cameras (id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, created_at, updated_at) VALUES "
+    in "INSERT INTO cameras (id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, onvif_port, mgmt_proto, main_video_encoding, main_video_width, main_video_height, main_video_fps, main_video_bitrate_kbps, main_video_gov_length, sub_video_encoding, sub_video_width, sub_video_height, sub_video_fps, sub_video_bitrate_kbps, sub_video_gov_length, audio_encoding, audio_bitrate_kbps, audio_sample_rate_khz, created_at, updated_at) VALUES "
         <> Text.intercalate ", " valueGroups
-        <> " RETURNING id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, created_at, updated_at"
+        <> " RETURNING id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, onvif_port, mgmt_proto, main_video_encoding, main_video_width, main_video_height, main_video_fps, main_video_bitrate_kbps, main_video_gov_length, sub_video_encoding, sub_video_width, sub_video_height, sub_video_fps, sub_video_bitrate_kbps, sub_video_gov_length, audio_encoding, audio_bitrate_kbps, audio_sample_rate_khz, created_at, updated_at"
   where
-    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, False), (5, True), (6, False), (7, True), (8, False), (9, False), (10, False), (11, True), (12, False), (13, False), (14, True), (15, True), (16, False), (17, False), (18, True), (19, True), (20, True), (21, True), (22, True), (23, False), (24, True), (25, True), (26, True)]
+    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, False), (5, True), (6, False), (7, True), (8, False), (9, False), (10, False), (11, True), (12, False), (13, False), (14, True), (15, True), (16, False), (17, False), (18, True), (19, True), (20, True), (21, True), (22, True), (23, False), (24, True), (25, False), (26, True), (27, False), (28, False), (29, False), (30, False), (31, False), (32, False), (33, False), (34, False), (35, False), (36, False), (37, False), (38, False), (39, False), (40, False), (41, False), (42, True), (43, True)]
     valueGroup tf offset =
         let step (parts, off) (bitIdx, hasDefault) =
                 if hasDefault && not (testBit tf bitIdx)
@@ -87,8 +87,25 @@ singleEncoder touchedFields = mconcat $ catMaybes
     , if testBit touchedFields 22 then Just ((.retentionHours) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , Just ((.assignedHost) >$< Encoders.param (Encoders.nullable Encoders.text))
     , if testBit touchedFields 24 then Just ((.manualAssign) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 25 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
-    , if testBit touchedFields 26 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , Just ((.onvifPort) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , if testBit touchedFields 26 then Just ((.mgmtProto) >$< Encoders.param (Encoders.nonNullable Encoders.text)) else Nothing
+    , Just ((.mainVideoEncoding) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , Just ((.mainVideoWidth) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.mainVideoHeight) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.mainVideoFps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.mainVideoBitrateKbps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.mainVideoGovLength) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoEncoding) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , Just ((.subVideoWidth) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoHeight) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoFps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoBitrateKbps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoGovLength) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.audioEncoding) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , Just ((.audioBitrateKbps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.audioSampleRateKhz) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , if testBit touchedFields 42 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 43 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 decoder :: Decoders.Result [Generated.ActualTypes.Camera]

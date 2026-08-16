@@ -68,12 +68,29 @@ sql touchedFields returning =
             , if testBit touchedFields 22 then Just "retention_hours" else Nothing
             , Just "assigned_host"
             , if testBit touchedFields 24 then Just "manual_assign" else Nothing
-            , if testBit touchedFields 25 then Just "created_at" else Nothing
-            , if testBit touchedFields 26 then Just "updated_at" else Nothing
+            , Just "onvif_port"
+            , if testBit touchedFields 26 then Just "mgmt_proto" else Nothing
+            , Just "main_video_encoding"
+            , Just "main_video_width"
+            , Just "main_video_height"
+            , Just "main_video_fps"
+            , Just "main_video_bitrate_kbps"
+            , Just "main_video_gov_length"
+            , Just "sub_video_encoding"
+            , Just "sub_video_width"
+            , Just "sub_video_height"
+            , Just "sub_video_fps"
+            , Just "sub_video_bitrate_kbps"
+            , Just "sub_video_gov_length"
+            , Just "audio_encoding"
+            , Just "audio_bitrate_kbps"
+            , Just "audio_sample_rate_khz"
+            , if testBit touchedFields 42 then Just "created_at" else Nothing
+            , if testBit touchedFields 43 then Just "updated_at" else Nothing
             ]
         columns = Text.intercalate ", " entries
         placeholders = Text.intercalate ", " ["$" <> Text.pack (show i) | i <- [1 .. length entries]]
-        returningClause = if returning then " RETURNING id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, created_at, updated_at" else ""
+        returningClause = if returning then " RETURNING id, slug, name, rtsp_url, rtsp_template, rtsp_transport, host, port, username, password_enc, password_nonce, codec, rtsp_sub_url, rtsp_sub_template, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, onvif_port, mgmt_proto, main_video_encoding, main_video_width, main_video_height, main_video_fps, main_video_bitrate_kbps, main_video_gov_length, sub_video_encoding, sub_video_width, sub_video_height, sub_video_fps, sub_video_bitrate_kbps, sub_video_gov_length, audio_encoding, audio_bitrate_kbps, audio_sample_rate_khz, created_at, updated_at" else ""
     in if null entries
         then "INSERT INTO cameras DEFAULT VALUES" <> returningClause
         else "INSERT INTO cameras (" <> columns <> ") VALUES (" <> placeholders <> ")" <> returningClause
@@ -106,8 +123,25 @@ encoder touchedFields = mconcat $ catMaybes
     , if testBit touchedFields 22 then Just ((.retentionHours) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , Just ((.assignedHost) >$< Encoders.param (Encoders.nullable Encoders.text))
     , if testBit touchedFields 24 then Just ((.manualAssign) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 25 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
-    , if testBit touchedFields 26 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , Just ((.onvifPort) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , if testBit touchedFields 26 then Just ((.mgmtProto) >$< Encoders.param (Encoders.nonNullable Encoders.text)) else Nothing
+    , Just ((.mainVideoEncoding) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , Just ((.mainVideoWidth) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.mainVideoHeight) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.mainVideoFps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.mainVideoBitrateKbps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.mainVideoGovLength) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoEncoding) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , Just ((.subVideoWidth) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoHeight) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoFps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoBitrateKbps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.subVideoGovLength) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.audioEncoding) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , Just ((.audioBitrateKbps) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , Just ((.audioSampleRateKhz) >$< Encoders.param (Encoders.nullable (fromIntegral >$< Encoders.int4)))
+    , if testBit touchedFields 42 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 43 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 

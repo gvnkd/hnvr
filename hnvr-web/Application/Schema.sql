@@ -60,12 +60,44 @@ CREATE TABLE cameras (
     retention_hours INT NOT NULL DEFAULT 168,
     assigned_host   TEXT,
     manual_assign   BOOLEAN NOT NULL DEFAULT FALSE,
+    onvif_port              INT,
+    mgmt_proto              TEXT NOT NULL DEFAULT 'onvif',
+    main_video_encoding     TEXT,
+    main_video_width        INT,
+    main_video_height       INT,
+    main_video_fps          INT,
+    main_video_bitrate_kbps INT,
+    main_video_gov_length   INT,
+    sub_video_encoding      TEXT,
+    sub_video_width         INT,
+    sub_video_height        INT,
+    sub_video_fps           INT,
+    sub_video_bitrate_kbps  INT,
+    sub_video_gov_length    INT,
+    audio_encoding          TEXT,
+    audio_bitrate_kbps      INT,
+    audio_sample_rate_khz   INT,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     FOREIGN KEY (assigned_host) REFERENCES hosts(id) ON DELETE SET NULL
 );
 
 CREATE INDEX cameras_assigned_idx ON cameras (assigned_host) WHERE enabled;
+
+CREATE TABLE camera_drift (
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id     UUID NOT NULL,
+    config_name   TEXT NOT NULL,
+    field_name    TEXT NOT NULL,
+    desired       TEXT NOT NULL,
+    observed      TEXT NOT NULL,
+    first_seen_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_seen_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (camera_id, config_name, field_name),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+);
+
+CREATE INDEX camera_drift_camera_idx ON camera_drift (camera_id);
 
 CREATE TABLE segments (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

@@ -9,8 +9,9 @@ import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-newtype ShowView = ShowView
-  { camera :: Camera
+data ShowView = ShowView
+  { camera :: Camera,
+    drifts :: [CameraDrift]
   }
 
 instance View ShowView where
@@ -52,9 +53,12 @@ instance View ShowView where
             {kvRow "Retention hours" (tshow camera.retentionHours)}
             {kvRow "Assigned host" (fromMaybe "—" camera.assignedHost)}
             {kvRow "Manual assign" (tshow camera.manualAssign)}
+            {kvRow "ONVIF port" (maybe "unmanaged" tshow camera.onvifPort)}
           </tbody>
         </table>
       </div>
+
+      {renderDrift camera drifts}
 
       <div class="card mt-4">
         <div class="card-header">Manual assignment</div>
@@ -100,6 +104,41 @@ instance View ShowView where
           <tr class="kv">
             <th>{k}</th>
             <td>{v}</td>
+          </tr>
+        |]
+
+      renderDrift cam _ | isNothing cam.onvifPort = mempty
+      renderDrift _ [] =
+        [hsx|
+          <div class="card mt-4">
+            <div class="card-header">ONVIF drift</div>
+            <div class="card-body">
+              <span class="badge badge-ok">SYNCED</span>
+              <span class="text-sm muted">camera matches desired encoder settings</span>
+            </div>
+          </div>
+        |]
+      renderDrift _ ds =
+        [hsx|
+          <div class="card mt-4">
+            <div class="card-header">ONVIF drift <span class="badge badge-warn">{tshow (length ds)}</span></div>
+            <table class="table">
+              <thead>
+                <tr><th>Config</th><th>Field</th><th>Desired</th><th>Observed</th><th>Last seen</th></tr>
+              </thead>
+              <tbody>{forEach ds renderDriftRow}</tbody>
+            </table>
+          </div>
+        |]
+
+      renderDriftRow d =
+        [hsx|
+          <tr>
+            <td class="mono">{d.configName}</td>
+            <td class="mono">{d.fieldName}</td>
+            <td class="mono">{d.desired}</td>
+            <td class="mono">{d.observed}</td>
+            <td class="mono">{tshow d.lastSeenAt}</td>
           </tr>
         |]
 

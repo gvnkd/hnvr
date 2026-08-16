@@ -3,6 +3,186 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **OpenIPC FLASH DONE, low_ent (Aug 16 2026, ~11:00–11:35)**: coupler
+> DVRIP flash succeeded (Ret 515; camera dark ~4 min, booted DHCP
+> .184). Post-flash: coupler default SSH password is **`12345`** (not
+> openipc); `firstboot` ran (overlay wiped, 8.75 MB rootfs_data);
+> `sensor=imx335` auto-detected (2592×1520 native — stock's 3072×2048
+> was upscaled), `totalmem=128M` (stock osmem hid it at 48M), MAC
+> preserved. Config now: static **192.168.0.198**, root password
+> `io27pJ3wui` (SSH + Majestic RTSP + web UI all follow /etc/shadow),
+> Majestic video0 h264 2592×1520@15 4096kbit + video1 h264 640×360@15
+> 1024kbit (sub-stream 5→15 fps = the CV win), jpeg snapshot, ONVIF
+> enabled on **port 80** with cleartext onvif.username/password set in
+> /etc/majestic.yaml. **Majestic RTSP URLs are query-style
+> `/stream=0` / `/stream=1`** — path-form (/stream1 etc.) silently
+> falls back to MAIN. ffprobe r_frame_rate garbage on short probes
+> still applies (143/6); avg_frame_rate + encoder log are truth.
+> **ONVIF auth gotcha**: Majestic challenges HTTP Digest at transport
+> level; plain HTTP Basic ALSO accepted, WSSE-only = 401 →
+> `Hnvr.Onvif.Client.soapCall` now sends an Authorization Basic header
+> (harmless to Hik-OEM 196/197) — hnvr-ptz tests 7/7, version bumped
+> **0.5.0.1**, `nix build .#hnvr-web` done; **deploy pending: restart
+> the leader with the new result/ (495239 still runs 0.5.0.0)**.
+> DB row updated via psql + assigned_host flipped NULL→hnvr-2 by the
+> coordinator (URL changes do NOT propagate on their own — ConfigWatcher
+> live-config slice still unimplemented; host flip republishes the
+> snapshot and startCamera is replace-on-duplicate). Recording verified:
+> ~2 frags/s, 56 segs/min steady. Analysis_fps left at 5 (Sergey can
+> bump now that sub is 15fps). Pitfall **#122**: running
+> `hnvr-leader --help` BOOTS the app (no --help handler) — a stray
+> leader lived 21 min alongside the real one; claim guard held (no
+> duplicate segments), killed manually. Always `strings | grep version`
+> instead. Backup images: `/home/pion/hw-backups/low_ent-699Q3/`
+> (coupler .bin, 699Q3_recovery.img, stock zip + SHA256SUMS); full
+> runbook + recovery: `design_docs/11-openipc-lowent-runbook.md`.
+
+> **low_ent ONVIF verification + Majestic fixes (Aug 16 2026 — v0.5.0.2)**:
+> verified post-flash ONVIF end-to-end. Found + fixed: (1) the 0.5.0.1
+> Basic-auth change computed `basicAuth` but NEVER added the header —
+> Majestic 401'd everything (live leader on :18001 still runs that
+> build → low_ent polls fail there until redeploy). (2) Majestic
+> implements only ver20 media for configs: ver10
+> `GetVideoEncoderConfigurations` faults `ter:UnknownAction` →
+> `getVideoConfigs` falls back to `tr2:GetProfiles` (per-profile
+> embedded tt:VideoEncoderConfiguration; fixture
+> `profiles-198-openipc.xml`), and `setVideoConfig` retries as
+> `tr2:SetVideoEncoderConfiguration` (accepted — verified no-op Set
+> OK). soapCall now always declares xmlns:tr2 + picks the SOAPAction
+> ver10/ver20 + device/media by the op namespace. (3) Majestic
+> GovLength reports 50 while its options claim range 1..12 and its
+> real GOP lives in majestic.yaml — gov left UNMANAGED (NULL) for
+> low_ent; don't chase it. (4) Majestic has NO audio encoder configs
+> over ONVIF (empty list) → audio fields silently unmanaged for
+> low_ent. (5) low_ent row: mgmt_proto back to 'onvif', port 80,
+> username root, RTSP query-form URLs, desired main H264
+> 2592×1520@15/4096, sub H264 640×360@15/1024 — all three cameras
+> "in sync", camera_drift empty, ~560 segs/10min each. (6) Per-token
+> options work on Majestic but return the GLOBAL list (native
+> 2592×1520 not in it; current value is prepended by the form).
+> Untracked `start-shell-telnetd.bin` at repo root is a flash
+> artifact — do NOT commit it.
+
+> **OpenIPC feasibility, low_ent (Aug 16 2026)**: pulled hardware ID via
+> python-dvr `get_upgrade_info()`: **`IPC_GK7205V300_G6S`** (Goke GK7205V300,
+> XM IVG-G6S module, fw V5.00.R02.422699Q3, BuildTime 2024-04-19). OpenIPC
+> status: GK7205V300 = stage DONE + recommended. Unpacked the official
+> 000699Q3 firmware zip (tehno32.ru; `.bin` = ZIP → uImage-wrapped images,
+> 64-byte header then RAW squashfs — no gzip despite uImage comp field):
+> u-boot env mtdparts sum to 0x1000000 → **16 MB flash**; RAM 128 MB
+> (coupler `totalmem=128M`; stock `osmem=48M` hides it); sysconfig.ko
+> `sensors=` whitelist: imx335, imx307(+2l), imx327(+2l), imx206,
+> sc2231/35, sc3235, sc4236, gc2053 (exact chip via ipctool at install).
+> **Install runbook: `design_docs/11-openipc-lowent-runbook.md`** —
+> PRIMARY PATH IS COUPLER VIA DVRIP, NO UART: exact-device image
+> `000699Q3_OpenIPC_IPC_GK7205V300_G6S.bin` exists (OpenIPC/coupler
+> latest release; native Hardware match, keeps stock u-boot, burns
+> uImage+rootfs+env+jffs2) + stock recovery img `699Q3_recovery.img`
+> (XM-DVR container for stock u-boot `run dd` TFTP recovery). Both +
+> official zip archived at `/home/pion/hw-backups/low_ent-699Q3/` with
+> SHA256SUMS. **Root access dead-ends (remote)**: SkipCheck InstallDesc
+> Shell commands are silently DROPPED on this 2024 fw (wget/nc/telnetd
+> callbacks never fire) — but **Burn works** (that's what coupler uses);
+> telnetd sits on **:50119** (telnetctrl=1 was already in env; Sofia
+> restart from ANY InstallDesc upload brings it up) but root pw is a
+> per-device random DES hash in /mnt/mtd/Log/ns pre-hashed by XM's login
+> (md5→pairwise-sum-mod62 "Dahua hash" transform, see kuku.eu.org
+> xm530/part2) — xmhdipc/tlJwpbo6 etc. all rejected. UART (3.3 V,
+> Ctrl-C; ⚠ 2024 XM u-boot shells may be password-locked) is the
+> fallback/recovery path. Side effects left behind: telnetd:50119 open
+> (root login prompt; wiped when OpenIPC lands) + camera
+> Sofia-restarted once mid-session; RTSP/ONVIF verified working after.
+> Open ports on 198: 80, 554, 8000, 8899(onvif), 12927, 12973, 23000,
+> 34567, 50119. Post-flash HNVR TODOs are in the runbook (new RTSP URLs,
+> re-probe, sub-stream fps fix).
+
+> **ONVIF config sync (Aug 15 2026 — v0.5.0.0)**: cameras gain sparse
+> desired encoder columns (NULL = unmanaged): `onvif_port`,
+> `main_video_*` / `sub_video_*` (encoding/width/height/fps/
+> bitrate_kbps/gov_length), `audio_*` (encoding/bitrate_kbps/
+> sample_rate_khz) — migration 0008 + `camera_drift` table (UNIQUE
+> camera_id+config_name+field_name). Save Changes (UpdateCameraAction)
+> persists then pushes best-effort via `Hnvr.Web.OnvifSync.pushCameraConfig`
+> (discover media XAddr → Get configs+options → clamp → Set only what
+> differs) and immediately refreshes that camera's drift rows; push
+> failure = flash error, row still saved. `Hnvr.Web.OnvifSyncer`
+> (HNVR_ONVIF_POLL_SECONDS, default 300; HNVR_DISABLE_ONVIFSYNC gate)
+> re-reads every managed+enabled camera and reconciles camera_drift
+> (upsert bumps last_seen_at; resolved rows deleted). Badges: /Cameras
+> Sync column (—/DRIFT n/SYNCED), /ShowCamera drift table.
+> `Hnvr.Core.Onvif` gained `pickMainSub` (highest-res H264/H265 config
+> = main; JPEG excluded) + `hostFromRtspUrl` (cameras.host is "" on all
+> of Sergey's rows — host falls back to the RTSP URL authority; empty
+> username = missing creds → camera skipped). Verified live vs cam-196:
+> drift row appeared for bogus fps=99, auto-cleared on NULL; Save
+> Changes pushed sub-stream 5→6 fps end-to-end (re-GET confirmed).
+> **Pitfall #119**: cam-196 rejects a Set immediately after a previous
+> Set with HTTP 400 ter:ConfigModify (encoder busy re-initializing) —
+> retry after ~3 s.
+> **Sync findings (Aug 15 2026, full-push session)**: all 3 cameras
+> converged to desired (main native-res @15/gov15, sub @15/1024/gov15,
+> drift table empty; `OnvifSyncer: <slug>: in sync` x3). Caveats:
+>   * **SetAudioEncoderConfiguration is BROKEN on the 196/197
+>     Hik-OEM gSOAP firmware** — even a no-op G711 set drops the
+>     connection (NoResponseDataReceived), and every AAC attempt faults
+>     `ter:Bitrate is not valid` although the camera's own
+>     GetAudioEncoderConfigurationOptions advertises AAC@16kbps/16kHz.
+>     Repeated attempts WEDGE the media service (GETs start dropping
+>     too; device service stays up) — recovery needs a tds:SystemReboot
+>     (works fine with WSSE digest). AAC on 196/197 must be switched in
+>     the camera web UI; 198 offers G711 only (no DVRIP audio-format
+>     config either). DB desired audio = G711 for all three.
+>   * Pace ONVIF Sets ≥8 s apart per camera; `soapCall` now retries
+>     once after a 3 s delay on transport errors.
+>   * 197 main reports BitrateLimit unreliably (0 then 512) — left
+>     main_video_bitrate_kbps NULL (unmanaged) for floor_2_5.
+>   * XM ONVIF (198) reports Encoding=H264 while the actual RTSP
+>     sub-stream is HEVC — ONVIF encoding field is decorative on XM.
+>   * ffprobe r_frame_rate on short probes is garbage (250/1, 57/4);
+>     trust ONVIF FrameRateLimit readback for sync checks.
+>   * H265 on 197 main was silently not-applied (camera stays H264) —
+>     desired reverted to H264.
+> **Options-driven Edit form (Aug 15 2026, later)**: Sergey hit
+> ter:ConfigModify saving low_ent — root cause: clamping against the
+> UNTTOKENED Get*ConfigurationOptions merges all profiles' sections, so
+> cross-stream values passed clamp and the camera rejected them.
+> Get{Video,Audio}EncoderConfigurationOptions now take a per-config
+> token (`Maybe Text` arg; XM 198 AND Hik-OEM 196/197 both honor it —
+> main/sub resolution lists differ correctly). pushCameraConfig clamps
+> per-token (falls back to untokened, then unconstrained). EditCamera
+> form fetches live options (`fetchFormOptions`) and renders dropdowns:
+> per-stream resolution select (splits "WxH" into hidden width/height
+> inputs via inline JS), encoding/bitrate/sample-rate selects, fps/br/
+> gov number inputs with min/max from ranges; free-text fallback when
+> the camera is unreachable. Parsers nub the Hik-OEM duplicated
+> resolution lists. **JPEG is filtered out of video encoding choices in
+> BOTH the view and clampVideo** (it leaks in via the snapshot config's
+> codec section on XM; pushing Encoding=JPEG to a video stream would
+> break recording). Truth from per-token options: 196/197 offer H264
+> only + audio G711 only — H265/AAC are NOT selectable on these
+> firmwares; their AAC-in-untokened-options was a different section's
+> advertisement. Sergey's H265/AAC desired values on backyard/floor_2_5
+> remain as standing drift rows by his choice.
+> **Codec fields split (Aug 15 2026, later)**: `codec`/`substreamCodec`/
+> `substreamWidth`/`substreamHeight` are PROBE-OWNED (ffprobe via
+> ProbeCameraAction) — removed from the New/Edit forms and from both
+> `fill` lists. The fill removal fixes a live bug: those fields had no
+> form inputs, so every Save wiped them to NULL. /Cameras table now has
+> Main + Sub codec badge columns (Sub = "—" without a sub URL).
+> Post-change probes: 196 h264/h264, 197 h264/h264, 198 hevc/hevc
+> (probe is ground truth — XM ONVIF reports H264 while streaming HEVC).
+> Sub streams are 640×360 everywhere after Sergey's dropdown saves. **Pitfall #120**: hlint misparses> OverloadedRecordDot `.id` selectors as `id` composition ("Redundant
+> id" false positive) — use `cam |> get #id` instead of `cam.id`.
+> **Pitfall #121**: pg-simple can't express row-constructor
+> `NOT IN ?` over tuples — fetch keys and delete stale rows
+> individually. Also: IHP schema parser rejects inline
+> `REFERENCES` in CREATE TABLE column lists — use table-level
+> `FOREIGN KEY ... REFERENCES` (extends the #115 comment rule).
+> Cameras table FK columns codegen as plain UUID, not Id' — compare
+> with `get #id`-unwrapped UUIDs. hnvr-ptz fixture tests must run from
+> the package dir (relative test/fixtures paths) — `cabal run` from
+> repo root breaks them.
+
 > **Duplicate-capture bug + snapshot-claim guard (Aug 15 2026, late —
 > v0.4.0.1)**: Sergey reported 1–2 s playback jump-backs (live +
 > archive). Root cause: `hnvr-leader` embeds the full node role
@@ -122,7 +302,7 @@
   41 GiB — cleaned via
   `mc rm --recursive --force local/hnvr-recordings/<slug>/2026-08-14/`
    (event thumbnails + init.mp4s kept; spool left for SpoolDrainer).
-   Current version: **0.4.0.1**.
+   Current version: **0.5.0.0** (ONVIF config sync — see top block).
   **App versioning (Aug 15 2026)**: single source of truth is
   `hnvr-web/hnvr-web.cabal` `version:` — bump on every feature/patch
   (feature → 2nd component, fix → 3rd+). `Hnvr.Web.version` re-exports
@@ -133,7 +313,8 @@
   `GET /status` JSON (`app/host/startedAt/uptimeSeconds/version`,
   middleware in `Hnvr.Web.Config` composed into the single
   CustomMiddleware option per pitfall #60), and a `v…` tag in the
-   sidebar footer. Current version: **0.4.0.1** (snapshot-claim guard
+    sidebar footer. Current version: **0.5.0.0** (ONVIF config sync;
+   0.4.0.1 was the snapshot-claim guard
    vs duplicate capture on the leader host + minio-hs delete status
    check; 0.4.0.0 was event video clips; 0.3.0.0 was tombstone verified
    recording deletion; 0.2.0.0 was UI v2 + versioning).
@@ -499,8 +680,21 @@ All three work over `-rtsp_transport tcp`. Audio present on all three
   common to XM / icamra / generic Chinese OEM firmware.
 - 196 + 197 also respond to ONVIF at `http://192.168.0.196/onvif/device_service`
   (gSOAP/2.8 server, Hikvision OEM namespaces) with WS-Security auth — useful
-  for Phase 5 PTZ probe. 198 has no ONVIF.
-- 198 also exposes XMeye NetSDK on port 34567 (proprietary — out of scope).
+  for Phase 5 PTZ probe.
+- 198 (low_ent) DOES have ONVIF (Aug 15 2026 correction) — XM firmware ships
+  it DISABLED: no listener, `/onvif/*` 404s, and the `NetWork.ONVIF`
+  DVRIP section reads null. Enabled live via python-dvr (OpenIPC) over
+  NetSDK :34567: `set_info("NetWork.ONVIF", {"Enable": True, "Port": 8899})`
+  (Ret 100; section then persists in the NetWork dump and :8899 opens).
+  Media XAddr: `http://192.168.0.198:8899/onvif/media_service`; admin login
+  works with the RTSP creds. WS-Discovery (UDP 3702 multicast) gets NO
+  answers from any of the three cams on this LAN — don't use it to
+  conclude ONVIF is absent. Cameras row updated: onvif_port=8899.
+- 198 also exposes XMeye NetSDK on port 34567 — python-dvr
+  (github.com/OpenIPC/python-dvr) speaks it: `DVRIPCam(ip, user, password)`,
+  `.login()`, `.get_info("NetWork")` dumps the whole network config tree
+  (individual `get_info("NetWork.X")` returns Ret 607 for sections that
+  are null in the full dump — read the full tree instead).
 - Encoder fps is only configurable via each camera's web admin UI.
 
 **Sub-stream fps is low on 196 + 198 (5fps)** — borderline for CV. The

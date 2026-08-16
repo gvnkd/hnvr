@@ -33,11 +33,13 @@ module Hnvr.Onvif.Client
     parseAudioConfigs,
     parseAudioOptions,
     parseVideoConfigs,
+    parseProfilesVideoConfigs,
     parseVideoOptions,
     parseServiceXAddrs,
   )
 where
 
+import Control.Concurrent (threadDelay)
 import Control.Exception (SomeException, try)
 import Control.Monad (void)
 import Crypto.Hash (Digest, SHA1 (..), hash)
@@ -46,13 +48,14 @@ import qualified Data.ByteArray as BA
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy as BL
+import Data.List (nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Time.Clock (UTCTime, getCurrentTime)
+import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Hnvr.Core.Onvif
 import qualified Network.HTTP.Client as HC
@@ -112,20 +115,42 @@ getAudioConfigs mgr creds media = do
   res <- soapCall mgr creds media "trt" "GetAudioEncoderConfigurations" ""
   pure (res >>= parseAudioConfigs)
 
-getAudioOptions :: HC.Manager -> OnvifCreds -> Text -> IO (Either OnvifError AudioOptions)
-getAudioOptions mgr creds media = do
-  res <- soapCall mgr creds media "trt" "GetAudioEncoderConfigurationOptions" ""
+getAudioOptions :: HC.Manager -> OnvifCreds -> Text -> Maybe Text -> IO (Either OnvifError AudioOptions)
+getAudioOptions mgr creds media mToken = do
+  res <- soapCall mgr creds media "trt" "GetAudioEncoderConfigurationOptions" (tokenEl mToken)
   pure (res >>= parseAudioOptions)
 
 getVideoConfigs :: HC.Manager -> OnvifCreds -> Text -> IO (Either OnvifError [VideoConfig])
 getVideoConfigs mgr creds media = do
   res <- soapCall mgr creds media "trt" "GetVideoEncoderConfigurations" ""
-  pure (res >>= parseVideoConfigs)
+  case res of
+    -- Majestic (OpenIPC) implements only ver20 media: configs come
+    -- embedded in GetProfiles' per-profile VideoEncoderConfiguration.
+    Left e
+      | isUnknownAction e ->
+          fmap (>>= parseProfilesVideoConfigs) (soapCall mgr creds media "tr2" "GetProfiles" "")
+    _ -> pure (res >>= parseVideoConfigs)
 
-getVideoOptions :: HC.Manager -> OnvifCreds -> Text -> IO (Either OnvifError VideoOptions)
-getVideoOptions mgr creds media = do
-  res <- soapCall mgr creds media "trt" "GetVideoEncoderConfigurationOptions" ""
+-- | "Method not implemented" fault — Majestic answers this for every
+-- ver10-media op it lacks.
+isUnknownAction :: OnvifError -> Bool
+isUnknownAction (OnvifHttpError 400 body) = "UnknownAction" `T.isInfixOf` body
+isUnknownAction (OnvifFault t) = "UnknownAction" `T.isInfixOf` t || "not implemented" `T.isInfixOf` t
+isUnknownAction _ = False
+
+-- | Options are per-configuration on real firmware: the main and sub
+-- stream offer different resolution/fps/bitrate sets, and an untokened
+-- query returns a merged (or first-profile) view. Passing a token that
+-- the camera rejects yields a fault, which the caller should treat as
+-- "no constraints" rather than a hard failure.
+getVideoOptions :: HC.Manager -> OnvifCreds -> Text -> Maybe Text -> IO (Either OnvifError VideoOptions)
+getVideoOptions mgr creds media mToken = do
+  res <- soapCall mgr creds media "trt" "GetVideoEncoderConfigurationOptions" (tokenEl mToken)
   pure (res >>= parseVideoOptions)
+
+tokenEl :: Maybe Text -> Text
+tokenEl Nothing = ""
+tokenEl (Just t) = "<trt:ConfigurationToken>" <> esc t <> "</trt:ConfigurationToken>"
 
 -- | SETs ---------------------------------------------------------------
 
@@ -149,41 +174,54 @@ setAudioConfig mgr creds media a = do
 
 setVideoConfig :: HC.Manager -> OnvifCreds -> Text -> VideoConfig -> IO (Either OnvifError ())
 setVideoConfig mgr creds media v = do
-  let codecSection = case vcEncoding v of
-        VEncH264 -> codecEl "H264"
-        VEncH265 -> codecEl "H265"
-        _ -> ""
-      codecEl tag =
-        "<tt:"
-          <> tag
-          <> ">"
-          <> el "GovLength" (tshow (vcGovLength v))
-          <> maybe "" (el (tag <> "Profile") . esc) (vcCodecProfile v)
-          <> "</tt:"
-          <> tag
-          <> ">"
-      body =
-        "<trt:Configuration token=\""
-          <> esc (vcToken v)
-          <> "\">"
-          <> el "Name" (esc (vcName v))
-          <> el "UseCount" (tshow (vcUseCount v))
-          <> el "Encoding" (videoEncodingText (vcEncoding v))
-          <> "<tt:Resolution>"
-          <> el "Width" (tshow (vcWidth v))
-          <> el "Height" (tshow (vcHeight v))
-          <> "</tt:Resolution>"
-          <> el "Quality" (tshowD (vcQuality v))
-          <> "<tt:RateControl>"
-          <> el "FrameRateLimit" (tshow (vcFps v))
-          <> el "EncodingInterval" (tshow (vcEncodingInterval v))
-          <> el "BitrateLimit" (tshow (vcBitrateKbps v))
-          <> "</tt:RateControl>"
-          <> codecSection
-          <> "</trt:Configuration>"
-          <> "<trt:ForcePersistence>true</trt:ForcePersistence>"
-  res <- soapCall mgr creds media "trt" "SetVideoEncoderConfiguration" body
-  pure (void' res)
+  res <- soapCall mgr creds media "trt" "SetVideoEncoderConfiguration" (videoBody "trt")
+  case res of
+    Left e
+      | isUnknownAction e ->
+          void' <$> soapCall mgr creds media "tr2" "SetVideoEncoderConfiguration" (videoBody "tr2")
+    _ -> pure (void' res)
+  where
+    codecSection = case vcEncoding v of
+      VEncH264 -> codecEl "H264"
+      VEncH265 -> codecEl "H265"
+      _ -> ""
+    codecEl tag =
+      "<tt:"
+        <> tag
+        <> ">"
+        <> el "GovLength" (tshow (vcGovLength v))
+        <> maybe "" (el (tag <> "Profile") . esc) (vcCodecProfile v)
+        <> "</tt:"
+        <> tag
+        <> ">"
+    videoBody ns =
+      "<"
+        <> ns
+        <> ":Configuration token=\""
+        <> esc (vcToken v)
+        <> "\">"
+        <> el "Name" (esc (vcName v))
+        <> el "UseCount" (tshow (vcUseCount v))
+        <> el "Encoding" (videoEncodingText (vcEncoding v))
+        <> "<tt:Resolution>"
+        <> el "Width" (tshow (vcWidth v))
+        <> el "Height" (tshow (vcHeight v))
+        <> "</tt:Resolution>"
+        <> el "Quality" (tshowD (vcQuality v))
+        <> "<tt:RateControl>"
+        <> el "FrameRateLimit" (tshow (vcFps v))
+        <> el "EncodingInterval" (tshow (vcEncodingInterval v))
+        <> el "BitrateLimit" (tshow (vcBitrateKbps v))
+        <> "</tt:RateControl>"
+        <> codecSection
+        <> "</"
+        <> ns
+        <> ":Configuration>"
+        <> "<"
+        <> ns
+        <> ":ForcePersistence>true</"
+        <> ns
+        <> ":ForcePersistence>"
 
 -- | Response parsers -----------------------------------------------------
 parseAudioConfigs :: ByteString -> Either OnvifError [AudioConfig]
@@ -206,8 +244,8 @@ parseAudioOptions bs = do
   doc <- parseDoc bs
   let opts = innermostOptions doc
       encs = mapMaybe (\o -> parseAudioEncoding <$> childText o "Encoding") opts
-      brs = normalizeBitrateKbps <$> concatMap (listItems "BitrateList") opts
-      srs = normalizeSampleRateKhz <$> concatMap (listItems "SampleRateList") opts
+      brs = nub (normalizeBitrateKbps <$> concatMap (listItems "BitrateList") opts)
+      srs = nub (normalizeSampleRateKhz <$> concatMap (listItems "SampleRateList") opts)
   pure (AudioOptions encs brs srs)
 
 parseVideoConfigs :: ByteString -> Either OnvifError [VideoConfig]
@@ -215,47 +253,59 @@ parseVideoConfigs bs = do
   doc <- parseDoc bs
   let confs = fromDocument doc $// laxElement "Configurations"
   pure (mapMaybe mkVideo confs)
+
+-- | Majestic (OpenIPC) ver20 media: video encoder configs come embedded
+-- in GetProfiles as per-profile @VideoEncoderConfiguration@ elements
+-- (same tt: schema shape as the ver10 Configurations).
+parseProfilesVideoConfigs :: ByteString -> Either OnvifError [VideoConfig]
+parseProfilesVideoConfigs bs = do
+  doc <- parseDoc bs
+  let confs = fromDocument doc $// laxElement "VideoEncoderConfiguration"
+  pure (mapMaybe mkVideo confs)
+
+mkVideo :: Cursor -> Maybe VideoConfig
+mkVideo c = do
+  token <- attr "token" c
+  name <- descText c "Name"
+  useCount <- readT =<< descText c "UseCount"
+  enc <- parseVideoEncoding <$> descText c "Encoding"
+  w <- readT =<< descText c "Width"
+  h <- readT =<< descText c "Height"
+  q <- readD =<< descText c "Quality"
+  fps <- readT =<< descText c "FrameRateLimit"
+  ei <- readT =<< descText c "EncodingInterval"
+  br <- readT =<< descText c "BitrateLimit"
+  -- GovLength: Hikvision-OEM (196) emits a junk flat GovLength=0
+  -- plus the real one nested in the codec element; XM (198) nests
+  -- it too; JPEG configs omit it entirely (0 = not applicable).
+  let nestedGov =
+        [ t
+        | codec <- descendantLocal c ["H264", "H265", "Mpeg4"],
+          Just t <- [childText codec "GovLength"]
+        ]
+  gov <- case nestedGov of
+    (t : _) -> readT t
+    [] -> maybe (Just 0) readT (childText c "GovLength")
+  let prof = firstText (descendantLocal c ["H264Profile", "H265Profile", "Mpeg4Profile"])
+  pure (VideoConfig token name useCount enc w h q fps ei br gov prof)
   where
-    mkVideo c = do
-      token <- attr "token" c
-      name <- descText c "Name"
-      useCount <- readT =<< descText c "UseCount"
-      enc <- parseVideoEncoding <$> descText c "Encoding"
-      w <- readT =<< descText c "Width"
-      h <- readT =<< descText c "Height"
-      q <- readD =<< descText c "Quality"
-      fps <- readT =<< descText c "FrameRateLimit"
-      ei <- readT =<< descText c "EncodingInterval"
-      br <- readT =<< descText c "BitrateLimit"
-      -- GovLength: Hikvision-OEM (196) emits a junk flat GovLength=0
-      -- plus the real one nested in the codec element; XM (198) nests
-      -- it too; JPEG configs omit it entirely (0 = not applicable).
-      let nestedGov =
-            [ t
-            | codec <- descendantLocal c ["H264", "H265", "Mpeg4"],
-              Just t <- [childText codec "GovLength"]
-            ]
-      gov <- case nestedGov of
-        (t : _) -> readT t
-        [] -> maybe (Just 0) readT (childText c "GovLength")
-      let prof = firstText (descendantLocal c ["H264Profile", "H265Profile", "Mpeg4Profile"])
-      pure (VideoConfig token name useCount enc w h q fps ei br gov prof)
     -- Video config fields are arbitrarily nested (Resolution,
     -- RateControl, H264/H265 wrappers — vendor-dependent), so look
-    -- up by local name anywhere below the Configurations element.
-    descText c l = firstText (descendantLocal c [l])
+    -- up by local name anywhere below the config element.
+    descText cur l = firstText (descendantLocal cur [l])
 
 parseVideoOptions :: ByteString -> Either OnvifError VideoOptions
 parseVideoOptions bs = do
   doc <- parseDoc bs
   let opts = innermostOptions doc
       resos =
-        [ (w, h)
-        | o <- opts,
-          r <- descendantLocal o ["ResolutionsAvailable"],
-          Just w <- [readT =<< childText r "Width"],
-          Just h <- [readT =<< childText r "Height"]
-        ]
+        nub
+          [ (w, h)
+          | o <- opts,
+            r <- descendantLocal o ["ResolutionsAvailable"],
+            Just w <- [readT =<< childText r "Width"],
+            Just h <- [readT =<< childText r "Height"]
+          ]
       encs =
         concatMap
           ( \o ->
@@ -296,6 +346,7 @@ soapCall mgr creds url ns op inner = do
           <> "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
           <> " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
           <> " xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
+          <> " xmlns:tr2=\"http://www.onvif.org/ver20/media/wsdl\""
           <> " xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">"
           <> "<soap:Header>"
           <> hdr
@@ -314,17 +365,39 @@ soapCall mgr creds url ns op inner = do
           <> "</soap:Body></soap:Envelope>"
   eRes <- try $ do
     req0 <- HC.parseRequest (T.unpack url)
-    let req =
+    let basicAuth =
+          "Basic "
+            <> B64.encode (TE.encodeUtf8 (ocUser creds <> ":" <> ocPass creds))
+        req =
           req0
             { HC.method = "POST",
               HC.requestHeaders =
                 [ ("Content-Type", "application/soap+xml; charset=utf-8"),
-                  ("SOAPAction", "\"http://www.onvif.org/ver10/media/wsdl/" <> TE.encodeUtf8 op <> "\"")
+                  ("Authorization", basicAuth),
+                  ( "SOAPAction",
+                    "\"http://www.onvif.org/"
+                      <> (if ns == "tr2" then "ver20" else "ver10")
+                      <> "/"
+                      <> (if ns == "tds" then "device" else "media")
+                      <> "/wsdl/"
+                      <> TE.encodeUtf8 op
+                      <> "\""
+                  )
                 ],
               HC.requestBody = HC.RequestBodyBS (TE.encodeUtf8 envelope),
               HC.responseTimeout = HC.responseTimeoutMicro 10000000
             }
-    HC.httpLbs req mgr
+    -- gSOAP firmware (Hikvision-OEM 196/197) drops the connection
+    -- outright when a request arrives while the encoder is still
+    -- re-initializing after a previous Set (NoResponseDataReceived).
+    -- Wait out the busy window and retry once on a fresh connection;
+    -- our writes carry absolute values, so a duplicate Set is safe.
+    r0 <- try (HC.httpLbs req mgr)
+    case r0 of
+      Left (_ :: SomeException) -> do
+        threadDelay 3000000
+        HC.httpLbs req mgr
+      Right r -> pure r
   pure $ case eRes of
     Left (e :: SomeException) -> Left (OnvifTransportError (T.pack (show e)))
     Right res ->

@@ -5,6 +5,7 @@ import qualified Hnvr.Core.AssignmentSpec as AssignmentSpec
 import qualified Hnvr.Core.CameraSnapshotSpec as CameraSnapshotSpec
 import qualified Hnvr.Core.ClipSpec as ClipSpec
 import qualified Hnvr.Core.CryptoSpec as CryptoSpec
+import qualified Hnvr.Core.DvripSpec as DvripSpec
 import qualified Hnvr.Core.EventSpec as EventSpec
 import qualified Hnvr.Core.FrameSpec as FrameSpec
 import qualified Hnvr.Core.GeometrySpec as GeometrySpec
@@ -29,6 +30,7 @@ main =
         CameraSnapshotSpec.tests,
         ClipSpec.tests,
         CryptoSpec.tests,
+        DvripSpec.tests,
         EventSpec.tests,
         FrameSpec.tests,
         GeometrySpec.tests,

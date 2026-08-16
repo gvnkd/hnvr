@@ -6,11 +6,16 @@
 module Hnvr.Web.View.Cameras.Edit (EditView (..)) where
 
 import Generated.Types
+import Hnvr.Core.Onvif
+import Hnvr.Web.OnvifSync (FormOptions (..))
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
-newtype EditView = EditView
-  { camera :: Camera
+data EditView = EditView
+  { camera :: Camera,
+    -- | Live ONVIF capabilities per stream (Nothing = camera
+    -- unreachable/unmanaged → free-text fallback inputs).
+    formOptions :: Maybe FormOptions
   }
 
 instance View EditView where
@@ -29,7 +34,7 @@ instance View EditView where
 
       <div class="card">
         <div class="card-header">Camera definition</div>
-        <div class="card-body">{renderForm camera}</div>
+        <div class="card-body">{renderForm camera formOptions}</div>
       </div>
 
       <div class="card mt-4">
@@ -51,7 +56,7 @@ instance View EditView where
       showUrl = "/ShowCamera?cameraId=" <> cid
       probeUrl = "/ProbeCamera?cameraId=" <> cid
 
-      renderForm camera =
+      renderForm camera mOpts =
         [hsx|
           <form class="form" method="POST" action={updateUrl camera}>
             {textFieldFor "slug" "Slug" camera.slug ""}
@@ -72,15 +77,6 @@ instance View EditView where
             {textFieldFor "retentionHours" "Full-record retention (hours)" (tshow camera.retentionHours) "Event clips have their own per-rule retention"}
 
             <div class="field">
-              <label>Codec</label>
-              <select name="codec">
-                <option value="unknown" selected={camera.codec == Unknown}>unknown</option>
-                <option value="h264" selected={camera.codec == H264}>h264</option>
-                <option value="hevc" selected={camera.codec == Hevc}>hevc</option>
-              </select>
-            </div>
-
-            <div class="field">
               <label>Analysis model</label>
               <select name="modelName">
                 <option value="yolov8n-320" selected={camera.modelName == "yolov8n-320"}>yolov8n-320 (default)</option>
@@ -89,14 +85,185 @@ instance View EditView where
               <div class="hint">Resolved to &lt;model-dir&gt;/&lt;name&gt;.onnx on the assigned host</div>
             </div>
 
+            <div class="card mt-4">
+              <div class="card-header">ONVIF encoder settings (desired)</div>
+              <div class="card-body">
+                <p class="text-sm muted mb-4">
+                  Pushed to the camera on Save Changes and drift-checked periodically.
+                  Empty fields are unmanaged — left alone on the camera.
+                  {optsNote}
+                </p>
+                {intFieldFor "onvifPort" "Management port" camera.onvifPort "ONVIF device-service port (80 Hikvision-OEM, 8899 XM) or DVRIP 34567 for mgmt_proto=dvrip. Empty = unmanaged"}
+                <div class="field">
+                  <label>Management protocol</label>
+                  <select name="mgmtProto">
+                    <option value="onvif" selected={camera.mgmtProto == "onvif"}>onvif (default)</option>
+                    <option value="dvrip" selected={camera.mgmtProto == "dvrip"}>dvrip (XM native — ONVIF decorative)</option>
+                  </select>
+                  <div class="hint">dvrip manages encoding/fps/bitrate/GOP via Simplify.Encode; audio codec is not configurable on XM</div>
+                </div>
+
+                <div class="subtitle mt-4">Main stream video</div>
+                {videoSection "mainVideo" (camera.mainVideoEncoding, camera.mainVideoWidth, camera.mainVideoHeight, camera.mainVideoFps, camera.mainVideoBitrateKbps, camera.mainVideoGovLength) (mOpts >>= \o -> o.foMain)}
+
+                <div class="subtitle mt-4">Sub-stream video</div>
+                {videoSection "subVideo" (camera.subVideoEncoding, camera.subVideoWidth, camera.subVideoHeight, camera.subVideoFps, camera.subVideoBitrateKbps, camera.subVideoGovLength) (mOpts >>= \o -> o.foSub)}
+
+                <div class="subtitle mt-4">Audio</div>
+                {audioSection camera.audioEncoding camera.audioBitrateKbps camera.audioSampleRateKhz (mOpts >>= \o -> o.foAudio)}
+              </div>
+            </div>
+
             <div class="flex items-center gap-2 mt-6">
               <button class="btn btn-primary" type="submit">Save Changes</button>
               <a class="btn btn-ghost" href={showUrl}>Cancel</a>
             </div>
           </form>
+          <script>
+            document.querySelectorAll("select[data-res-select]").forEach(function (sel) {
+              sel.addEventListener("change", function () {
+                var w = document.querySelector("input[name='" + sel.dataset.widthTarget + "']");
+                var h = document.querySelector("input[name='" + sel.dataset.heightTarget + "']");
+                var parts = sel.value.split("x");
+                if (parts.length === 2) { w.value = parts[0]; h.value = parts[1]; }
+                else { w.value = ""; h.value = ""; }
+              });
+            });
+          </script>
         |]
+        where
+          optsNote = case mOpts of
+            Just _ -> [hsx| <span>Dropdowns list values reported by the camera.</span>|]
+            Nothing -> [hsx| <span class="t-warn">Camera unreachable or unmanaged — free-text inputs shown; values are validated on push only.</span>|]
 
       updateUrl cam = "/UpdateCamera?cameraId=" <> tshow (cam |> get #id)
+
+      -- \| One video stream section. With live options: dropdowns for
+      -- encoding + resolution (a select feeding hidden width/height
+      -- inputs, split by the inline script above) + ranged inputs for
+      -- fps/bitrate/gov. Without: plain number inputs.
+      videoSection prefix (enc, w, h, fps, br, gov) mOpts =
+        [hsx|
+          {encSelect (prefix <> "Encoding") enc (voEncodings <$> mOpts)}
+          {resField prefix w h mOpts}
+          {intRanged (prefix <> "Fps") "FPS" fps (mOpts >>= \o -> o.voFpsRange)}
+          {intRanged (prefix <> "BitrateKbps") "Bitrate (kbps)" br (mOpts >>= \o -> o.voBitrateRangeKbps)}
+          {intRanged (prefix <> "GovLength") "GOP length (frames)" gov (mOpts >>= \o -> o.voGovRange)}
+        |]
+
+      resField prefix w h mOpts = case mOpts of
+        Just opts
+          | not (null opts.voResolutions) ->
+              let currentRes = (,) <$> w <*> h
+                  resChoices = case currentRes of
+                    Just cur | cur `notElem` opts.voResolutions -> cur : opts.voResolutions
+                    _ -> opts.voResolutions
+               in [hsx|
+                    <div class="field">
+                      <label>Resolution</label>
+                      <select class="input" data-res-select="1" data-width-target={prefix <> "Width"} data-height-target={prefix <> "Height"}>
+                        <option value="" selected={isNothing w}>unmanaged</option>
+                        {forEach resChoices (resOption currentRes)}
+                      </select>
+                      <input type="hidden" name={prefix <> "Width"} value={maybe "" tshow w} />
+                      <input type="hidden" name={prefix <> "Height"} value={maybe "" tshow h} />
+                      <div class="hint">Resolutions reported by the camera for this stream</div>
+                    </div>
+                  |]
+        _ ->
+          [hsx|
+            {intFieldFor (prefix <> "Width") "Width (px)" w ""}
+            {intFieldFor (prefix <> "Height") "Height (px)" h ""}
+          |]
+
+      resOption current (rw, rh) =
+        [hsx|<option value={tshow rw <> "x" <> tshow rh} selected={current == Just (rw, rh)}>{tshow rw}×{tshow rh}</option>|]
+
+      encSelect name' current mEncs =
+        [hsx|
+          <div class="field">
+            <label>Encoding</label>
+            <select name={name'}>
+              <option value="" selected={isNothing current}>unmanaged</option>
+              {forEach encChoices (encOption current)}
+            </select>
+          </div>
+        |]
+        where
+          encChoices = case mEncs of
+            Just encs
+              | filtered@(_ : _) <- filter (/= VEncJpeg) encs -> map videoEncodingText filtered
+            _ -> ["H264", "H265"]
+
+      encOption current e =
+        [hsx|<option value={e} selected={current == Just e}>{e}</option>|]
+
+      audioSection enc br sr mOpts =
+        [hsx|
+          {audioEncSelect enc (aoEncodings <$> mOpts)}
+          {audioListSelect "audioBitrateKbps" "Bitrate (kbps)" br (aoBitratesKbps <$> mOpts)}
+          {audioListSelect "audioSampleRateKhz" "Sample rate (kHz)" sr (aoSampleRatesKhz <$> mOpts)}
+        |]
+
+      audioEncSelect current mEncs =
+        [hsx|
+          <div class="field">
+            <label>Encoding</label>
+            <select name="audioEncoding">
+              <option value="" selected={isNothing current}>unmanaged</option>
+              {forEach encChoices (encOption current)}
+            </select>
+          </div>
+        |]
+        where
+          encChoices = case mEncs of
+            Just encs | not (null encs) -> map audioEncodingText encs
+            _ -> ["G711", "G726", "AAC"]
+
+      audioListSelect name' label' current mItems = case mItems of
+        Just items
+          | not (null items) ->
+              [hsx|
+                <div class="field">
+                  <label>{label'}</label>
+                  <select name={name'}>
+                    <option value="" selected={isNothing current}>unmanaged</option>
+                    {forEach (withCurrent current items) (audioItemOption current)}
+                  </select>
+                </div>
+              |]
+        _ -> intFieldFor name' label' current ""
+        where
+          withCurrent (Just cur) items
+            | cur `notElem` items = cur : items
+          withCurrent _ items = items
+
+      audioItemOption current i =
+        [hsx|<option value={tshow i} selected={current == Just i}>{tshow i}</option>|]
+
+      -- \| Number input; when the camera reports an allowed range, show
+      -- it as the hint and clamp via min/max attributes.
+      intRanged name' label' value' mRange =
+        [hsx|
+          <div class="field">
+            <label>{label'}</label>
+            <input class="input" type="number" name={name'} value={maybe "" tshow value'} min={rangeMin} max={rangeMax} />
+            <div class="hint">{hint}</div>
+          </div>
+        |]
+        where
+          (rangeMin, rangeMax, hint) = case mRange of
+            Just (lo, hi) -> (tshow lo, tshow hi, "allowed " <> tshow lo <> "–" <> tshow hi)
+            Nothing -> ("" :: Text, "" :: Text, "" :: Text)
+
+      intFieldFor name' label' value' hint' =
+        [hsx|
+          <div class="field">
+            <label>{label'}</label>
+            <input class="input" type="number" name={name'} value={maybe "" tshow value'} />
+            <div class="hint">{hint'}</div>
+          </div>
+        |]
 
       textFieldFor name' label' value' hint' =
         [hsx|

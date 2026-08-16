@@ -75,9 +75,26 @@ instance FromRow Generated.ActualTypes.Camera where
         retentionHours <- field
         assignedHost <- field
         manualAssign <- field
+        onvifPort <- field
+        mgmtProto <- field
+        mainVideoEncoding <- field
+        mainVideoWidth <- field
+        mainVideoHeight <- field
+        mainVideoFps <- field
+        mainVideoBitrateKbps <- field
+        mainVideoGovLength <- field
+        subVideoEncoding <- field
+        subVideoWidth <- field
+        subVideoHeight <- field
+        subVideoFps <- field
+        subVideoBitrateKbps <- field
+        subVideoGovLength <- field
+        audioEncoding <- field
+        audioBitrateKbps <- field
+        audioSampleRateKhz <- field
         createdAt <- field
         updatedAt <- field
-        let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTemplate rtspTransport host port username passwordEnc passwordNonce codec rtspSubUrl rtspSubTemplate useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
+        let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTemplate rtspTransport host port username passwordEnc passwordNonce codec rtspSubUrl rtspSubTemplate useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
         pure theRecord
 
 instance FromRowHasql Generated.ActualTypes.Camera where
@@ -129,7 +146,7 @@ updateRecordDiscardResultCamera model = do
 
 instance Record Generated.ActualTypes.Camera where
     {-# INLINE newRecord #-}
-    newRecord = Generated.ActualTypes.Camera def def def def def "tcp" def def def def def def def def True def def def False def "yolov8n-320" True def def False def def  def
+    newRecord = Generated.ActualTypes.Camera def def def def def "tcp" def def def def def def def def True def def def False def "yolov8n-320" True def def False def "onvif" def def def def def def def def def def def def def def def def def  def
 
 
 instance QueryBuilder.FilterPrimaryKey "cameras" where
@@ -212,12 +229,63 @@ instance SetField "assignedHost" (Camera') (Maybe Text) where
 instance SetField "manualAssign" (Camera') Bool where
     {-# INLINE setField #-}
     setField newValue record = record { manualAssign = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16777216 } }
+instance SetField "onvifPort" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { onvifPort = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 33554432 } }
+instance SetField "mgmtProto" (Camera') Text where
+    {-# INLINE setField #-}
+    setField newValue record = record { mgmtProto = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 67108864 } }
+instance SetField "mainVideoEncoding" (Camera') (Maybe Text) where
+    {-# INLINE setField #-}
+    setField newValue record = record { mainVideoEncoding = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 134217728 } }
+instance SetField "mainVideoWidth" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { mainVideoWidth = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 268435456 } }
+instance SetField "mainVideoHeight" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { mainVideoHeight = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 536870912 } }
+instance SetField "mainVideoFps" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { mainVideoFps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1073741824 } }
+instance SetField "mainVideoBitrateKbps" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { mainVideoBitrateKbps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2147483648 } }
+instance SetField "mainVideoGovLength" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { mainVideoGovLength = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4294967296 } }
+instance SetField "subVideoEncoding" (Camera') (Maybe Text) where
+    {-# INLINE setField #-}
+    setField newValue record = record { subVideoEncoding = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8589934592 } }
+instance SetField "subVideoWidth" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { subVideoWidth = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 17179869184 } }
+instance SetField "subVideoHeight" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { subVideoHeight = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 34359738368 } }
+instance SetField "subVideoFps" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { subVideoFps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 68719476736 } }
+instance SetField "subVideoBitrateKbps" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { subVideoBitrateKbps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 137438953472 } }
+instance SetField "subVideoGovLength" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { subVideoGovLength = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 274877906944 } }
+instance SetField "audioEncoding" (Camera') (Maybe Text) where
+    {-# INLINE setField #-}
+    setField newValue record = record { audioEncoding = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 549755813888 } }
+instance SetField "audioBitrateKbps" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { audioBitrateKbps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1099511627776 } }
+instance SetField "audioSampleRateKhz" (Camera') (Maybe Int) where
+    {-# INLINE setField #-}
+    setField newValue record = record { audioSampleRateKhz = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2199023255552 } }
 instance SetField "createdAt" (Camera') UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 33554432 } }
+    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4398046511104 } }
 instance SetField "updatedAt" (Camera') UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 67108864 } }
+    setField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8796093022208 } }
 instance SetField "meta" (Camera') MetaBag where
     {-# INLINE setField #-}
     setField newValue record = record { meta = newValue }
@@ -296,12 +364,63 @@ instance UpdateField "assignedHost" (Camera') (Camera') (Maybe Text) (Maybe Text
 instance UpdateField "manualAssign" (Camera') (Camera') Bool Bool where
     {-# INLINE updateField #-}
     updateField newValue record = record { manualAssign = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16777216 } }
+instance UpdateField "onvifPort" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { onvifPort = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 33554432 } }
+instance UpdateField "mgmtProto" (Camera') (Camera') Text Text where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { mgmtProto = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 67108864 } }
+instance UpdateField "mainVideoEncoding" (Camera') (Camera') (Maybe Text) (Maybe Text) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { mainVideoEncoding = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 134217728 } }
+instance UpdateField "mainVideoWidth" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { mainVideoWidth = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 268435456 } }
+instance UpdateField "mainVideoHeight" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { mainVideoHeight = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 536870912 } }
+instance UpdateField "mainVideoFps" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { mainVideoFps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1073741824 } }
+instance UpdateField "mainVideoBitrateKbps" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { mainVideoBitrateKbps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2147483648 } }
+instance UpdateField "mainVideoGovLength" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { mainVideoGovLength = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4294967296 } }
+instance UpdateField "subVideoEncoding" (Camera') (Camera') (Maybe Text) (Maybe Text) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { subVideoEncoding = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8589934592 } }
+instance UpdateField "subVideoWidth" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { subVideoWidth = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 17179869184 } }
+instance UpdateField "subVideoHeight" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { subVideoHeight = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 34359738368 } }
+instance UpdateField "subVideoFps" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { subVideoFps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 68719476736 } }
+instance UpdateField "subVideoBitrateKbps" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { subVideoBitrateKbps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 137438953472 } }
+instance UpdateField "subVideoGovLength" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { subVideoGovLength = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 274877906944 } }
+instance UpdateField "audioEncoding" (Camera') (Camera') (Maybe Text) (Maybe Text) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { audioEncoding = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 549755813888 } }
+instance UpdateField "audioBitrateKbps" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { audioBitrateKbps = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1099511627776 } }
+instance UpdateField "audioSampleRateKhz" (Camera') (Camera') (Maybe Int) (Maybe Int) where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { audioSampleRateKhz = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 2199023255552 } }
 instance UpdateField "createdAt" (Camera') (Camera') UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 33554432 } }
+    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4398046511104 } }
 instance UpdateField "updatedAt" (Camera') (Camera') UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 67108864 } }
+    updateField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8796093022208 } }
 instance UpdateField "meta" (Camera') (Camera') MetaBag MetaBag where
     {-# INLINE updateField #-}
     updateField newValue record = record { meta = newValue }
@@ -331,7 +450,24 @@ instance FieldBit "enabled" (Camera') where fieldBit = 2097152
 instance FieldBit "retentionHours" (Camera') where fieldBit = 4194304
 instance FieldBit "assignedHost" (Camera') where fieldBit = 8388608
 instance FieldBit "manualAssign" (Camera') where fieldBit = 16777216
-instance FieldBit "createdAt" (Camera') where fieldBit = 33554432
-instance FieldBit "updatedAt" (Camera') where fieldBit = 67108864
+instance FieldBit "onvifPort" (Camera') where fieldBit = 33554432
+instance FieldBit "mgmtProto" (Camera') where fieldBit = 67108864
+instance FieldBit "mainVideoEncoding" (Camera') where fieldBit = 134217728
+instance FieldBit "mainVideoWidth" (Camera') where fieldBit = 268435456
+instance FieldBit "mainVideoHeight" (Camera') where fieldBit = 536870912
+instance FieldBit "mainVideoFps" (Camera') where fieldBit = 1073741824
+instance FieldBit "mainVideoBitrateKbps" (Camera') where fieldBit = 2147483648
+instance FieldBit "mainVideoGovLength" (Camera') where fieldBit = 4294967296
+instance FieldBit "subVideoEncoding" (Camera') where fieldBit = 8589934592
+instance FieldBit "subVideoWidth" (Camera') where fieldBit = 17179869184
+instance FieldBit "subVideoHeight" (Camera') where fieldBit = 34359738368
+instance FieldBit "subVideoFps" (Camera') where fieldBit = 68719476736
+instance FieldBit "subVideoBitrateKbps" (Camera') where fieldBit = 137438953472
+instance FieldBit "subVideoGovLength" (Camera') where fieldBit = 274877906944
+instance FieldBit "audioEncoding" (Camera') where fieldBit = 549755813888
+instance FieldBit "audioBitrateKbps" (Camera') where fieldBit = 1099511627776
+instance FieldBit "audioSampleRateKhz" (Camera') where fieldBit = 2199023255552
+instance FieldBit "createdAt" (Camera') where fieldBit = 4398046511104
+instance FieldBit "updatedAt" (Camera') where fieldBit = 8796093022208
 
 

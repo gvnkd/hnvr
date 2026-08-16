@@ -56,15 +56,6 @@ instance View NewView where
             {textFieldFor "retentionHours" "Full-record retention (hours)" (tshow camera.retentionHours) "Event clips have their own per-rule retention"}
 
             <div class="field">
-              <label>Codec</label>
-              <select name="codec">
-                <option value="unknown" selected={camera.codec == Unknown}>unknown</option>
-                <option value="h264" selected={camera.codec == H264}>h264</option>
-                <option value="hevc" selected={camera.codec == Hevc}>hevc</option>
-              </select>
-            </div>
-
-            <div class="field">
               <label>Analysis model</label>
               <select name="modelName">
                 <option value="yolov8n-320" selected={camera.modelName == "yolov8n-320"}>yolov8n-320 (default)</option>

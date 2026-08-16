@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:          hnvr-web
-version:       0.4.0.1
+version:       0.5.0.2
 synopsis:
   HNVR leader (IHP web + event writer + MediaMTX sync) and node binaries
 
@@ -12,6 +12,7 @@ library
     Generated.ActualTypes
     Generated.ActualTypes.AuditLog
     Generated.ActualTypes.Camera
+    Generated.ActualTypes.CameraDrift
     Generated.ActualTypes.Event
     Generated.ActualTypes.EventClip
     Generated.ActualTypes.EventClipEvent
@@ -23,6 +24,8 @@ library
     Generated.AuditLog
     Generated.AuditLogInclude
     Generated.Camera
+    Generated.CameraDrift
+    Generated.CameraDriftInclude
     Generated.CameraInclude
     Generated.Enums
     Generated.Event
@@ -40,12 +43,14 @@ library
     Generated.Statements
     Generated.Statements.CreateAuditLog
     Generated.Statements.CreateCamera
+    Generated.Statements.CreateCameraDrift
     Generated.Statements.CreateEvent
     Generated.Statements.CreateEventClip
     Generated.Statements.CreateEventClipEvent
     Generated.Statements.CreateHost
     Generated.Statements.CreateManyAuditLog
     Generated.Statements.CreateManyCamera
+    Generated.Statements.CreateManyCameraDrift
     Generated.Statements.CreateManyEvent
     Generated.Statements.CreateManyEventClip
     Generated.Statements.CreateManyEventClipEvent
@@ -58,6 +63,7 @@ library
     Generated.Statements.CreateUser
     Generated.Statements.FetchAuditLog
     Generated.Statements.FetchCamera
+    Generated.Statements.FetchCameraDrift
     Generated.Statements.FetchEvent
     Generated.Statements.FetchEventClip
     Generated.Statements.FetchEventClipEvent
@@ -67,6 +73,7 @@ library
     Generated.Statements.FetchUser
     Generated.Statements.RowDecoderAuditLog
     Generated.Statements.RowDecoderCamera
+    Generated.Statements.RowDecoderCameraDrift
     Generated.Statements.RowDecoderEvent
     Generated.Statements.RowDecoderEventClip
     Generated.Statements.RowDecoderEventClipEvent
@@ -76,6 +83,7 @@ library
     Generated.Statements.RowDecoderUser
     Generated.Statements.UpdateAuditLog
     Generated.Statements.UpdateCamera
+    Generated.Statements.UpdateCameraDrift
     Generated.Statements.UpdateEvent
     Generated.Statements.UpdateEventClip
     Generated.Statements.UpdateEventClipEvent
@@ -104,6 +112,8 @@ library
     Hnvr.Web.HealthCache
     Hnvr.Web.MediaMTXConfigSyncer
     Hnvr.Web.Metrics
+    Hnvr.Web.OnvifSync
+    Hnvr.Web.OnvifSyncer
     Hnvr.Web.PendingPurge
     Hnvr.Web.RetentionSweeper
     Hnvr.Web.SchemaMigration

@@ -12,6 +12,7 @@ library
     Hnvr.Core.CameraSnapshot
     Hnvr.Core.Clip
     Hnvr.Core.Crypto
+    Hnvr.Core.Dvrip
     Hnvr.Core.Event
     Hnvr.Core.Frame
     Hnvr.Core.Geometry
@@ -64,6 +65,7 @@ test-suite hnvr-core-test
     Hnvr.Core.CameraSnapshotSpec
     Hnvr.Core.ClipSpec
     Hnvr.Core.CryptoSpec
+    Hnvr.Core.DvripSpec
     Hnvr.Core.EventSpec
     Hnvr.Core.FrameSpec
     Hnvr.Core.GeometrySpec

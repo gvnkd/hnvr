@@ -79,7 +79,34 @@ tests =
             let opts = VideoOptions [] [] (Just (1, 10)) Nothing Nothing
              in vcFps (clampVideo opts cam198Video (emptyDesiredVideo {dvFps = Just 15})) @?= 10,
           testCase "unmanaged fields keep current values" $
-            clampVideo (VideoOptions [] [] Nothing Nothing Nothing) cam198Video emptyDesiredVideo @?= cam198Video
+            clampVideo (VideoOptions [] [] Nothing Nothing Nothing) cam198Video emptyDesiredVideo @?= cam198Video,
+          testCase "JPEG never pushed: desired JPEG unmanaged, offered JPEG filtered" $
+            let opts = VideoOptions [VEncJpeg, VEncH264] [] Nothing Nothing Nothing
+             in vcEncoding (clampVideo opts cam198Video (emptyDesiredVideo {dvEncoding = Just VEncJpeg}))
+                  @?= VEncH264
+        ],
+      testGroup
+        "pickMainSub"
+        [ testCase "highest resolution is main, next is sub" $
+            pickMainSub [subCfg, cam198Video, jpegCfg]
+              @?= (Just cam198Video, Just subCfg),
+          testCase "single video config → no sub" $
+            pickMainSub [cam198Video] @?= (Just cam198Video, Nothing),
+          testCase "no video configs → nothing" $
+            pickMainSub [jpegCfg] @?= (Nothing, Nothing)
+        ],
+      testGroup
+        "hostFromRtspUrl"
+        [ testCase "userinfo + port" $
+            hostFromRtspUrl "rtsp://admin:123456@192.168.0.197:554/h264PreviewCh01"
+              @?= Just "192.168.0.197",
+          testCase "H264DVR form (no userinfo)" $
+            hostFromRtspUrl "rtsp://192.168.0.198:554/user=admin&password=x&channel=0&stream=0"
+              @?= Just "192.168.0.198",
+          testCase "no port, no path" $
+            hostFromRtspUrl "rtsp://10.0.0.1" @?= Just "10.0.0.1",
+          testCase "empty → Nothing" $
+            hostFromRtspUrl "" @?= Nothing
         ]
     ]
 
@@ -91,3 +118,9 @@ cam198Audio = AudioConfig "A_ENC_000" "A_ENC_000" 2 EncG711 128 8
 
 cam198Video :: VideoConfig
 cam198Video = VideoConfig "000" "V_ENC_000" 1 VEncH264 3072 2048 6 15 0 4698 15 (Just "High")
+
+subCfg :: VideoConfig
+subCfg = VideoConfig "001" "V_ENC_001" 1 VEncH264 704 576 6 5 0 512 15 (Just "Main")
+
+jpegCfg :: VideoConfig
+jpegCfg = VideoConfig "002" "V_ENC_JPEG" 1 VEncJpeg 1920 1080 6 1 0 0 0 Nothing

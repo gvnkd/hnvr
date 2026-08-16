@@ -7,10 +7,12 @@ module Hnvr.Web.View.Cameras.Index (IndexView (..)) where
 
 import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
+import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
-newtype IndexView = IndexView
-  { cameras :: [Camera]
+data IndexView = IndexView
+  { cameras :: [Camera],
+    drifts :: [CameraDrift]
   }
 
 instance View IndexView where
@@ -51,8 +53,10 @@ instance View IndexView where
                 <tr>
                   <th>Slug</th>
                   <th>Name</th>
-                  <th>Codec</th>
+                  <th>Main</th>
+                  <th>Sub</th>
                   <th>Host</th>
+                  <th>Sync</th>
                   <th class="text-right" data-no-sort="1">Actions</th>
                 </tr>
               </thead>
@@ -67,7 +71,9 @@ instance View IndexView where
             <td class="mono t-strong">{camera.slug}</td>
             <td>{camera.name}</td>
             <td>{codecBadge camera.codec}</td>
+            <td>{subCodecBadge camera}</td>
             <td class="mono">{fromMaybe "—" camera.assignedHost}</td>
+            <td>{syncBadge camera}</td>
             <td class="text-right whitespace-nowrap">
               <a href={showUrl} class="btn btn-ghost btn-sm">Show</a>
               <a href={editUrl} class="btn btn-ghost btn-sm">Edit</a>
@@ -82,3 +88,18 @@ instance View IndexView where
       codecBadge Unknown = [hsx|<span class="badge badge-mute">UNKNOWN</span>|]
       codecBadge H264 = [hsx|<span class="badge badge-info">H264</span>|]
       codecBadge Hevc = [hsx|<span class="badge badge-warn">HEVC</span>|]
+
+      -- \| Sub-stream codec badge; "—" when the camera has no sub URL.
+      subCodecBadge camera = case camera.rtspSubUrl of
+        Nothing -> [hsx|<span class="badge badge-mute">—</span>|]
+        Just "" -> [hsx|<span class="badge badge-mute">—</span>|]
+        Just _ -> codecBadge camera.substreamCodec
+
+      syncBadge camera
+        | isNothing camera.onvifPort = [hsx|<span class="badge badge-mute">—</span>|]
+        | n > 0 = [hsx|<span class="badge badge-warn">DRIFT {n}</span>|]
+        | otherwise = [hsx|<span class="badge badge-ok">SYNCED</span>|]
+        where
+          n = length (filter (\d -> d.cameraId == camUuidOf camera) drifts) :: Int
+
+      camUuidOf camera = case camera |> get #id of Id u -> u

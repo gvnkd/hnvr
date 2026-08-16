@@ -85,5 +85,21 @@ tests =
               Right o -> do
                 (3072, 2048) `elem` voResolutions o @?= True
                 VEncH264 `elem` voEncodings o @?= True
+        ],
+      testGroup
+        "parseProfilesVideoConfigs (OpenIPC/Majestic ver20 media)"
+        [ testCase "cam-198 OpenIPC: two profiles, main 2592x1520 + sub 640x360" $ do
+            bs <- BS.readFile "test/fixtures/profiles-198-openipc.xml"
+            case parseProfilesVideoConfigs bs of
+              Left e -> assertFailure (show e)
+              Right cs -> do
+                length cs @?= 2
+                let (Just main_, Just sub) = pickMainSub cs
+                vcName main_ @?= "V_ENC_000"
+                (vcWidth main_, vcHeight main_) @?= (2592, 1520)
+                vcFps main_ @?= 15
+                vcBitrateKbps main_ @?= 4096
+                (vcWidth sub, vcHeight sub) @?= (640, 360)
+                vcEncoding main_ @?= VEncH264
         ]
     ]

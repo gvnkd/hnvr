@@ -50,6 +50,7 @@ import Hnvr.Web.EventWriter (startEventWriter)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
 import Hnvr.Web.Metrics (ensureMetrics, startGpuPoller, startMetricsServer)
+import Hnvr.Web.OnvifSyncer (startOnvifSyncer)
 import Hnvr.Web.PendingPurge (startPendingPurgeSweeper)
 import Hnvr.Web.RetentionSweeper (startRetentionSweeper)
 import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
@@ -157,6 +158,8 @@ connectNatsAndStartEventWriter = do
   -- Verified-delete sweeper (tombstoned segments → S3 purge → row
   -- DELETE). Same PG+S3-only profile as the retention sweep.
   gated "HNVR_DISABLE_PENDINGPURGE" startPendingPurgeSweeper
+  -- ONVIF drift poller: PG + HTTP to cameras only, no NATS.
+  gated "HNVR_DISABLE_ONVIFSYNC" startOnvifSyncer
   let defaultUri = "nats://nats:nats@localhost:4222"
   uri <- fromMaybe defaultUri <$> Env.lookupEnv "HNVR_NATS_URI"
   let connect' = do

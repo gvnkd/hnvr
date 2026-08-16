@@ -38,10 +38,15 @@ module Hnvr.Core.Onvif
     parseVideoEncoding,
     emptyDesiredAudio,
     emptyDesiredVideo,
+    pickMainSub,
+    hostFromRtspUrl,
   )
 where
 
 import Data.Aeson (FromJSON, ToJSON)
+import Data.List (sortOn)
+import Data.Maybe (fromMaybe)
+import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -237,7 +242,7 @@ clampVideo opts cur d =
     { vcToken = vcToken cur,
       vcName = vcName cur,
       vcUseCount = vcUseCount cur,
-      vcEncoding = pick (dvEncoding d) (voEncodings opts) (vcEncoding cur),
+      vcEncoding = pick dEnc videoEncs (vcEncoding cur),
       vcWidth = w',
       vcHeight = h',
       vcQuality = vcQuality cur,
@@ -248,6 +253,12 @@ clampVideo opts cur d =
       vcCodecProfile = vcCodecProfile cur
     }
   where
+    -- JPEG appears in options via the snapshot config's codec section;
+    -- it must never be pushed onto a video stream.
+    dEnc = case dvEncoding d of
+      Just VEncJpeg -> Nothing
+      other -> other
+    videoEncs = filter (/= VEncJpeg) (voEncodings opts)
     (w', h') = case (dvWidth d, dvHeight d) of
       (Just w, Just h)
         | null (voResolutions opts) -> (w, h)
@@ -282,3 +293,31 @@ nearestRes (w, h) = foldr1 closer
   where
     closer a b = if dist a <= dist b then a else b
     dist (w', h') = abs (w' - w) + abs (h' - h)
+
+-- | Split the camera's video encoder configs into (main, sub).
+-- JPEG snapshot configs are excluded; main is the highest-resolution
+-- H264/H265 config, sub the highest of the remainder. Fewer than two
+-- video configs yields a 'Nothing' sub; none yields ('Nothing','Nothing').
+pickMainSub :: [VideoConfig] -> (Maybe VideoConfig, Maybe VideoConfig)
+pickMainSub confs = case sortOn (Down . area) (filter isVideo confs) of
+  [] -> (Nothing, Nothing)
+  [m] -> (Just m, Nothing)
+  (m : s : _) -> (Just m, Just s)
+  where
+    isVideo c = vcEncoding c `elem` [VEncH264, VEncH265]
+    area c = vcWidth c * vcHeight c
+
+-- | Extract the host from an RTSP URL of either shape used in the
+-- cameras table:
+--
+--   * @rtsp://user:pass\@192.168.0.197:554/path@ (userinfo + port)
+--   * @rtsp://192.168.0.198:554/user=admin&...@ (H264DVR form)
+--
+-- 'Nothing' when the host part is empty.
+hostFromRtspUrl :: Text -> Maybe Text
+hostFromRtspUrl url =
+  let noScheme = fromMaybe url (T.stripPrefix "rtsp://" url)
+      authority = T.takeWhile (/= '/') noScheme
+      hostPort = snd (T.breakOnEnd "@" authority) -- drop userinfo if present
+      host = T.takeWhile (/= ':') hostPort
+   in if T.null host then Nothing else Just host

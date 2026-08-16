@@ -84,6 +84,15 @@ pendingDeleteSql = $(embedFile "migrations/0006-pending-delete.sql")
 eventClipsSql :: ByteString
 eventClipsSql = $(embedFile "migrations/0007-event-clips.sql")
 
+-- | ONVIF config sync: sparse desired encoder columns on cameras +
+-- @camera_drift@ table. See the file header.
+onvifConfigSyncSql :: ByteString
+onvifConfigSyncSql = $(embedFile "migrations/0008-onvif-config-sync.sql")
+
+-- | Management protocol selector (onvif|dvrip) on cameras.
+mgmtProtoSql :: ByteString
+mgmtProtoSql = $(embedFile "migrations/0009-mgmt-proto.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -127,6 +136,14 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0007-event-clips" eventClipsSql) True conn
     handleResult "0007-event-clips" clipsRes
+    onvifRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0008-onvif-config-sync" onvifConfigSyncSql) True conn
+    handleResult "0008-onvif-config-sync" onvifRes
+    mgmtRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0009-mgmt-proto" mgmtProtoSql) True conn
+    handleResult "0009-mgmt-proto" mgmtRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

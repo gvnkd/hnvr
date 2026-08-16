@@ -27,6 +27,8 @@ import Data.UUID (UUID)
 import Generated.Types
 import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.OnvifSync (FormOptions, checkCameraDrift, fetchFormOptions, pushCameraConfig, targetForCamera)
+import Hnvr.Web.OnvifSyncer (persistDrift)
 import Hnvr.Web.View.Cameras.Edit
 import Hnvr.Web.View.Cameras.Index
 import Hnvr.Web.View.Cameras.New
@@ -34,12 +36,47 @@ import Hnvr.Web.View.Cameras.Show
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 import IHP.ModelSupport (Id' (Id))
+import qualified Network.HTTP.Client as HC
 import Web.Controller.Cameras.Probe (ProbeInfo (..), probe)
 import Web.Controller.Support.Crypto (decryptPassword, encryptPassword)
 
 -- | Raw UUID of a camera row (audit targets).
 camUuid :: Camera -> UUID
 camUuid cam = case cam |> get #id of Id u -> u
+
+-- | Best-effort ONVIF push after Save Changes: Nothing when the camera
+-- is ONVIF-unmanaged (no port/host/creds — plain save), otherwise the
+-- push result. On a successful push, re-reads the camera and refreshes
+-- its camera_drift rows so the badge reflects the push immediately
+-- rather than at the next OnvifSyncer tick.
+pushOnvif :: Camera -> IO (Maybe (Either Text Text))
+pushOnvif cam = do
+  eTarget <- targetForCamera cam
+  case eTarget of
+    Left _ -> pure Nothing
+    Right target -> do
+      mgr <- HC.newManager HC.defaultManagerSettings
+      res <- pushCameraConfig mgr target cam
+      case res of
+        Right _ -> do
+          eDrift <- checkCameraDrift mgr target cam
+          case eDrift of
+            Right items -> persistDrift (camUuid cam) items
+            Left _ -> pure ()
+        Left _ -> pure ()
+      pure (Just res)
+
+-- | Fetch live ONVIF capabilities for the Edit form dropdowns.
+-- 'Nothing' when the camera is unmanaged or unreachable — the form
+-- falls back to free-text inputs.
+fetchOpts :: Camera -> IO (Maybe FormOptions)
+fetchOpts cam = do
+  eTarget <- targetForCamera cam
+  case eTarget of
+    Left _ -> pure Nothing
+    Right target -> do
+      mgr <- HC.newManager HC.defaultManagerSettings
+      Just <$> fetchFormOptions mgr target
 
 -- | Acting user's UUID for audit rows.
 currentUserUuid :: (?request :: Request) => Maybe UUID
@@ -66,20 +103,23 @@ instance Controller CamerasController where
   beforeAction = ensureIsUser
   action CamerasAction = do
     cameras <- query @Camera |> orderByDesc #createdAt |> fetch
+    drifts <- query @CameraDrift |> fetch
     render IndexView {..}
   action ShowCameraAction {cameraId} = do
     camera <- fetch cameraId
+    drifts <- query @CameraDrift |> filterWhere (#cameraId, camUuid camera) |> fetch
     render ShowView {..}
   action NewCameraAction = do
     let camera = newRecord @Camera
     render NewView {..}
   action EditCameraAction {cameraId} = do
     camera <- fetch cameraId
+    formOptions <- liftIO (fetchOpts camera)
     render EditView {..}
   action CreateCameraAction = do
     let camera0 =
           newRecord @Camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "modelName", "enabled", "retentionHours", "assignedHost", "manualAssign"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "recordAudio", "analysisFps", "modelName", "enabled", "retentionHours", "assignedHost", "manualAssign"]
         plaintext = paramOrDefault ("" :: Text) "password"
     (enc, nonce) <- liftIO (encryptPassword plaintext)
     let camera =
@@ -97,7 +137,7 @@ instance Controller CamerasController where
     camera <- fetch cameraId
     let camera' =
           camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "codec", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "substreamCodec", "substreamWidth", "substreamHeight", "recordAudio", "analysisFps", "modelName", "enabled", "retentionHours", "assignedHost", "manualAssign"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTemplate", "rtspTransport", "host", "port", "username", "rtspSubUrl", "rtspSubTemplate", "useSubstreamForAnalysis", "recordAudio", "analysisFps", "modelName", "enabled", "retentionHours", "assignedHost", "manualAssign", "onvifPort", "mgmtProto", "mainVideoEncoding", "mainVideoWidth", "mainVideoHeight", "mainVideoFps", "mainVideoBitrateKbps", "mainVideoGovLength", "subVideoEncoding", "subVideoWidth", "subVideoHeight", "subVideoFps", "subVideoBitrateKbps", "subVideoGovLength", "audioEncoding", "audioBitrateKbps", "audioSampleRateKhz"]
         plaintext = paramOrNothing "password" :: Maybe Text
     camera'' <- case plaintext of
       Nothing -> pure camera'
@@ -113,9 +153,17 @@ instance Controller CamerasController where
       then do
         camera''' <- camera'' |> updateRecord
         audit currentUserUuid "camera.update" "camera" (Just (camUuid camera'''))
-        setSuccessMessage "Camera updated"
+        pushResult <- liftIO (pushOnvif camera''')
+        case pushResult of
+          Nothing -> setSuccessMessage "Camera updated"
+          Just (Left err) ->
+            setErrorMessage ("Camera saved, but ONVIF push failed: " <> err)
+          Just (Right summary) ->
+            setSuccessMessage ("Camera updated; ONVIF: " <> summary)
         redirectTo ShowCameraAction {cameraId = camera''' |> get #id}
-      else render EditView {camera = camera''}
+      else do
+        formOptions <- liftIO (fetchOpts camera'')
+        render EditView {camera = camera'', formOptions}
   action DeleteCameraAction {cameraId} = do
     camera <- fetch cameraId
     deleteRecord camera

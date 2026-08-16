@@ -7,12 +7,14 @@ build-type:    Simple
 
 library
   exposed-modules:
+    Hnvr.Dvrip.Client
     Hnvr.Onvif.Client
     Hnvr.Ptz.Controller
     Hnvr.Ptz.Driver
     Hnvr.Ptz.Onvif
 
   build-depends:
+    , aeson
     , base               >=4.18 && <5
     , base64-bytestring
     , bytestring
@@ -23,6 +25,7 @@ library
     , http-client
     , http-types
     , memory
+    , network
     , text
     , time
     , xml-conduit
