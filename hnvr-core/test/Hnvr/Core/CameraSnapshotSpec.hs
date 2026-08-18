@@ -102,7 +102,8 @@ sampleSnapshot =
       csSubHeight = Just 480,
       csAnalysisFps = 5,
       csModelName = "yolov8n-320",
-      csRules = []
+      csRules = [],
+      csPtz = Nothing
     }
 
 sampleBatch :: CameraSnapshotBatch

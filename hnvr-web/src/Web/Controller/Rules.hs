@@ -37,15 +37,11 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (getCurrentTime)
 import Data.UUID (UUID)
-import qualified Data.UUID as UUID
 import Generated.Types
-import Hnvr.Core.CameraSnapshot (RuleSnapshot (..))
-import qualified Hnvr.Nats.Bus as Bus
-import Hnvr.Nats.Subjects (commandAssign)
 import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.BusRegistry (busRegistry)
-import Hnvr.Web.CommandTypes (AssignPayload (..), cameraIdOf, projectCameraWithRules)
+import Hnvr.Web.CommandTypes (cameraIdOf, republishAssign)
 import Hnvr.Web.View.Rules.Edit
 import Hnvr.Web.View.Rules.Index
 import Hnvr.Web.View.Rules.New
@@ -143,42 +139,9 @@ buildRuleFromParams rule =
 -- camera is unassigned or the bus is down (boot snapshot still covers
 -- the next restart).
 publishRuleRefresh :: (?modelContext :: ModelContext) => Camera -> IO ()
-publishRuleRefresh camera =
-  forM_ camera.assignedHost $ \host -> do
-    mBus <- liftIO (readIORef busRegistry)
-    forM_ mBus $ \bus -> do
-      rules <- query @Rule |> filterWhere (#cameraId, camUuidOf camera) |> filterWhere (#enabled, True) |> fetch
-      let snaps = map toSnapshot rules
-      forM_ (projectCameraWithRules snaps camera) $ \snap ->
-        liftIO
-          $ Bus.publishJson bus (commandAssign camera.slug)
-          $ AssignPayload
-            { apSlug = camera.slug,
-              apHost = host,
-              apCameraId = camUuidOf camera,
-              apCamera = Just snap
-            }
-
--- | Rule row → wire shape (geometry passes through as JSON).
-toSnapshot :: Rule -> RuleSnapshot
-toSnapshot rule =
-  RuleSnapshot
-    { rsId = ruleIdText rule,
-      rsKind = kindText rule.kind,
-      rsGeometry = rule.geometry,
-      rsClasses = rule.classes,
-      rsCooldownMs = rule.cooldownMs,
-      rsClipPrerollSec = rule.clipPrerollSec,
-      rsClipPostrollSec = rule.clipPostrollSec,
-      rsClipRetentionHours = rule.clipRetentionHours
-    }
-  where
-    ruleIdText r = case r |> get #id of Id u -> UUID.toText u
-    kindText LineCross = "line_cross"
-    kindText RuleKindZoneEnter = "zone_enter"
-    kindText RuleKindZoneExit = "zone_exit"
-    kindText RuleKindZoneInside = "zone_inside"
-    kindText RuleKindZoneMotion = "zone_motion"
+publishRuleRefresh camera = do
+  mBus <- liftIO (readIORef busRegistry)
+  forM_ mBus $ \bus -> republishAssign bus camera
 
 -- | Raw UUID of a camera row (Rule.cameraId is a bare UUID, not an
 -- IHP 'Id').

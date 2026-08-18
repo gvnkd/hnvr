@@ -67,14 +67,17 @@ instance View IndexView where
 
       renderCamera camera =
         [hsx|
-          <tr data-href={showUrl}>
-            <td class="mono t-strong">{camera.slug}</td>
+          <tr data-href={showUrl} class={rowClass}>
+            <td class="mono t-strong">{camera.slug} {enabledBadge}</td>
             <td>{camera.name}</td>
             <td>{codecBadge camera.codec}</td>
             <td>{subCodecBadge camera}</td>
             <td class="mono">{fromMaybe "—" camera.assignedHost}</td>
             <td>{syncBadge camera}</td>
             <td class="text-right whitespace-nowrap">
+              <form method="POST" action={toggleUrl} style="display:contents">
+                <button type="submit" class={toggleClass}>{toggleLabel}</button>
+              </form>
               <a href={showUrl} class="btn btn-ghost btn-sm">Show</a>
               <a href={editUrl} class="btn btn-ghost btn-sm">Edit</a>
             </td>
@@ -84,6 +87,14 @@ instance View IndexView where
           cid = tshow (camera |> get #id)
           showUrl = "/ShowCamera?cameraId=" <> cid
           editUrl = "/EditCamera?cameraId=" <> cid
+          toggleUrl = "/ToggleCameraEnabled?cameraId=" <> cid
+          enabledBadge =
+            if camera.enabled
+              then [hsx|<span class="badge badge-ok">ON</span>|]
+              else [hsx|<span class="badge badge-mute">OFF</span>|]
+          toggleLabel = if camera.enabled then "Disable" else "Enable"
+          toggleClass = if camera.enabled then "btn btn-ghost btn-sm" else "btn btn-sm"
+          rowClass = if camera.enabled then "" else "row-disabled"
 
       codecBadge Unknown = [hsx|<span class="badge badge-mute">UNKNOWN</span>|]
       codecBadge H264 = [hsx|<span class="badge badge-info">H264</span>|]

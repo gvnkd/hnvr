@@ -15,6 +15,7 @@
 --   * @UpdateCameraAction@   → @/UpdateCamera?cameraId=…@ (POST/PATCH)
 --   * @DeleteCameraAction@   → @/DeleteCamera?cameraId=…@ (DELETE)
 --   * @ProbeCameraAction@    → @/ProbeCamera?cameraId=…@ (POST)
+--   * @ProbePtzCameraAction@ → @/ProbePtzCamera?cameraId=…@ (POST)
 --   * @AssignCameraAction@   → @/AssignCamera?cameraId=…@ (POST)
 module Web.Controller.Cameras
   ( CamerasController (..),
@@ -22,6 +23,7 @@ module Web.Controller.Cameras
 where
 
 import Data.Aeson (object, (.=))
+import Data.IORef (readIORef)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Time.Clock (getCurrentTime)
@@ -29,7 +31,9 @@ import Data.UUID (UUID)
 import Generated.Types
 import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
-import Hnvr.Web.OnvifSync (FormOptions, checkCameraDrift, fetchFormOptions, pushCameraConfig, targetForCamera)
+import Hnvr.Web.BusRegistry (busRegistry)
+import Hnvr.Web.CommandTypes (publishAssignTo, republishAssignAlways)
+import Hnvr.Web.OnvifSync (FormOptions, checkCameraDrift, fetchFormOptions, probePtz, pushCameraConfig, targetForCamera)
 import Hnvr.Web.OnvifSyncer (persistDrift)
 import Hnvr.Web.View.Cameras.Edit
 import Hnvr.Web.View.Cameras.Index
@@ -94,7 +98,9 @@ data CamerasController
   | CreateCameraAction
   | UpdateCameraAction {cameraId :: !(Id Camera)}
   | DeleteCameraAction {cameraId :: !(Id Camera)}
+  | ToggleCameraEnabledAction {cameraId :: !(Id Camera)}
   | ProbeCameraAction {cameraId :: !(Id Camera)}
+  | ProbePtzCameraAction {cameraId :: !(Id Camera)}
   | AssignCameraAction {cameraId :: !(Id Camera)}
   | TestCryptoCameraAction {cameraId :: !(Id Camera)}
   deriving stock (Eq, Show, Data)
@@ -146,7 +152,7 @@ instance Controller CamerasController where
     camera <- fetch cameraId
     let camera' =
           camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours", "onvifPort", "mgmtProto", "mainVideoEncoding", "mainVideoWidth", "mainVideoHeight", "mainVideoFps", "mainVideoBitrateKbps", "mainVideoGovLength", "subVideoEncoding", "subVideoWidth", "subVideoHeight", "subVideoFps", "subVideoBitrateKbps", "subVideoGovLength", "audioEncoding", "audioBitrateKbps", "audioSampleRateKhz"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours", "onvifPort", "mgmtProto", "mainVideoEncoding", "mainVideoWidth", "mainVideoHeight", "mainVideoFps", "mainVideoBitrateKbps", "mainVideoGovLength", "subVideoEncoding", "subVideoWidth", "subVideoHeight", "subVideoFps", "subVideoBitrateKbps", "subVideoGovLength", "audioEncoding", "audioBitrateKbps", "audioSampleRateKhz", "ptzProfileToken", "ptzIdleTimeoutS"]
         plaintext = paramOrNothing "password" :: Maybe Text
     now <- liftIO getCurrentTime
     camera'' <- case plaintext of
@@ -164,11 +170,18 @@ instance Controller CamerasController where
             |> set #enabled (checkboxOn "enabled")
             |> set #recordAudio (checkboxOn "recordAudio")
             |> set #useSubstreamForAnalysis (checkboxOn "useSubstreamForAnalysis")
+            |> set #ptzEnabled (checkboxOn "ptzEnabled")
+            |> set #ptzViewerControl (checkboxOn "ptzViewerControl")
             |> set #updatedAt now
     if camera2 |> isValid
       then do
         camera''' <- camera2 |> updateRecord
         audit currentUserUuid "camera.update" "camera" (Just (camUuid camera''')) (Just (object ["slug" .= camera'''.slug]))
+        -- Tell the owning host immediately: enabled=False publishes
+        -- apCamera=Nothing (stop directive); any other edit restarts
+        -- the worker pair with fresh config.
+        mBus <- liftIO (readIORef busRegistry)
+        forM_ mBus $ \bus -> republishAssignAlways bus camera'''
         pushResult <- liftIO (pushOnvif camera''')
         case pushResult of
           Nothing -> setSuccessMessage "Camera updated"
@@ -184,10 +197,35 @@ instance Controller CamerasController where
       checkboxOn name = paramOrNothing @Text name == Just "on"
   action DeleteCameraAction {cameraId} = do
     camera <- fetch cameraId
+    -- Stop the worker on the owning host before the row disappears.
+    mBus <- liftIO (readIORef busRegistry)
+    forM_ mBus $ \bus ->
+      forM_ camera.assignedHost $ \host ->
+        publishAssignTo bus camera host Nothing
     deleteRecord camera
     audit currentUserUuid "camera.delete" "camera" (Just (camUuid camera)) (Just (object ["slug" .= camera.slug]))
     setSuccessMessage "Camera deleted"
     redirectTo CamerasAction
+
+  -- \| POST /ToggleCameraEnabled?cameraId=… — one-click enable/disable
+  -- from the index row or Show page. Flips the flag, then publishes
+  -- the assign payload immediately: enabled=False arrives as
+  -- @apCamera = Nothing@ and the owning host stops the worker
+  -- pair (no more RTSP requests to an offline camera).
+  action ToggleCameraEnabledAction {cameraId} = do
+    camera <- fetch cameraId
+    now <- liftIO getCurrentTime
+    camera' <-
+      camera
+        |> set #enabled (not camera.enabled)
+        |> set #updatedAt now
+        |> updateRecord
+    let what = if camera'.enabled then "camera.enable" else "camera.disable"
+    audit currentUserUuid what "camera" (Just (camUuid camera')) (Just (object ["slug" .= camera'.slug]))
+    mBus <- liftIO (readIORef busRegistry)
+    forM_ mBus $ \bus -> republishAssignAlways bus camera'
+    setSuccessMessage (if camera'.enabled then "Camera enabled" else "Camera disabled — host notified")
+    redirectTo ShowCameraAction {cameraId}
 
   -- \| Probe the main RTSP URL (and sub URL when present) with ffprobe and
   -- fill the codec + sub-stream fields. Triggered by the "Probe Streams"
@@ -222,6 +260,43 @@ instance Controller CamerasController where
               . set #substreamWidth (Just sub.probeWidth)
               . set #substreamHeight (Just sub.probeHeight)
           applySubProbe _ = id
+
+  -- \| POST /ProbePtzCamera?cameraId=… — discover the camera's ONVIF
+  -- PTZ service (GetCapabilities), resolve the first media profile
+  -- token, and enable PTZ. Reports a hardware caveat when the service
+  -- answers but GetStatus returns a nil position (fixed camera whose
+  -- firmware accepts PTZ ops as no-ops — e.g. the Hik-OEM turrets).
+  action ProbePtzCameraAction {cameraId} = do
+    camera <- fetch cameraId
+    eTarget <- liftIO (targetForCamera camera)
+    case eTarget of
+      Left why -> do
+        setErrorMessage ("PTZ probe: " <> why)
+        redirectTo EditCameraAction {cameraId}
+      Right target -> do
+        mgr <- liftIO (HC.newManager HC.defaultManagerSettings)
+        res <- liftIO (probePtz mgr target)
+        case res of
+          Left err -> do
+            setErrorMessage ("PTZ probe failed: " <> err)
+            redirectTo EditCameraAction {cameraId}
+          Right (profileToken, mPos) -> do
+            camera' <-
+              camera
+                |> set #ptzProfileToken (Just profileToken)
+                |> set #ptzEnabled True
+                |> updateRecord
+            audit currentUserUuid "camera.probe_ptz" "camera" (Just (camUuid camera')) (Just (object ["slug" .= camera'.slug, "profile_token" .= profileToken]))
+            case mPos of
+              Just _ -> setSuccessMessage ("PTZ OK: service found, profile token " <> profileToken)
+              Nothing ->
+                setSuccessMessage
+                  ( "PTZ service found (profile token "
+                      <> profileToken
+                      <> "), but GetStatus reports no position — this camera"
+                      <> " likely has no PTZ hardware (commands accepted as no-ops)"
+                  )
+            redirectTo EditCameraAction {cameraId = camera' |> get #id}
 
   -- \| POST /AssignCamera?cameraId=… — admin override of assigned_host.
   -- Sets @manual_assign = true@ so the AssignmentCoordinator doesn't

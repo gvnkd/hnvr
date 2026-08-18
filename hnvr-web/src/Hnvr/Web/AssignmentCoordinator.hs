@@ -134,8 +134,8 @@ applyAssignment bus (cam, newHost, slug) = do
     sqlExec
       "UPDATE cameras SET assigned_host = ?, updated_at = NOW() WHERE id = ?"
       (newHost, cam |> get #id)
-  let snapshot = projectCamera cam
-      camId :: UUID = case cam |> get #id of Id u -> u
+  snapshot <- projectCamera cam
+  let camId :: UUID = case cam |> get #id of Id u -> u
       payload =
         AssignPayload
           { apSlug = slug,

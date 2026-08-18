@@ -3,6 +3,144 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **PTZ investigation, low_ent (Aug 17 2026) — MOTORS EXIST (corrected);
+> driven by a separate BSD board, SoC-side interface unknown**. Sergey
+> disassembled: product **GX-PM2X20I-M6S-B** (20X optical zoom dome),
+> head module label **550XM-AI 20X TF POE**, control board
+> **bsd_8g18x_lh_ipc_ahd_v2**. Motors (pan+tilt+zoom) all home at
+> power-on. Earlier "not motorized" verdict was WRONG (was: digital
+> PTZ) — the G6S mainboard (GK7205V300+imx335) is real, but motors
+> live behind the BSD board. Remote status: EVERYTHING negative —
+> decoded product jsons say PtzParams{bUsePtz:0, UartIndex:1,
+> Rs485DeReCtrlGpio:[3,0]=GPIO24, bCreateAfThread:0, bUseMotor:0}
+> (85K50T sibling identical); no XmMotor.ko anywhere; i2cdetect empty;
+> GPIO stepper bruteforce (48 combos) negative; DC H-bridge pair test
+> on boilerplate pins {69,70,59,58,57,56,53,52} (20 drives, 450ms
+> differential) negative — these pins are NOT this unit's motor wiring;
+> UART hunt: AMA1/AMA2 × mux {72/73 func1, 12/13 func2, 4/29 func2}
+> × bauds 2400-115200 × XM(0xc5/a5-init)+Pelco-D × RS485 DE/RE GPIO24
+> both polarities — zero reply, zero motion (PSNR oracle; today's
+> noise floor ~35-41dB, control interleaved). KEY LOSS: stock read
+> per-device motor pinout/params from **/mnt/mtd/Log/motorset**
+> (fun_get_motor_params precedence 1) — coupler flash + firstboot
+> ERASED it. Subreption article = same module family (GK7205V300+
+> imx335+MX6208 DC motor driver; motor_open/motor_move/motor_scan
+> ioctls in Sofia App via /dev/xm_gpio; XmDemux.ko = pinmux+gpio ABI).
+> Open questions for Sergey: (1) do motors still home at power-on
+> UNDER OpenIPC? YES=BSD autonomous (UART cmd link, hunt pads/protocol)
+> / NO=SoC-driven homing (motor GPIOs via BSD as dumb driver; pinout
+> lost — would need temporary 699Q3_recovery.img reflash + logic
+> analyzer on the BSD connector during stock boot to recover it).
+> (2) photos of bsd_8g18x both sides (chip markings — MCU? RS485
+> xcvr? stepper drivers) for qwen-vision; (3) harness wire count
+> main↔BSD: 2=RS485, 3-4=UART+DE, 8+=direct coil drive.
+> **Phase 5 — PTZ manual control + presets (Aug 16 2026 — v0.6.0.0)**:
+> full phase landed + verified live end-to-end against cam-196.
+> **Fleet verdict: NO camera has working PTZ hardware** — 196 (backyard)
+> advertises a full PTZ service and ACCEPTS every op (ContinuousMove,
+> AbsoluteMove, Stop all return proper responses) but the position
+> register never leaves (0,0), UtcTime is frozen at epoch, and an
+> ffmpeg frame-diff during a full-speed move shows scene noise only
+> (PSNR 29.9 vs no-command baseline 33.0 — same band; a real pan would
+> be ≪20): firmware stub, no motors. 197 (floor_2_5) answers GetStatus
+> with `PTZStatus xsi:nil="true"` (the fixed-camera tell). 198
+> (low_ent/Majestic) advertises no PTZ service at all. DoD #10 is
+> hardware-blocked; everything software-side works.
+>
+> Architecture (follows design 01/05/06 with noted deviations):
+>   * `Hnvr.Core.Ptz` — pure wire types: PtzCommand (sum, strict
+>     decode, `commandName`/`commandArgs`), PtzCommandMsg envelope
+>     (command+args+source+user_id+duration_ms), PtzReply
+>     (request/reply), PtzState + `stateAfter`, PtzStatusMsg,
+>     PtzAuditRecord. Wire `source` values match the ptz_source PG
+>     enum labels exactly (insert with `?::ptz_source` cast).
+>   * `Hnvr.Onvif.Client` — PTZ ops on the PTZ XAddr with ns "tptz"
+>     (envelope gained xmlns:tptz; SOAPAction ns map: tptz→ver20/ptz,
+>     tds→ver10/device, tr2→ver20/media, else ver10/media).
+>     `discoverPtzXAddr` (Nothing = no PTZ service), `getProfileTokens`
+>     (trt GetProfiles + tr2 fallback), move/stop/absolute/goto/
+>     setPreset (returns camera token)/removePreset/getPresets/
+>     getStatus (xsi:nil → Nothing). Pure parsers fixture-tested
+>     (7 new fixtures from live 196/197/198 incl. capabilities + nil
+>     status + 255-slot preset list).
+>   * `Hnvr.Ptz.Onvif.OnvifPtz` — resolved endpoint record (mgr, creds,
+>     XAddr, profile token) + thin Either-returning ops. **The design's
+>     `PtzDriver` typeclass was dropped** (no error channel; codebase
+>     seam pattern is records of IO actions, cf. Metrics).
+>   * `Hnvr.Ptz.Controller` — per-camera command loop + 1 s idle
+>     ticker; subscribes hnvr.commands.ptz.<slug>, executes, replies on
+>     replyTo, publishes status (hnvr.ptz.status.<slug>) + audit record
+>     (hnvr.ptz.audit) after EVERY command; idle timeout → go_home
+>     (home preset, else absolute origin) with source idle_timeout.
+>   * Lifecycle: `CaptureSupervisor` gained csPtz handles — startCamera
+>     calls maybeStartPtz (resolveOnvifPtz discovery; failure logs +
+>     skips, capture unaffected), stopCamera cancels both asyncs.
+>   * Snapshot: `CameraSnapshot.csPtz :: Maybe PtzSnapshot` (plaintext
+>     password — same exposure class as csRtspUrl). Hand-written
+>     FromJSON with `.:?` so new nodes tolerate pre-Phase-5 leaders.
+>     `projectCamera`/`projectCameraWithRules` are now IO (decrypt);
+>     SnapshotResponder uses a 21-column hand-written CamRow FromRow
+>     (pg-simple tuple cap, pitfall #122 class; password cols are
+>     `Maybe (Binary ByteString)` — what decryptPassword takes).
+>   * Web: `POST /PtzCamera?ptzCameraId=` (fire-and-forget JSON;
+>     set_preset/get_presets via Bus.requestJson 8 s), presets CRUD at
+>     /PtzPresets (+Goto/Home/Purge; `format=json` branches for
+>     ptz.js), `ProbePtzCameraAction` (discovery + profile token fill +
+>     nil-status hardware warning), live-view panel + `static/ptz.js`
+>     (hold-to-move pad, preset dropdown, 1 Hz status poll from
+>     /PtzStatusCamera ← PtzStatusCache subscription).
+>   * Audit: `PtzAuditWriter` (leader) persists the node's audit feed
+>     — rows record EXECUTION with ok/error, not publish intent.
+>     `Rules.publishRuleRefresh` generalized to
+>     `Hnvr.Web.CommandTypes.republishAssign` (full projection incl.
+>     PTZ) — reused by HomePtzPresetAction so home-token changes reach
+>     the node.
+>   * Schema: migration 0011-ptz (wired into SchemaMigration);
+>     cameras +ptz_enabled/ptz_profile_token/ptz_home_preset_id/
+>     ptz_idle_timeout_s/ptz_viewer_control; ptz_presets; ptz_source
+>     enum; ptz_audit_log (+ok/error columns over design). No
+>     ptz_onvif_url/ptz creds columns (runtime discovery + camera
+>     creds, same as OnvifSync's media XAddr pattern).
+>   * Metrics: `hnvr_ptz_commands_total{camera,command,source}` +
+>     `hnvr_ptz_command_seconds{camera}` (Metrics record gained
+>     mPtzCommand/mPtzCommandSeconds — update noOpMetrics +
+>     Hnvr.Web.Metrics together).
+>   * Kill switches: HNVR_DISABLE_PTZSTATUSCACHE / _PTZAUDIT.
+>
+> **Pitfall #123 (regen.sh blanket sed)**: the pitfall-#32 PK patch
+> (`nullable Mapping.encoder` → `nonNullable`) also rewrote
+> cameras.ptz_home_preset_id — a LEGITIMATELY nullable forward FK —
+> producing `IsScalar (Maybe (Id' "ptz_presets"))` errors. regen.sh now
+> re-patches the three Camera statements back to nullable after the
+> blanket pass. Any future nullable `Id'` FK column hits the same trap.
+> Circular FK (cameras ↔ ptz_presets) makes codegen parameterize
+> `Camera' ptzHomePresetId` — expected, harmless.
+>
+> Live verification (196, protocol-level): continuous_move/stop/
+> set_preset(token "1")/goto/remove/go_home all ok:true; 6 audit rows;
+> idle return-home fired on its own 30 s after a move
+> (go_home{source="idle_timeout"} 1 in /metrics). backyard row left
+> ptz_enabled=true (harmless no-op hardware; demonstrates the panel).
+> Playwright PTZ specs: not written (phase verified via curl; add when
+> a real PTZ camera exists). Tests: 214 core + 14 ptz + 15 nats +
+> 9 storage + 53 capture, pre-commit green.
+> **Restart trap (hit Aug 16)**: leader-env.sh lacked the ffmpeg bin
+> dir on PATH — capture/analysis workers failed with
+> `createProcess: posix_spawnp: does not exist` → 5 restarts →
+> FailedPermanent on all 3 cameras. Fixed; env script now exports the
+> ffmpeg-full PATH. Symptom signature: all cameras offline right after
+> a leader restart with ExitFailure 99 in the log.
+> **Dashboard PTZ (Aug 16, same version)**: panel markup extracted to
+> `Hnvr.Web.View.PtzPanel.ptzPanel` (shared by /ShowLive and the
+> dashboard); `HNVR.ptz(cameraId, rootEl?)` is root-scoped and returns
+> `{close()}` (stops the 1 Hz status poller). Dashboard renders a
+> per-PTZ-camera `<template data-ptz-for={slug}>` (ptzPresets fetched
+> in DashboardAction) + a `.live-overlay-ptz` slot in the overlay;
+> app.js openLive clones the template in and binds it, closeLive
+> closes + clears. cam-cards carry `data-cam-id` (PTZ endpoints key on
+> the UUID, overlay opens by slug).
+
+
 > **Stub/dead-field audit cleanup (Aug 16 2026 — v0.5.2.0)**: full-repo
 > audit found two more user-visible lies plus a pile of dead schema.
 > Fixed ALL of A+B class + C1:

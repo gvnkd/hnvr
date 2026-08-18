@@ -110,26 +110,47 @@ Goal: emit and persist events; UI for rules and events.
 
 Goal: full manual PTZ from the web UI; preset management; idle return-to-home.
 
-- [ ] `hnvr-ptz` sublib:
-  - [ ] ONVIF SOAP client (~500 LOC, hand-rolled, no Hackage dep)
-  - [ ] WS-Security UsernameToken auth (SHA-1 digest)
-  - [ ] `PtzDriver` typeclass
-  - [ ] Operations: GetServices, GetPresets, GotoPreset, SetPreset, RemovePreset, ContinuousMove, Stop, AbsoluteMove, GetStatus, GetConfigurations
-- [ ] `PtzController` per PTZ-enabled camera (one async thread)
-- [ ] PTZ state machine (Idle, ManualMove, GoingToPreset, ReturningHome)
-- [ ] NATS subjects: `hnvr.commands.ptz.<cam>`, `hnvr.ptz.status.<cam>`
-- [ ] `ptz_presets` + `ptz_audit_log` tables
-- [ ] Camera config: `ptz_enabled`, `ptz_onvif_url`, `ptz_profile_token`, `ptz_home_preset_id`, `ptz_idle_timeout_s`, `ptz_viewer_control`
-- [ ] IHP:
-  - [ ] `POST /cameras/:id/ptz` action (publishes NATS command)
-  - [ ] `/cameras/:slug/presets` CRUD UI
-  - [ ] "Probe ONVIF" button on camera edit (calls GetCapabilities, fills ptz_onvif_url + profile_token)
-- [ ] Live view PTZ panel (joystick + zoom + preset dropdown)
-  - [ ] `static/ptz.js` (~80 LOC vanilla JS)
-  - [ ] PTZ status indicator via autoRefresh
-- [ ] Idle timeout → return to home preset
-- [ ] Audit log of every PTZ command
-- [ ] EKG metrics: `hnvr_ptz_commands_total{cam,command,source}`, `hnvr_ptz_command_seconds`
+**Landed Aug 16 2026 (v0.6.0.0)**. Deviations from the original bullet list:
+no `ptz_onvif_url`/`ptz_username`/`ptz_password_enc` columns (PTZ XAddr is
+discovered at controller start via GetCapabilities; ONVIF reuses the camera
+credentials); the audit feed is node→leader on `hnvr.ptz.audit` (nodes have
+no DB access) so rows record execution with ok/error, not publish intent.
+**Fleet caveat: none of Sergey's three cameras have working PTZ hardware** —
+196 accepts all ops as no-ops (position register frozen, image diff shows no
+movement), 197 reports nil PTZStatus, 198 (Majestic) advertises no PTZ
+service. Verified protocol-level end-to-end against 196.
+
+- [x] `hnvr-ptz` sublib:
+  - [x] ONVIF SOAP client PTZ subset (extends the Phase-4 config-sync client:
+    `tptz` ns + SOAPAction mapping; discoverPtzXAddr, GetPresets, GotoPreset,
+    SetPreset, RemovePreset, ContinuousMove, Stop, AbsoluteMove, GetStatus,
+    GetProfiles tokens)
+  - [x] WS-Security UsernameToken auth (SHA-1 digest) — landed in Phase 4
+  - [x] Driver as resolved-endpoint record (`Hnvr.Ptz.Onvif.OnvifPtz`) —
+    the design's typeclass dropped (no error channel); ops return
+    `Either OnvifError`
+- [x] `PtzController` per PTZ-enabled camera (command loop + 1 s idle ticker)
+- [x] PTZ state machine (Idle, ManualMove, GoingToPreset, ReturningHome)
+- [x] NATS subjects: `hnvr.commands.ptz.<cam>` (+request/reply for
+  set_preset/get_presets), `hnvr.ptz.status.<cam>`, `hnvr.ptz.audit`
+- [x] `ptz_presets` + `ptz_audit_log` tables (migration 0011; audit log
+  gained ok/error columns)
+- [x] Camera config: `ptz_enabled`, `ptz_profile_token`, `ptz_home_preset_id`,
+  `ptz_idle_timeout_s`, `ptz_viewer_control`
+- [x] IHP:
+  - [x] `POST /PtzCamera?ptzCameraId=…` (publishes NATS command; JSON)
+  - [x] `/PtzPresets?ptzCameraId=…` CRUD UI (+ goto/home; format=json for fetch)
+  - [x] "Probe PTZ" button on camera edit (discovers PTZ service + fills
+    profile token; warns on nil status = no hardware)
+- [x] Live view PTZ panel (8-way hold-to-move pad + zoom + preset dropdown)
+  - [x] `static/ptz.js` (~110 LOC vanilla JS)
+  - [x] PTZ status indicator (1 Hz poll of /PtzStatusCamera, fed by the
+    hnvr.ptz.status.> cache)
+- [x] Idle timeout → return to home preset (absolute origin when no home)
+- [x] Audit log of every PTZ command (ptz_audit_log, written leader-side
+  from the node's audit feed)
+- [x] EKG metrics: `hnvr_ptz_commands_total{cam,command,source}`,
+  `hnvr_ptz_command_seconds`
 
 **Demo**: open live view of a PTZ camera, drag joystick to pan, click preset to jump to saved position, idle for 30 s → camera returns to home preset. Disable PTZ via UI toggle → control panel disappears.
 

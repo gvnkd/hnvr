@@ -10,12 +10,14 @@ import Generated.Types
 import Hnvr.Core.CameraStatus (CameraStatus (..))
 import Hnvr.Web.CameraStatus (cameraStatusFor, hostDisplayLive)
 import Hnvr.Web.View.Layout (renderLayout)
+import Hnvr.Web.View.PtzPanel (ptzPanel)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
 data IndexView = IndexView
   { cameras :: [Camera],
     hosts :: [Host],
+    ptzPresets :: [PtzPreset],
     now :: UTCTime
   }
 
@@ -49,12 +51,26 @@ instance View IndexView where
             <button class="btn btn-ghost btn-sm" data-live-close="1">close ✕</button>
           </div>
           <video autoplay muted></video>
+          <div class="live-overlay-ptz"></div>
         </div>
       </div>
+
+      {forEach ptzCams renderPtzTemplate}
+      <script src="/static/ptz.js"></script>
     |]
     where
       nCams = tshow (length cameras) :: Text
       nHosts = tshow (length hosts) :: Text
+      ptzCams = filter (.ptzEnabled) cameras
+
+      -- Per-PTZ-camera panel templates; app.js clones the matching
+      -- template into the overlay's .live-overlay-ptz slot on open.
+      renderPtzTemplate cam =
+        [hsx|
+          <template data-ptz-for={cam.slug}>{ptzPanel cam (presetsFor cam)}</template>
+        |]
+      presetsFor cam = filter (\p -> p.cameraId == camUuid cam) ptzPresets
+      camUuid c = case c |> get #id of Id u -> u
 
       renderHosts [] = [hsx|<div class="empty"><span class="empty-icon">⌖</span>No hosts reporting yet.</div>|]
       renderHosts hs =
@@ -126,7 +142,7 @@ instance View IndexView where
             CSDisabled -> [hsx|<span class="badge badge-mute cam-badge-status">DISABLED</span>|]
           card =
             [hsx|
-              <div class="cam-card" data-slug={cam.slug} title="Click for live view">
+              <div class="cam-card" data-slug={cam.slug} data-cam-id={cid} title="Click for live view">
                 <div class="cam-live" data-frame-url={frameUrl}>
                   <img alt="" />
                   <img alt="" />

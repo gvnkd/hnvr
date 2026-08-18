@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Leader-side SnapshotResponder.
@@ -31,6 +32,7 @@ import Control.Exception (SomeException, bracket, catch)
 import Control.Monad (forever)
 import Data.Aeson (Value (..), decodeStrict, encode)
 import qualified Data.Aeson.KeyMap as KM
+import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BL
 import Data.List (foldl')
@@ -42,19 +44,23 @@ import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import Database.PostgreSQL.Simple (Only (..))
 import qualified Database.PostgreSQL.Simple as PG
-import Database.PostgreSQL.Simple.Types (PGArray (..))
+import Database.PostgreSQL.Simple.FromRow (FromRow (..), field)
+import Database.PostgreSQL.Simple.Types (Binary (..), PGArray (..))
 import Hnvr.Core.CameraSnapshot
   ( CameraSnapshot (..),
     CameraSnapshotBatch (..),
+    PtzSnapshot (..),
     RuleSnapshot (..),
     transportFromText,
   )
 import Hnvr.Core.HostClaim (ClaimDecision (..), decideSnapshotClaim)
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Logging (logError, logInfo, logWarn)
+import Hnvr.Core.Onvif (hostFromRtspUrl)
 import Hnvr.Nats.Bus (Bus, Message (..))
 import qualified Hnvr.Nats.Bus as Bus
 import qualified System.Environment as Env
+import Web.Controller.Support.Crypto (decryptPassword)
 
 -- | Spawn the responder in a background 'async'. Subscribes to
 -- @hnvr.commands.snapshot.>@ and replies to each message's @replyTo@
@@ -114,9 +120,8 @@ isLeaderRequest msg =
     Just (Object o) -> KM.lookup "leader" o == Just (Bool True)
     _ -> False
 
--- | One-shot PG connection: SELECT id, slug, rtsp_url, rtsp_transport,
--- record_audio, sub-stream fields, analysis_fps, model_name FROM cameras
--- WHERE assigned_host = ? AND enabled = TRUE.
+-- | One-shot PG connection: full camera rows (incl. PTZ columns, home
+-- preset token via LEFT JOIN) WHERE assigned_host = ? AND enabled.
 -- Cameras with an unrecognised transport value are silently skipped
 -- (matches 'Hnvr.Web.CommandTypes.projectCamera' semantics — better to
 -- under-populate than to spawn a worker that will crash on ffmpeg SETUP).
@@ -127,14 +132,14 @@ fetchAssignedCameras host = do
     rows <-
       PG.query
         conn
-        "SELECT id, slug, rtsp_url, rtsp_transport, record_audio, rtsp_sub_url, use_substream_for_analysis, substream_width, substream_height, analysis_fps, model_name FROM cameras WHERE assigned_host = ? AND enabled = TRUE"
+        "SELECT c.id, c.slug, c.rtsp_url, c.rtsp_transport, c.record_audio, c.rtsp_sub_url, c.use_substream_for_analysis, c.substream_width, c.substream_height, c.analysis_fps, c.model_name, c.ptz_enabled, c.mgmt_proto, c.host, c.onvif_port, c.username, c.password_enc, c.password_nonce, c.ptz_profile_token, c.ptz_idle_timeout_s, hp.onvif_token FROM cameras c LEFT JOIN ptz_presets hp ON hp.id = c.ptz_home_preset_id WHERE c.assigned_host = ? AND c.enabled = TRUE"
         (Only host)
     ruleRows <-
       PG.query_
         conn
         "SELECT id, camera_id, kind::text, geometry, classes, cooldown_ms, clip_preroll_sec, clip_postroll_sec, clip_retention_hours FROM rules WHERE enabled = TRUE"
     let rulesByCam = foldl' (\m r@(_rid, cid, _, _, _, _, _, _, _) -> M.insertWith (++) (cid :: UUID) [mkRuleSnap r] m) M.empty ruleRows
-    pure (foldMap (mkSnapshot rulesByCam) rows)
+    concat <$> mapM (mkSnapshot rulesByCam) rows
   where
     mkRuleSnap (rid, _cid, kind, geometry, PGArray classes, cooldown, pre, post, retHours) =
       RuleSnapshot
@@ -147,25 +152,112 @@ fetchAssignedCameras host = do
           rsClipPostrollSec = fromIntegral post,
           rsClipRetentionHours = fmap fromIntegral retHours
         }
-    mkSnapshot rulesByCam (cid, slug, url, transportTxt, recordAudio, subUrl, useSub, subW, subH, fps, modelName) =
-      case transportFromText transportTxt of
-        Just tr ->
-          [ CameraSnapshot
-              { csId = CameraId cid,
-                csSlug = slug,
-                csRtspUrl = url,
-                csTransport = tr,
-                csRecordAudio = recordAudio,
-                csRtspSubUrl = subUrl,
-                csUseSubstream = useSub,
-                csSubWidth = fromIntegral <$> subW,
-                csSubHeight = fromIntegral <$> subH,
-                csAnalysisFps = fromIntegral fps,
-                csModelName = modelName,
-                csRules = M.findWithDefault [] cid rulesByCam
-              }
-          ]
-        Nothing -> []
+    mkSnapshot rulesByCam row =
+      case transportFromText row.crTransport of
+        Just tr -> do
+          ptz <- mkPtz row
+          pure
+            [ CameraSnapshot
+                { csId = CameraId row.crId,
+                  csSlug = row.crSlug,
+                  csRtspUrl = row.crRtspUrl,
+                  csTransport = tr,
+                  csRecordAudio = row.crRecordAudio,
+                  csRtspSubUrl = row.crSubUrl,
+                  csUseSubstream = row.crUseSub,
+                  csSubWidth = fromIntegral <$> row.crSubW,
+                  csSubHeight = fromIntegral <$> row.crSubH,
+                  csAnalysisFps = fromIntegral row.crFps,
+                  csModelName = row.crModelName,
+                  csRules = M.findWithDefault [] row.crId rulesByCam,
+                  csPtz = ptz
+                }
+            ]
+        Nothing -> pure []
+
+-- | 21 columns exceeds pg-simple's tuple 'FromRow' instances
+-- (pitfall #122 class), so the row lands in a record via explicit
+-- 'field' reads.
+data CamRow = CamRow
+  { crId :: !UUID,
+    crSlug :: !Text,
+    crRtspUrl :: !Text,
+    crTransport :: !Text,
+    crRecordAudio :: !Bool,
+    crSubUrl :: !(Maybe Text),
+    crUseSub :: !Bool,
+    crSubW :: !(Maybe Int),
+    crSubH :: !(Maybe Int),
+    crFps :: !Int,
+    crModelName :: !Text,
+    crPtzEnabled :: !Bool,
+    crMgmtProto :: !Text,
+    crHost :: !(Maybe Text),
+    crOnvifPort :: !(Maybe Int),
+    crUsername :: !(Maybe Text),
+    crPasswordEnc :: !(Maybe (Binary ByteString)),
+    crPasswordNonce :: !(Maybe (Binary ByteString)),
+    crPtzProfileToken :: !(Maybe Text),
+    crPtzIdleTimeoutS :: !Int,
+    crHomePresetToken :: !(Maybe Text)
+  }
+
+instance FromRow CamRow where
+  fromRow =
+    CamRow
+      <$> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+      <*> field
+
+-- | PTZ projection, mirroring
+-- 'Hnvr.Web.CommandTypes.ptzSnapshotFor' (keep both in sync): ONVIF
+-- proto only, host falls back to the RTSP URL authority, decryptable
+-- password required.
+mkPtz :: CamRow -> IO (Maybe PtzSnapshot)
+mkPtz row
+  | not row.crPtzEnabled = pure Nothing
+  | row.crMgmtProto /= "onvif" = pure Nothing
+  | otherwise = case (mHost, row.crOnvifPort, nonEmpty row.crUsername, row.crPtzProfileToken) of
+      (Just host', Just port', Just user, Just profileToken) -> do
+        mPw <- decryptPassword row.crPasswordEnc row.crPasswordNonce
+        pure $ case mPw of
+          Nothing -> Nothing
+          Just pw ->
+            Just
+              PtzSnapshot
+                { psHost = host',
+                  psOnvifPort = port',
+                  psUsername = user,
+                  psPassword = pw,
+                  psProfileToken = profileToken,
+                  psHomePresetToken = row.crHomePresetToken,
+                  psIdleTimeoutS = row.crPtzIdleTimeoutS
+                }
+      _ -> pure Nothing
+  where
+    mHost = case row.crHost of
+      Just h | not (T.null h) -> Just h
+      _ -> hostFromRtspUrl row.crRtspUrl
+    nonEmpty (Just t) | not (T.null t) = Just t
+    nonEmpty _ = Nothing
 
 -- | Default DB URL matches IHP's. Real deployments set DATABASE_URL.
 defaultDbUrl :: String

@@ -50,11 +50,26 @@ instance View EditView where
           </form>
         </div>
       </div>
+
+      <div class="card mt-4">
+        <div class="card-header">PTZ probe</div>
+        <div class="card-body">
+          <p class="text-sm muted mb-4">
+            Discover the camera's ONVIF PTZ service and media profile
+            token; enables PTZ when found.
+          </p>
+          <form method="POST" action={probePtzUrl}>
+            <button class="btn" type="submit">Probe PTZ</button>
+          </form>
+        </div>
+      </div>
     |]
     where
       cid = tshow (camera |> get #id)
       showUrl = "/ShowCamera?cameraId=" <> cid
       probeUrl = "/ProbeCamera?cameraId=" <> cid
+      probePtzUrl = "/ProbePtzCamera?cameraId=" <> cid
+      presetsUrl = "/PtzPresets?ptzCameraId=" <> cid
 
       renderForm camera mOpts =
         [hsx|
@@ -118,6 +133,24 @@ instance View EditView where
 
                 <div class="subtitle mt-4">Audio</div>
                 {audioSection camera.audioEncoding camera.audioBitrateKbps camera.audioSampleRateKhz (mOpts >>= \o -> o.foAudio)}
+              </div>
+            </div>
+
+            <div class="card mt-4">
+              <div class="card-header">PTZ (manual control + presets)</div>
+              <div class="card-body">
+                <p class="text-sm muted mb-4">
+                  Requires an ONVIF PTZ service on the camera (mgmt_proto=onvif,
+                  management port set, credentials working). Use Probe PTZ to
+                  verify and fill the profile token.
+                  <a href={presetsUrl}>Manage presets →</a>
+                </p>
+                <div class="field">
+                  <label><input type="checkbox" name="ptzEnabled" checked={camera.ptzEnabled} /> PTZ enabled (joystick on live view, preset return-home)</label>
+                  <label><input type="checkbox" name="ptzViewerControl" checked={camera.ptzViewerControl} /> allow non-admin viewers to control PTZ</label>
+                </div>
+                {textFieldFor "ptzProfileToken" "Media profile token" (fromMaybe "" camera.ptzProfileToken) "ONVIF profile the PTZ ops address (filled by Probe PTZ)"}
+                {intFieldFor "ptzIdleTimeoutS" "Idle timeout (s)" (Just camera.ptzIdleTimeoutS) "Return to home preset after this many seconds without PTZ input; 0 disables"}
               </div>
             </div>
 

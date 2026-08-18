@@ -27,6 +27,7 @@ module Hnvr.Web.OnvifSync
     desiredAudioCfg,
     pushCameraConfig,
     checkCameraDrift,
+    probePtz,
     FormOptions (..),
     fetchFormOptions,
   )
@@ -38,6 +39,7 @@ import qualified Data.Text as T
 import Generated.Types
 import Hnvr.Core.Dvrip (SimplifyEncode (..), applyDesiredVideo, dvripVideoDrift)
 import Hnvr.Core.Onvif
+import Hnvr.Core.Ptz (PtzPosition)
 import Hnvr.Dvrip.Client (DvripCreds (..), DvripError (..), dvripGetEncode, dvripSetEncode)
 import Hnvr.Onvif.Client
 import qualified Network.HTTP.Client as HC
@@ -282,6 +284,32 @@ checkCameraDrift mgr target cam = case target.otProto of
 
 labelDrift :: Text -> [DriftItem] -> [DriftItem]
 labelDrift prefix = map (\d -> d {diConfig = prefix <> ":" <> diConfig d})
+
+-- | PTZ probe (Phase 5): discover the PTZ service XAddr, resolve the
+-- first media profile token, and read the current position. 'Right'
+-- carries @(profileToken, Maybe position)@ — 'Nothing' position means
+-- the camera reports a nil PTZStatus (no PTZ hardware; the Hik-OEM
+-- turrets accept all PTZ ops as no-ops, which only the nil status
+-- reveals).
+probePtz :: HC.Manager -> OnvifTarget -> IO (Either Text (Text, Maybe PtzPosition))
+probePtz _ target | target.otProto == ProtoDvrip = pure (Left "ptz requires mgmt_proto=onvif")
+probePtz mgr target = do
+  e <- discoverPtzXAddr mgr target.otCreds target.otHost target.otPort
+  case e of
+    Left err -> pure (Left (errText err))
+    Right Nothing -> pure (Left "camera advertises no PTZ service (fixed camera)")
+    Right (Just ptzXaddr) -> do
+      eMedia <- discoverMediaXAddr mgr target.otCreds target.otHost target.otPort
+      case eMedia of
+        Left err -> pure (Left (errText err))
+        Right media -> do
+          eToks <- getProfileTokens mgr target.otCreds media
+          case eToks of
+            Left err -> pure (Left (errText err))
+            Right [] -> pure (Left "camera reports no media profiles")
+            Right ((tok, _) : _) -> do
+              ePos <- ptzGetStatus mgr target.otCreds ptzXaddr tok
+              pure (Right (tok, fromRight Nothing ePos))
 
 errText :: OnvifError -> Text
 errText (OnvifTransportError t) = "transport: " <> t

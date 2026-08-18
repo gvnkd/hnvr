@@ -33,6 +33,9 @@ instance View ShowView where
           <div class="subtitle">{camera.name} · {codecBadge camera.codec}</div>
         </div>
         <div class="actions">
+          <form method="POST" action={toggleUrl} style="display:contents">
+            <button type="submit" class="btn">{toggleLabel}</button>
+          </form>
           <a class="btn" href={editUrl}>Edit</a>
           <a class="btn" href={debugUrl}>Debug stream</a>
           <a class="btn" href={newRuleUrl}>New rule</a>
@@ -103,6 +106,8 @@ instance View ShowView where
       archiveUrl = "/PlayerArchive?cameraId=" <> cid
       assignUrl = "/AssignCamera?cameraId=" <> cid
       testCryptoUrl = "/TestCryptoCamera?cameraId=" <> cid
+      toggleUrl = "/ToggleCameraEnabled?cameraId=" <> cid
+      toggleLabel = if camera.enabled then "Disable camera" else "Enable camera"
 
       kvRow k v =
         [hsx|

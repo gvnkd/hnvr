@@ -1,4 +1,5 @@
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -17,24 +18,38 @@ module Hnvr.Web.CommandTypes
     SnapshotRequest (..),
     projectCamera,
     projectCameraWithRules,
+    ptzSnapshotFor,
+    republishAssign,
+    republishAssignAlways,
+    publishAssignTo,
     cameraIdOf,
   )
 where
 
+import Control.Monad (forM_)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.UUID (UUID)
+import qualified Data.UUID as UUID
 import Generated.Types
 import Hnvr.Core.CameraSnapshot
   ( CameraSnapshot (..),
+    PtzSnapshot (..),
     RuleSnapshot (..),
     Transport,
     transportFromText,
   )
 import Hnvr.Core.Id (CameraId (..))
+import Hnvr.Core.Onvif (hostFromRtspUrl)
+import Hnvr.Nats.Bus (Bus)
+import qualified Hnvr.Nats.Bus as Bus
+import Hnvr.Nats.Subjects (commandAssign)
+import IHP.Fetch (fetch, fetchOneOrNothing)
 import IHP.HaskellSupport (get, (|>))
-import IHP.ModelSupport (Id' (Id))
+import IHP.ModelSupport (Id' (Id), ModelContext)
+import IHP.QueryBuilder (filterWhere, query)
+import Web.Controller.Support.Crypto (decryptPassword)
 
 -- | Wire payload for @hnvr.commands.assign.<slug>@.
 --
@@ -118,34 +133,145 @@ instance FromJSON SnapshotRequest where
 --   * the @rtsp_transport@ column has a value we don't recognise
 --     (we log + treat as disabled rather than spawning a worker that
 --     will immediately fail at ffmpeg SETUP).
-projectCamera :: Camera -> Maybe CameraSnapshot
+--
+-- IO since Phase 5: the PTZ projection decrypts the camera password.
+projectCamera :: (?modelContext :: ModelContext) => Camera -> IO (Maybe CameraSnapshot)
 projectCamera = projectCameraWithRules []
 
 -- | 'projectCamera' with the camera's rules attached (Phase 4: rule
 -- CRUD republishes the assign payload so the owning host restarts the
 -- analysis pair with fresh rules).
-projectCameraWithRules :: [RuleSnapshot] -> Camera -> Maybe CameraSnapshot
+projectCameraWithRules :: (?modelContext :: ModelContext) => [RuleSnapshot] -> Camera -> IO (Maybe CameraSnapshot)
 projectCameraWithRules rules cam =
   if not cam.enabled
-    then Nothing
+    then pure Nothing
     else case transportFromText cam.rtspTransport of
-      Nothing -> Nothing
-      Just tr ->
-        Just
-          CameraSnapshot
-            { csId = cameraIdOf cam,
-              csSlug = cam.slug,
-              csRtspUrl = cam.rtspUrl,
-              csTransport = tr,
-              csRecordAudio = cam.recordAudio,
-              csRtspSubUrl = cam.rtspSubUrl,
-              csUseSubstream = cam.useSubstreamForAnalysis,
-              csSubWidth = fromIntegral <$> cam.substreamWidth,
-              csSubHeight = fromIntegral <$> cam.substreamHeight,
-              csAnalysisFps = fromIntegral cam.analysisFps,
-              csModelName = cam.modelName,
-              csRules = rules
-            }
+      Nothing -> pure Nothing
+      Just tr -> do
+        ptz <- ptzSnapshotFor cam
+        pure $
+          Just
+            CameraSnapshot
+              { csId = cameraIdOf cam,
+                csSlug = cam.slug,
+                csRtspUrl = cam.rtspUrl,
+                csTransport = tr,
+                csRecordAudio = cam.recordAudio,
+                csRtspSubUrl = cam.rtspSubUrl,
+                csUseSubstream = cam.useSubstreamForAnalysis,
+                csSubWidth = fromIntegral <$> cam.substreamWidth,
+                csSubHeight = fromIntegral <$> cam.substreamHeight,
+                csAnalysisFps = fromIntegral cam.analysisFps,
+                csModelName = cam.modelName,
+                csRules = rules,
+                csPtz = ptz
+              }
+
+-- | Build the PTZ snapshot for a camera row (Phase 5). 'Nothing'
+-- unless @ptz_enabled@ AND every required piece is present:
+--   * management protocol is ONVIF (DVRIP rows can't PTZ via ONVIF),
+--   * host (falls back to the RTSP URL authority, same as
+--     'Hnvr.Web.OnvifSync.targetForCamera'),
+--   * @onvif_port@, @username@, decryptable password, and a probed
+--     @ptz_profile_token@.
+-- The home preset's ONVIF token is resolved with one query when
+-- @ptz_home_preset_id@ is set.
+ptzSnapshotFor :: (?modelContext :: ModelContext) => Camera -> IO (Maybe PtzSnapshot)
+ptzSnapshotFor cam
+  | not cam.ptzEnabled = pure Nothing
+  | cam.mgmtProto /= "onvif" = pure Nothing
+  | otherwise = case (mHost, cam.onvifPort, nonEmpty cam.username, cam.ptzProfileToken) of
+      (Just host', Just port', Just user, Just profileToken) -> do
+        mPw <- decryptPassword cam.passwordEnc cam.passwordNonce
+        case mPw of
+          Nothing -> pure Nothing
+          Just pw -> do
+            homeToken <- homePresetToken
+            pure $
+              Just
+                PtzSnapshot
+                  { psHost = host',
+                    psOnvifPort = fromIntegral port',
+                    psUsername = user,
+                    psPassword = pw,
+                    psProfileToken = profileToken,
+                    psHomePresetToken = homeToken,
+                    psIdleTimeoutS = fromIntegral cam.ptzIdleTimeoutS
+                  }
+      _ -> pure Nothing
+  where
+    mHost = case cam.host of
+      Just h | not (T.null h) -> Just h
+      _ -> hostFromRtspUrl cam.rtspUrl
+    nonEmpty (Just t) | not (T.null t) = Just t
+    nonEmpty _ = Nothing
+    homePresetToken = case cam.ptzHomePresetId of
+      Nothing -> pure Nothing
+      Just pid -> do
+        mPreset <- query @PtzPreset |> filterWhere (#id, pid) |> fetchOneOrNothing
+        pure (mPreset >>= (.onvifToken))
+
+-- | Republish the camera's assign payload (full projection: rules +
+-- PTZ) so the owning host restarts its worker pair with fresh config.
+-- Shared by rule CRUD (Phase 4) and PTZ preset/config changes
+-- (Phase 5). No-op when the camera is unassigned; the caller checks
+-- bus availability (boot snapshot covers the next restart either way).
+republishAssign :: (?modelContext :: ModelContext) => Bus -> Camera -> IO ()
+republishAssign bus camera =
+  forM_ camera.assignedHost $ \host -> do
+    rules <- query @Rule |> filterWhere (#cameraId, camUuid) |> filterWhere (#enabled, True) |> fetch
+    mSnap <- projectCameraWithRules (map ruleSnapOf rules) camera
+    forM_ mSnap $ \snap -> publishAssignTo bus camera host (Just snap)
+  where
+    camUuid = case cameraIdOf camera of CameraId u -> u
+
+-- | 'republishAssign' variant for enable/disable toggles: publishes
+-- even when the camera is DISABLED, with @apCamera = Nothing@ — the
+-- node's ConfigWatcher reads that as a stop directive. Plain
+-- 'republishAssign' would silently skip the publish and the node
+-- would keep recording a disabled camera.
+republishAssignAlways :: (?modelContext :: ModelContext) => Bus -> Camera -> IO ()
+republishAssignAlways bus camera =
+  forM_ camera.assignedHost $ \host -> do
+    rules <- query @Rule |> filterWhere (#cameraId, camUuid) |> filterWhere (#enabled, True) |> fetch
+    mSnap <- projectCameraWithRules (map ruleSnapOf rules) camera
+    publishAssignTo bus camera host mSnap
+  where
+    camUuid = case cameraIdOf camera of CameraId u -> u
+
+publishAssignTo :: Bus -> Camera -> Text -> Maybe CameraSnapshot -> IO ()
+publishAssignTo bus camera host mSnap =
+  Bus.publishJson bus (commandAssign camera.slug) $
+    AssignPayload
+      { apSlug = camera.slug,
+        apHost = host,
+        apCameraId = camUuid,
+        apCamera = mSnap
+      }
+  where
+    camUuid = case cameraIdOf camera of CameraId u -> u
+
+ruleSnapOf :: Rule -> RuleSnapshot
+ruleSnapOf rule =
+  RuleSnapshot
+    { rsId = ruleIdText rule,
+      rsKind = kindText rule.kind,
+      rsGeometry = rule.geometry,
+      rsClasses = rule.classes,
+      rsCooldownMs = rule.cooldownMs,
+      rsClipPrerollSec = rule.clipPrerollSec,
+      rsClipPostrollSec = rule.clipPostrollSec,
+      rsClipRetentionHours = rule.clipRetentionHours
+    }
+  where
+    ruleIdText r = case r |> get #id of Id u -> UUID.toText u
+
+kindText :: RuleKind -> Text
+kindText LineCross = "line_cross"
+kindText RuleKindZoneEnter = "zone_enter"
+kindText RuleKindZoneExit = "zone_exit"
+kindText RuleKindZoneInside = "zone_inside"
+kindText RuleKindZoneMotion = "zone_motion"
 
 -- | Unwrap the IHP @Id' "cameras"@ newtype into the underlying 'UUID'
 -- so it can travel over the wire as a plain JSON string. Pattern match

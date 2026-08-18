@@ -10,11 +10,11 @@ library
     Hnvr.Dvrip.Client
     Hnvr.Onvif.Client
     Hnvr.Ptz.Controller
-    Hnvr.Ptz.Driver
     Hnvr.Ptz.Onvif
 
   build-depends:
     , aeson
+    , async
     , base               >=4.18 && <5
     , base64-bytestring
     , bytestring
@@ -26,6 +26,7 @@ library
     , http-types
     , memory
     , network
+    , stm
     , text
     , time
     , xml-conduit
@@ -40,6 +41,7 @@ test-suite hnvr-ptz-test
   build-depends:
     , base
     , bytestring
+    , containers
     , hnvr-core
     , hnvr-ptz
     , tasty

@@ -49,7 +49,17 @@ module Generated.Statements (
     module Generated.Statements.CreateAuditLog,
     module Generated.Statements.UpdateAuditLog,
     module Generated.Statements.FetchAuditLog,
-    module Generated.Statements.CreateManyAuditLog
+    module Generated.Statements.CreateManyAuditLog,
+    module Generated.Statements.RowDecoderPtzPreset,
+    module Generated.Statements.CreatePtzPreset,
+    module Generated.Statements.UpdatePtzPreset,
+    module Generated.Statements.FetchPtzPreset,
+    module Generated.Statements.CreateManyPtzPreset,
+    module Generated.Statements.RowDecoderPtzAuditLog,
+    module Generated.Statements.CreatePtzAuditLog,
+    module Generated.Statements.UpdatePtzAuditLog,
+    module Generated.Statements.FetchPtzAuditLog,
+    module Generated.Statements.CreateManyPtzAuditLog
 ) where
 import qualified Generated.Statements.RowDecoderHost
 import qualified Generated.Statements.CreateHost
@@ -101,4 +111,14 @@ import qualified Generated.Statements.CreateAuditLog
 import qualified Generated.Statements.UpdateAuditLog
 import qualified Generated.Statements.FetchAuditLog
 import qualified Generated.Statements.CreateManyAuditLog
+import qualified Generated.Statements.RowDecoderPtzPreset
+import qualified Generated.Statements.CreatePtzPreset
+import qualified Generated.Statements.UpdatePtzPreset
+import qualified Generated.Statements.FetchPtzPreset
+import qualified Generated.Statements.CreateManyPtzPreset
+import qualified Generated.Statements.RowDecoderPtzAuditLog
+import qualified Generated.Statements.CreatePtzAuditLog
+import qualified Generated.Statements.UpdatePtzAuditLog
+import qualified Generated.Statements.FetchPtzAuditLog
+import qualified Generated.Statements.CreateManyPtzAuditLog
 

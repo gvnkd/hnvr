@@ -52,6 +52,8 @@ import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
 import Hnvr.Web.Metrics (ensureMetrics, startGpuPoller, startMetricsServer)
 import Hnvr.Web.OnvifSyncer (startOnvifSyncer)
 import Hnvr.Web.PendingPurge (startPendingPurgeSweeper)
+import Hnvr.Web.PtzAuditWriter (startPtzAuditWriter)
+import Hnvr.Web.PtzStatusCache (startPtzStatusCache)
 import Hnvr.Web.RetentionSweeper (startRetentionSweeper)
 import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
 import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
@@ -176,6 +178,10 @@ connectNatsAndStartEventWriter = do
         -- Leader-only: respond to node snapshot requests so workers
         -- can bootstrap their initial camera set on boot.
         gated "HNVR_DISABLE_SNAPSHOTRESPONDER" (startSnapshotResponder bus)
+        -- Phase 5: PTZ status cache (UI indicator) + audit writer
+        -- (node-executed commands → ptz_audit_log rows).
+        gated "HNVR_DISABLE_PTZSTATUSCACHE" (startPtzStatusCache bus)
+        gated "HNVR_DISABLE_PTZAUDIT" (startPtzAuditWriter bus)
         -- Leader also runs the full node role (CaptureSupervisor +
         -- ConfigWatcher + HealthReporter) per @01-architecture.md:21@
         -- — "leader = all of node + leader roles".

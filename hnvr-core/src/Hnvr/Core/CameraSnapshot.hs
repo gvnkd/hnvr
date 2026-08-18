@@ -19,6 +19,7 @@
 module Hnvr.Core.CameraSnapshot
   ( CameraSnapshot (..),
     CameraSnapshotBatch (..),
+    PtzSnapshot (..),
     RuleSnapshot (..),
     Transport (..),
     transportToText,
@@ -26,7 +27,7 @@ module Hnvr.Core.CameraSnapshot
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
 import Data.List (intercalate)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -104,7 +105,47 @@ data CameraSnapshot = CameraSnapshot
     csModelName :: !Text,
     -- | Enabled rules on this camera (Phase 4). Projected into
     -- 'Hnvr.Cv.Rules.Rule' by the receiving host.
-    csRules :: ![RuleSnapshot]
+    csRules :: ![RuleSnapshot],
+    -- | PTZ config (Phase 5). 'Just' when @ptz_enabled@ and the row has
+    -- everything a 'Hnvr.Ptz.Controller' needs (host, onvif_port,
+    -- credentials, profile token). @psPassword@ is decrypted leader-side
+    -- and crosses NATS in plaintext — same exposure class as
+    -- @csRtspUrl@, which embeds the same credentials.
+    csPtz :: !(Maybe PtzSnapshot)
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON CameraSnapshot
+
+-- | Hand-written decoder (not derived): @ptz@ defaults to 'Nothing' so
+-- a new node tolerates a pre-Phase-5 leader's payloads (deploy order
+-- independence).
+instance FromJSON CameraSnapshot where
+  parseJSON = withObject "CameraSnapshot" $ \o ->
+    CameraSnapshot
+      <$> o .: "csId"
+      <*> o .: "csSlug"
+      <*> o .: "csRtspUrl"
+      <*> o .: "csTransport"
+      <*> o .: "csRecordAudio"
+      <*> o .: "csRtspSubUrl"
+      <*> o .: "csUseSubstream"
+      <*> o .: "csSubWidth"
+      <*> o .: "csSubHeight"
+      <*> o .: "csAnalysisFps"
+      <*> o .: "csModelName"
+      <*> o .: "csRules"
+      <*> o .:? "csPtz"
+
+-- | PTZ config for one camera, as sent to the owning host.
+data PtzSnapshot = PtzSnapshot
+  { psHost :: !Text,
+    psOnvifPort :: !Int,
+    psUsername :: !Text,
+    psPassword :: !Text,
+    psProfileToken :: !Text,
+    psHomePresetToken :: !(Maybe Text),
+    psIdleTimeoutS :: !Int
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

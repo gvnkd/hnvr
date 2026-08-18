@@ -425,15 +425,29 @@
 
   /* ── Fullscreen live overlay (FLIP expand from card) ────────── */
   var liveSession = null;
+  var livePtz = null;
   function openLive(card) {
     var overlay = document.getElementById("live-overlay");
     if (!overlay) return;
     var slug = card.getAttribute("data-slug");
+    var camId = card.getAttribute("data-cam-id");
     var video = overlay.querySelector("video");
     var statusEl = overlay.querySelector(".live-overlay-status-text");
     var ledEl = overlay.querySelector(".led");
     var slugEl = overlay.querySelector(".live-overlay-head .slug");
     if (slugEl) slugEl.textContent = slug;
+
+    /* PTZ panel: clone the camera's template into the overlay slot
+       (template only exists for ptz_enabled cameras). */
+    var ptzSlot = overlay.querySelector(".live-overlay-ptz");
+    if (ptzSlot) {
+      ptzSlot.innerHTML = "";
+      var tpl = document.querySelector('template[data-ptz-for="' + slug + '"]');
+      if (tpl && camId && HNVR.ptz) {
+        ptzSlot.appendChild(tpl.content.cloneNode(true));
+        livePtz = HNVR.ptz(camId, ptzSlot);
+      }
+    }
 
     overlay.hidden = false;
     requestAnimationFrame(function () {
@@ -487,6 +501,12 @@
       liveSession.close();
       liveSession = null;
     }
+    if (livePtz) {
+      livePtz.close();
+      livePtz = null;
+    }
+    var ptzSlot = overlay.querySelector(".live-overlay-ptz");
+    if (ptzSlot) ptzSlot.innerHTML = "";
     var video = overlay.querySelector("video");
     if (video) video.srcObject = null;
     setTimeout(function () {

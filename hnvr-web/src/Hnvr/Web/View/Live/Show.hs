@@ -18,11 +18,13 @@ import Generated.Types
 import Hnvr.Core.CameraStatus (CameraStatus (..))
 import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
+import Hnvr.Web.View.PtzPanel (ptzPanel)
 import IHP.ViewPrelude
 
 data ShowView = ShowView
   { camera :: Camera,
     hosts :: [Host],
+    presets :: [PtzPreset],
     now :: UTCTime
   }
 
@@ -60,6 +62,8 @@ instance View ShowView where
           <div class="text-sm muted">loading…</div>
         </div>
       </div>
+      {ptzPanel'}
+      {ptzScriptTag}
       {scriptTag}
     |]
     where
@@ -85,6 +89,18 @@ instance View ShowView where
       -- entire <script>…</script> element in Haskell and inject it as
       -- a single body-level splice. See pitfall #63.
       scriptTag = preEscapedTextValue ("<script>" <> whepJs camera <> feedJs camera <> "</script>" :: Text)
+      ptzScriptTag =
+        if camera.ptzEnabled
+          then preEscapedTextValue ("<script src=\"/static/ptz.js\"></script><script>HNVR.ptz('" <> tshow (camera |> get #id) <> "');</script>" :: Text)
+          else mempty
+
+      -- PTZ control panel (Phase 5): shared markup from
+      -- 'Hnvr.Web.View.PtzPanel' (also used by the dashboard overlay);
+      -- hidden unless ptz_enabled, behaviour in /static/ptz.js.
+      ptzPanel' =
+        if not camera.ptzEnabled
+          then mempty
+          else [hsx|<div class="mt-4">{ptzPanel camera presets}</div>|]
 
 -- | Live event feed poller: refreshes the panel from the fragment
 -- endpoint every 5 s (design 05 §"Live event feed"; a fetch poller

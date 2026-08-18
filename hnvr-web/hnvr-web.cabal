@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:          hnvr-web
-version:       0.5.2.0
+version:       0.6.0.0
 synopsis:
   HNVR leader (IHP web + event writer + MediaMTX sync) and node binaries
 
@@ -18,6 +18,8 @@ library
     Generated.ActualTypes.EventClipEvent
     Generated.ActualTypes.Host
     Generated.ActualTypes.PrimaryKeys
+    Generated.ActualTypes.PtzAuditLog
+    Generated.ActualTypes.PtzPreset
     Generated.ActualTypes.Rule
     Generated.ActualTypes.Segment
     Generated.ActualTypes.User
@@ -36,6 +38,10 @@ library
     Generated.EventInclude
     Generated.Host
     Generated.HostInclude
+    Generated.PtzAuditLog
+    Generated.PtzAuditLogInclude
+    Generated.PtzPreset
+    Generated.PtzPresetInclude
     Generated.Rule
     Generated.RuleInclude
     Generated.Segment
@@ -55,9 +61,13 @@ library
     Generated.Statements.CreateManyEventClip
     Generated.Statements.CreateManyEventClipEvent
     Generated.Statements.CreateManyHost
+    Generated.Statements.CreateManyPtzAuditLog
+    Generated.Statements.CreateManyPtzPreset
     Generated.Statements.CreateManyRule
     Generated.Statements.CreateManySegment
     Generated.Statements.CreateManyUser
+    Generated.Statements.CreatePtzAuditLog
+    Generated.Statements.CreatePtzPreset
     Generated.Statements.CreateRule
     Generated.Statements.CreateSegment
     Generated.Statements.CreateUser
@@ -68,6 +78,8 @@ library
     Generated.Statements.FetchEventClip
     Generated.Statements.FetchEventClipEvent
     Generated.Statements.FetchHost
+    Generated.Statements.FetchPtzAuditLog
+    Generated.Statements.FetchPtzPreset
     Generated.Statements.FetchRule
     Generated.Statements.FetchSegment
     Generated.Statements.FetchUser
@@ -78,6 +90,8 @@ library
     Generated.Statements.RowDecoderEventClip
     Generated.Statements.RowDecoderEventClipEvent
     Generated.Statements.RowDecoderHost
+    Generated.Statements.RowDecoderPtzAuditLog
+    Generated.Statements.RowDecoderPtzPreset
     Generated.Statements.RowDecoderRule
     Generated.Statements.RowDecoderSegment
     Generated.Statements.RowDecoderUser
@@ -88,6 +102,8 @@ library
     Generated.Statements.UpdateEventClip
     Generated.Statements.UpdateEventClipEvent
     Generated.Statements.UpdateHost
+    Generated.Statements.UpdatePtzAuditLog
+    Generated.Statements.UpdatePtzPreset
     Generated.Statements.UpdateRule
     Generated.Statements.UpdateSegment
     Generated.Statements.UpdateUser
@@ -116,6 +132,8 @@ library
     Hnvr.Web.OnvifSync
     Hnvr.Web.OnvifSyncer
     Hnvr.Web.PendingPurge
+    Hnvr.Web.PtzAuditWriter
+    Hnvr.Web.PtzStatusCache
     Hnvr.Web.RetentionSweeper
     Hnvr.Web.SchemaMigration
     Hnvr.Web.SnapshotResponder
@@ -135,6 +153,8 @@ library
     Hnvr.Web.View.Hosts.Index
     Hnvr.Web.View.Layout
     Hnvr.Web.View.Live.Show
+    Hnvr.Web.View.PtzPanel
+    Hnvr.Web.View.PtzPresets.Index
     Hnvr.Web.View.Rules.Edit
     Hnvr.Web.View.Rules.Index
     Hnvr.Web.View.Rules.New
@@ -151,6 +171,8 @@ library
     Web.Controller.Events
     Web.Controller.Hosts
     Web.Controller.Live
+    Web.Controller.Ptz
+    Web.Controller.PtzPresets
     Web.Controller.Rules
     Web.Controller.Sessions
     Web.Controller.Stats

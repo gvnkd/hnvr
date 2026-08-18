@@ -116,7 +116,11 @@ newMetrics store = do
         mRecordInference = \ep secs ->
           dist ("hnvr_inference_seconds{ep=\"" <> ep <> "\"}") >>= \d -> Dist.add d secs,
         mSubstreamFallback = \slug ->
-          counter ("hnvr_substream_fallback_total{camera=\"" <> slug <> "\"}") >>= Counter.inc
+          counter ("hnvr_substream_fallback_total{camera=\"" <> slug <> "\"}") >>= Counter.inc,
+        mPtzCommand = \slug cmd source ->
+          counter ("hnvr_ptz_commands_total{camera=\"" <> slug <> "\",command=\"" <> cmd <> "\",source=\"" <> source <> "\"}") >>= Counter.inc,
+        mPtzCommandSeconds = \slug secs ->
+          dist ("hnvr_ptz_command_seconds{camera=\"" <> slug <> "\"}") >>= \d -> Dist.add d secs
       }
 
 -- | Serve @GET \/metrics@ in Prometheus text format on

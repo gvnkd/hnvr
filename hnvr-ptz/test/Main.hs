@@ -3,7 +3,9 @@
 module Main (main) where
 
 import qualified Data.ByteString as BS
+import qualified Data.Map.Strict as Map
 import Hnvr.Core.Onvif
+import Hnvr.Core.Ptz
 import Hnvr.Onvif.Client
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -101,5 +103,44 @@ tests =
                 vcBitrateKbps main_ @?= 4096
                 (vcWidth sub, vcHeight sub) @?= (640, 360)
                 vcEncoding main_ @?= VEncH264
+        ],
+      testGroup
+        "PTZ (Phase 5)"
+        [ testCase "parseServiceXAddrs: 196 advertises ptz + media" $ do
+            bs <- BS.readFile "test/fixtures/capabilities-196.xml"
+            case parseServiceXAddrs bs of
+              Left e -> assertFailure (show e)
+              Right caps -> do
+                Map.lookup "ptz" caps @?= Just "http://192.168.0.196:80/onvif/ptz"
+                Map.lookup "media" caps @?= Just "http://192.168.0.196:80/onvif/media",
+          testCase "parseServiceXAddrs: 198 (Majestic) has no ptz" $ do
+            bs <- BS.readFile "test/fixtures/capabilities-198.xml"
+            case parseServiceXAddrs bs of
+              Left e -> assertFailure (show e)
+              Right caps -> Map.lookup "ptz" caps @?= Nothing,
+          testCase "parsePtzPresets: 196 reports 255 numbered slots" $ do
+            bs <- BS.readFile "test/fixtures/ptz-presets-196.xml"
+            case parsePtzPresets bs of
+              Left e -> assertFailure (show e)
+              Right ps -> do
+                length ps @?= 255
+                head ps @?= OnvifPreset (PresetToken "1") "1",
+          testCase "parsePtzStatus: 196 reports a real position" $ do
+            bs <- BS.readFile "test/fixtures/ptz-status-196.xml"
+            case parsePtzStatus bs of
+              Left e -> assertFailure (show e)
+              Right mPos -> mPos @?= Just (PtzPosition 0 0 0),
+          testCase "parsePtzStatus: 197 xsi:nil -> Nothing (no PTZ hardware)" $ do
+            bs <- BS.readFile "test/fixtures/ptz-status-197-nil.xml"
+            case parsePtzStatus bs of
+              Left e -> assertFailure (show e)
+              Right mPos -> mPos @?= Nothing,
+          testCase "parseProfileTokens: 198 OpenIPC tr2 profiles" $ do
+            bs <- BS.readFile "test/fixtures/profiles-198-openipc.xml"
+            case parseProfileTokens bs of
+              Left e -> assertFailure (show e)
+              Right ts -> do
+                length ts @?= 2
+                fst (head ts) @?= "PROFILE_000"
         ]
     ]

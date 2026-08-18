@@ -16,6 +16,7 @@ import Data.Time.Clock (getCurrentTime)
 import Generated.Types
 import Hnvr.Web.View.Live.Show
 import IHP.ControllerPrelude
+import IHP.ModelSupport (Id' (Id))
 
 newtype LiveController
   = ShowLiveAction {cameraId :: Id Camera}
@@ -27,5 +28,12 @@ instance Controller LiveController where
   action ShowLiveAction {cameraId} = do
     camera <- fetch cameraId
     hosts <- query @Host |> fetch
+    -- PTZ panel preset dropdown (Phase 5); empty when PTZ is off.
+    presets <-
+      if camera.ptzEnabled
+        then query @PtzPreset |> filterWhere (#cameraId, camUuid camera) |> orderBy #name |> fetch
+        else pure []
     now <- liftIO getCurrentTime
     render ShowView {..}
+    where
+      camUuid cam = case cam |> get #id of Id u -> u

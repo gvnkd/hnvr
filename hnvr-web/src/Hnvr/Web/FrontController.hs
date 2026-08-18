@@ -19,6 +19,8 @@ import Web.Controller.EventClips (EventClipsController (..))
 import Web.Controller.Events (EventsController (..))
 import Web.Controller.Hosts (HostsController (..))
 import Web.Controller.Live (LiveController (..))
+import Web.Controller.Ptz (PtzController (..))
+import Web.Controller.PtzPresets (PtzPresetsController (..))
 import Web.Controller.Rules (RulesController (..))
 import Web.Controller.Sessions (SessionsController (..))
 import Web.Controller.Stats (StatsController (..))
@@ -37,6 +39,8 @@ instance FrontController RootApplication where
       parseRoute @EventsController,
       parseRoute @EventClipsController,
       parseRoute @RulesController,
+      parseRoute @PtzController,
+      parseRoute @PtzPresetsController,
       parseRoute @StatsController,
       parseRoute @AuditLogController
     ]

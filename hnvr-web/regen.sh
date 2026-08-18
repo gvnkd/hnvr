@@ -21,4 +21,10 @@ for f in gen/Generated/Statements/Create*.hs gen/Generated/Statements/Update*.hs
   sed -i 's|Encoders.param (Encoders.nullable Mapping.encoder)|Encoders.param (Encoders.nonNullable Mapping.encoder)|g' "$f"
 done
 
+# …but cameras.ptz_home_preset_id IS a Maybe (forward FK to ptz_presets)
+# — the blanket PK patch above must not touch it.
+for f in gen/Generated/Statements/CreateCamera.hs gen/Generated/Statements/CreateManyCamera.hs gen/Generated/Statements/UpdateCamera.hs; do
+  sed -i 's|(.ptzHomePresetId) >$< Encoders.param (Encoders.nonNullable Mapping.encoder)|(.ptzHomePresetId) >$< Encoders.param (Encoders.nullable Mapping.encoder)|g' "$f"
+done
+
 echo "[regen] done. $(find gen -name '*.hs' | wc -l) files in gen/"

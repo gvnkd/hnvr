@@ -24,6 +24,7 @@ library
     Hnvr.Core.Onvif
     Hnvr.Core.Playlist
     Hnvr.Core.Prelude
+    Hnvr.Core.Ptz
     Hnvr.Core.Recording
     Hnvr.Core.Segment
     Hnvr.Core.Time
@@ -76,6 +77,7 @@ test-suite hnvr-core-test
     Hnvr.Core.MetricsSpec
     Hnvr.Core.OnvifSpec
     Hnvr.Core.PlaylistSpec
+    Hnvr.Core.PtzSpec
     Hnvr.Core.RecordingSpec
     Hnvr.Core.SegmentSpec
     Hnvr.Core.TimeSpec

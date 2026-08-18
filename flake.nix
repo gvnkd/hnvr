@@ -129,6 +129,7 @@
               mkdir -p $out
               cp static/app.css $out/app.css
               cp static/app.js $out/app.js
+              cp static/ptz.js $out/ptz.js
             '';
           };
         in

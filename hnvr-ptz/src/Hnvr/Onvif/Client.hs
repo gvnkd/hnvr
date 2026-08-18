@@ -24,18 +24,32 @@ module Hnvr.Onvif.Client
   ( OnvifCreds (..),
     OnvifError (..),
     discoverMediaXAddr,
+    discoverPtzXAddr,
     getAudioConfigs,
     getAudioOptions,
     getVideoConfigs,
     getVideoOptions,
     setAudioConfig,
     setVideoConfig,
+    getProfileTokens,
+    ptzContinuousMove,
+    ptzStop,
+    ptzAbsoluteMove,
+    ptzGotoPreset,
+    ptzSetPreset,
+    ptzRemovePreset,
+    ptzGetPresets,
+    ptzGetStatus,
     parseAudioConfigs,
     parseAudioOptions,
     parseVideoConfigs,
     parseProfilesVideoConfigs,
     parseVideoOptions,
     parseServiceXAddrs,
+    parseProfileTokens,
+    parsePtzPresets,
+    parsePtzStatus,
+    parsePresetToken,
   )
 where
 
@@ -58,6 +72,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Hnvr.Core.Onvif
+import Hnvr.Core.Ptz (OnvifPreset (..), PresetName (..), PresetToken (..), PtzPosition (..), StopAxes (..), Velocity (..))
 import qualified Network.HTTP.Client as HC
 import qualified Network.HTTP.Types as HT
 import Text.Read (readMaybe)
@@ -91,6 +106,20 @@ discoverMediaXAddr mgr creds host port = do
     case Map.lookup "media" caps of
       Just x -> Right x
       Nothing -> Left (OnvifParseError "GetCapabilities: no Media XAddr")
+
+-- | Same discovery for the PTZ service. 'Nothing' (not an error) when
+-- the camera doesn't advertise PTZ at all (fixed cameras — e.g.
+-- Majestic/OpenIPC omits the section entirely; Hik-OEM turrets
+-- advertise it but accept ops as no-ops, which discovery can't see).
+discoverPtzXAddr ::
+  HC.Manager -> OnvifCreds -> Text -> Int -> IO (Either OnvifError (Maybe Text))
+discoverPtzXAddr mgr creds host port = do
+  let url = "http://" <> host <> ":" <> tshow port <> "/onvif/device_service"
+  res <- soapCall mgr creds url "tds" "GetCapabilities" "<tds:Category>All</tds:Category>"
+  pure $ do
+    body <- res
+    caps <- parseServiceXAddrs body
+    pure (Map.lookup "ptz" caps)
 
 -- | Parse Capabilities into a lowercased service-name → XAddr map
 -- ("media", "events", "ptz", "device", "imaging", "analytics", ...).
@@ -223,7 +252,185 @@ setVideoConfig mgr creds media v = do
         <> ns
         <> ":ForcePersistence>"
 
+-- | PTZ service ops (Phase 5) --------------------------------------------
+--
+-- All take the PTZ service XAddr (from 'discoverPtzXAddr') and a media
+-- profile token. Ops are fire-and-forget on the wire level: a 2xx
+-- response (possibly with an empty body) is success.
+
+-- | Media profile tokens (trt:GetProfiles, tr2 fallback for
+-- ver20-only firmware like Majestic). PTZ ops address a profile, and
+-- the token is what @cameras.ptz_profile_token@ stores. Returns
+-- @(token, name)@ pairs in camera order (first = main profile on
+-- every firmware we've met).
+getProfileTokens :: HC.Manager -> OnvifCreds -> Text -> IO (Either OnvifError [(Text, Text)])
+getProfileTokens mgr creds media = do
+  res <- soapCall mgr creds media "trt" "GetProfiles" ""
+  case res of
+    Left e
+      | isUnknownAction e ->
+          fmap (>>= parseProfileTokens) (soapCall mgr creds media "tr2" "GetProfiles" "")
+    _ -> pure (res >>= parseProfileTokens)
+
+parseProfileTokens :: ByteString -> Either OnvifError [(Text, Text)]
+parseProfileTokens bs = do
+  doc <- parseDoc bs
+  let profs = fromDocument doc $// laxElement "Profiles"
+  pure
+    [ (token, name)
+    | p <- profs,
+      Just token <- [attr "token" p],
+      let name = fromMaybe token (childText p "Name")
+    ]
+
+-- | ContinuousMove. @mTimeoutS@ maps to @tptz:Timeout@ (xs:duration
+-- @PTnS@); omitting it lets the camera apply its default move timeout.
+ptzContinuousMove ::
+  HC.Manager -> OnvifCreds -> Text -> Text -> Velocity -> Maybe Int -> IO (Either OnvifError ())
+ptzContinuousMove mgr creds ptz profile v mTimeoutS = do
+  let body =
+        "<tptz:ProfileToken>"
+          <> esc profile
+          <> "</tptz:ProfileToken>"
+          <> "<tptz:Velocity>"
+          <> "<tt:PanTilt x=\""
+          <> fshow (vPan v)
+          <> "\" y=\""
+          <> fshow (vTilt v)
+          <> "\"/>"
+          <> "<tt:Zoom x=\""
+          <> fshow (vZoom v)
+          <> "\"/>"
+          <> "</tptz:Velocity>"
+          <> maybe "" (\s -> "<tptz:Timeout>PT" <> tshow s <> "S</tptz:Timeout>") mTimeoutS
+  void' <$> soapCall mgr creds ptz "tptz" "ContinuousMove" body
+
+ptzStop :: HC.Manager -> OnvifCreds -> Text -> Text -> StopAxes -> IO (Either OnvifError ())
+ptzStop mgr creds ptz profile axes = do
+  let body =
+        "<tptz:ProfileToken>"
+          <> esc profile
+          <> "</tptz:ProfileToken>"
+          <> "<tptz:PanTilt>"
+          <> boolText (saPanTilt axes)
+          <> "</tptz:PanTilt>"
+          <> "<tptz:Zoom>"
+          <> boolText (saZoom axes)
+          <> "</tptz:Zoom>"
+  void' <$> soapCall mgr creds ptz "tptz" "Stop" body
+  where
+    boolText b = if b then "true" else "false"
+
+-- | AbsoluteMove (goto-preset and home-return fallback on cameras
+-- without presets). No Speed element — camera default.
+ptzAbsoluteMove :: HC.Manager -> OnvifCreds -> Text -> Text -> PtzPosition -> IO (Either OnvifError ())
+ptzAbsoluteMove mgr creds ptz profile pos = do
+  let body =
+        "<tptz:ProfileToken>"
+          <> esc profile
+          <> "</tptz:ProfileToken>"
+          <> "<tptz:Position>"
+          <> "<tt:PanTilt x=\""
+          <> fshow (ppPan pos)
+          <> "\" y=\""
+          <> fshow (ppTilt pos)
+          <> "\"/>"
+          <> "<tt:Zoom x=\""
+          <> fshow (ppZoom pos)
+          <> "\"/>"
+          <> "</tptz:Position>"
+  void' <$> soapCall mgr creds ptz "tptz" "AbsoluteMove" body
+
+ptzGotoPreset :: HC.Manager -> OnvifCreds -> Text -> Text -> PresetToken -> IO (Either OnvifError ())
+ptzGotoPreset mgr creds ptz profile (PresetToken token) = do
+  let body =
+        "<tptz:ProfileToken>"
+          <> esc profile
+          <> "</tptz:ProfileToken>"
+          <> "<tptz:PresetToken>"
+          <> esc token
+          <> "</tptz:PresetToken>"
+  void' <$> soapCall mgr creds ptz "tptz" "GotoPreset" body
+
+-- | SetPreset returns the camera-assigned token (SetPresetResponse →
+-- PresetToken), which the caller persists in @ptz_presets.onvif_token@.
+ptzSetPreset :: HC.Manager -> OnvifCreds -> Text -> Text -> PresetName -> IO (Either OnvifError PresetToken)
+ptzSetPreset mgr creds ptz profile (PresetName name) = do
+  let body =
+        "<tptz:ProfileToken>"
+          <> esc profile
+          <> "</tptz:ProfileToken>"
+          <> "<tptz:PresetName>"
+          <> esc name
+          <> "</tptz:PresetName>"
+  res <- soapCall mgr creds ptz "tptz" "SetPreset" body
+  pure (res >>= parsePresetToken)
+
+ptzRemovePreset :: HC.Manager -> OnvifCreds -> Text -> Text -> PresetToken -> IO (Either OnvifError ())
+ptzRemovePreset mgr creds ptz profile (PresetToken token) = do
+  let body =
+        "<tptz:ProfileToken>"
+          <> esc profile
+          <> "</tptz:ProfileToken>"
+          <> "<tptz:PresetToken>"
+          <> esc token
+          <> "</tptz:PresetToken>"
+  void' <$> soapCall mgr creds ptz "tptz" "RemovePreset" body
+
+ptzGetPresets :: HC.Manager -> OnvifCreds -> Text -> Text -> IO (Either OnvifError [OnvifPreset])
+ptzGetPresets mgr creds ptz profile = do
+  res <- soapCall mgr creds ptz "tptz" "GetPresets" ("<tptz:ProfileToken>" <> esc profile <> "</tptz:ProfileToken>")
+  pure (res >>= parsePtzPresets)
+
+-- | GetStatus. 'Nothing' when the camera reports a nil PTZStatus
+-- (xsi:nil — the fixed-camera answer; the service exists but there's
+-- no position to report).
+ptzGetStatus :: HC.Manager -> OnvifCreds -> Text -> Text -> IO (Either OnvifError (Maybe PtzPosition))
+ptzGetStatus mgr creds ptz profile = do
+  res <- soapCall mgr creds ptz "tptz" "GetStatus" ("<tptz:ProfileToken>" <> esc profile <> "</tptz:ProfileToken>")
+  pure (res >>= parsePtzStatus)
+
 -- | Response parsers -----------------------------------------------------
+parsePtzPresets :: ByteString -> Either OnvifError [OnvifPreset]
+parsePtzPresets bs = do
+  doc <- parseDoc bs
+  let presets = fromDocument doc $// laxElement "Preset"
+  pure
+    [ OnvifPreset (PresetToken token) name
+    | p <- presets,
+      Just token <- [attr "token" p],
+      let name = fromMaybe token (childText p "Name")
+    ]
+
+-- | PTZStatus → position. @xsi:nil="true"@ (fixed camera) → 'Nothing'.
+-- Missing/uncoercible axes default to 0 — a partially-answered status
+-- is still a position report, not a parse failure.
+parsePtzStatus :: ByteString -> Either OnvifError (Maybe PtzPosition)
+parsePtzStatus bs = do
+  doc <- parseDoc bs
+  case fromDocument doc $// laxElement "PTZStatus" of
+    [] -> Left (OnvifParseError "no PTZStatus element")
+    (st : _)
+      | isNil st -> pure Nothing
+      | otherwise -> pure (Just (PtzPosition pan tilt zoom))
+      where
+        isNil c = case c $| laxAttribute "nil" of
+          (v : _) -> v == "true" || v == "1"
+          [] -> False
+        axis l a = case descendantLocal st [l] of
+          (c : _) -> fromMaybe 0 (readF =<< attr a c)
+          [] -> 0
+        pan = axis "PanTilt" "x"
+        tilt = axis "PanTilt" "y"
+        zoom = axis "Zoom" "x"
+
+parsePresetToken :: ByteString -> Either OnvifError PresetToken
+parsePresetToken bs = do
+  doc <- parseDoc bs
+  case fromDocument doc $// laxElement "PresetToken" of
+    (t : _) -> pure (PresetToken (T.concat (t $/ content)))
+    [] -> Left (OnvifParseError "SetPresetResponse: no PresetToken")
+
 parseAudioConfigs :: ByteString -> Either OnvifError [AudioConfig]
 parseAudioConfigs bs = do
   doc <- parseDoc bs
@@ -341,12 +548,18 @@ soapCall ::
   IO (Either OnvifError ByteString)
 soapCall mgr creds url ns op inner = do
   hdr <- wsseHeader creds
-  let envelope =
+  let actionNs = case ns of
+        "tptz" -> "ver20/ptz"
+        "tds" -> "ver10/device"
+        "tr2" -> "ver20/media"
+        _ -> "ver10/media"
+      envelope =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
           <> "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
           <> " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
           <> " xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
           <> " xmlns:tr2=\"http://www.onvif.org/ver20/media/wsdl\""
+          <> " xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\""
           <> " xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">"
           <> "<soap:Header>"
           <> hdr
@@ -375,13 +588,7 @@ soapCall mgr creds url ns op inner = do
                 [ ("Content-Type", "application/soap+xml; charset=utf-8"),
                   ("Authorization", basicAuth),
                   ( "SOAPAction",
-                    "\"http://www.onvif.org/"
-                      <> (if ns == "tr2" then "ver20" else "ver10")
-                      <> "/"
-                      <> (if ns == "tds" then "device" else "media")
-                      <> "/wsdl/"
-                      <> TE.encodeUtf8 op
-                      <> "\""
+                    "\"http://www.onvif.org/" <> actionNs <> "/wsdl/" <> TE.encodeUtf8 op <> "\""
                   )
                 ],
               HC.requestBody = HC.RequestBodyBS (TE.encodeUtf8 envelope),
@@ -498,6 +705,18 @@ firstText (c : _) = Just (T.concat (c $/ content))
 
 readT :: Text -> Maybe Int
 readT = readMaybe . T.unpack
+
+readF :: Text -> Maybe Float
+readF = readMaybe . T.unpack
+
+-- | Format a velocity/position component: clamp to [-1, 1] (defensive —
+-- cameras fault on out-of-range) and print without trailing noise.
+fshow :: Float -> Text
+fshow f =
+  let c = max (-1) (min 1 f)
+   in if c == fromIntegral (round c :: Int)
+        then tshow (round c :: Int)
+        else T.pack (show c)
 
 readD :: Text -> Maybe Double
 readD = readMaybe . T.unpack

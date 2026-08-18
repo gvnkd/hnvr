@@ -93,7 +93,7 @@ import Hnvr.Capture.Worker
     CaptureState (..),
     captureWorkerWithStop,
   )
-import Hnvr.Core.CameraSnapshot (CameraSnapshot (..))
+import Hnvr.Core.CameraSnapshot (CameraSnapshot (..), PtzSnapshot (..))
 import qualified Hnvr.Core.CameraSnapshot as Snap
 import Hnvr.Core.Event (CvEvent (..))
 import Hnvr.Core.Frame (Frame (..))
@@ -101,6 +101,7 @@ import Hnvr.Core.Geometry (Box (..))
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Logging (logInfo, logWarn)
 import Hnvr.Core.Metrics (Metrics (..))
+import Hnvr.Core.Ptz (PresetToken (..))
 import Hnvr.Core.Time (formatYmdHmsMs)
 import Hnvr.Cv.Analyzer (defaultAnalyzerConfig, execProvidersFromEnv)
 import Hnvr.Cv.AnalyzerRunner (runAnalyzer)
@@ -120,7 +121,11 @@ import qualified Hnvr.Nats.Bus as Bus
 import qualified Hnvr.Nats.Subjects as Subjects
 import Hnvr.Node.ClipRecorder (ClipState)
 import qualified Hnvr.Node.ClipRecorder as Clip
+import Hnvr.Onvif.Client (OnvifCreds (..))
+import Hnvr.Ptz.Controller (PtzControllerConfig (..), startPtzController)
+import qualified Hnvr.Ptz.Onvif as Ptz
 import Hnvr.Storage.S3 (putObjectBytes)
+import qualified Network.HTTP.Client as HC
 import Network.Minio (defaultPutObjectOptions, pooContentType)
 import qualified System.Directory as Dir
 import System.Environment (lookupEnv)
@@ -133,9 +138,14 @@ data CaptureSupervisor = CaptureSupervisor
   { csConfig :: !CaptureConfig,
     csWorkers :: !(IORef (Map CameraId WorkerHandle)),
     csAnalysis :: !(IORef (Map CameraId AnalysisHandle)),
+    -- | PTZ controllers (Phase 5): one per PTZ-enabled camera.
+    csPtz :: !(IORef (Map CameraId PtzHandle)),
     -- | Event-clip recorder state (ring buffers + open clips).
     csClipState :: !ClipState
   }
+
+-- | One PTZ controller = command loop + idle ticker.
+type PtzHandle = (Async (), Async ())
 
 -- | One per running camera. The @stopTVar@ is polled by the worker's
 -- driver loop; setting it to 'True' causes the next state-machine tick
@@ -167,6 +177,7 @@ startCaptureSupervisor :: CaptureConfig -> IO CaptureSupervisor
 startCaptureSupervisor cfg = do
   ref <- newIORef Map.empty
   aRef <- newIORef Map.empty
+  pRef <- newIORef Map.empty
   clipState <- Clip.newClipState
   -- SpoolDrainer is process-wide (not per-camera) so it can clean up
   -- after camera reassignments too. Started here so it shares the
@@ -174,7 +185,7 @@ startCaptureSupervisor cfg = do
   startSpoolDrainer cfg
   Clip.startClipTicker cfg clipState
   logInfo "CaptureSupervisor: started"
-  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csClipState = clipState})
+  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csClipState = clipState})
 
 -- | Idempotent: starts a worker for the given camera. If a worker is
 -- already running for the same 'CameraId', it is stopped first (so
@@ -223,7 +234,43 @@ startCamera sup snap = do
   let handle = WorkerHandle {whStop = stopTVar, whAsync = a, whSlug = csSlug snap, whState = stateVar}
   modifyIORef' sup.csWorkers (Map.insert (csId snap) handle)
   maybeStartAnalysis sup snap relayUrl
+  maybeStartPtz sup snap
   logInfo ("CaptureSupervisor: started worker for " <> csSlug snap <> " via " <> relayUrl)
+
+-- | Spawn the PTZ controller (Phase 5) when the snapshot carries a
+-- 'PtzSnapshot'. Discovery failure (camera offline, no PTZ service
+-- advertised) logs and skips — the camera still records; the next
+-- startCamera re-tries.
+maybeStartPtz :: CaptureSupervisor -> CameraSnapshot -> IO ()
+maybeStartPtz sup snap = case csPtz snap of
+  Nothing -> pure ()
+  Just ps -> case capBus sup.csConfig of
+    Nothing -> logWarn ("CaptureSupervisor: no NATS bus; PTZ disabled for " <> csSlug snap)
+    Just bus -> do
+      mgr <- HC.newManager HC.defaultManagerSettings
+      eDrv <-
+        Ptz.resolveOnvifPtz
+          mgr
+          (OnvifCreds (psUsername ps) (psPassword ps))
+          (psHost ps)
+          (psOnvifPort ps)
+          (psProfileToken ps)
+      case eDrv of
+        Left err -> logWarn ("CaptureSupervisor: PTZ unavailable for " <> csSlug snap <> ": " <> err)
+        Right drv -> do
+          h <-
+            startPtzController
+              PtzControllerConfig
+                { pccBus = bus,
+                  pccSlug = csSlug snap,
+                  pccCameraId = csId snap,
+                  pccDriver = drv,
+                  pccHomePreset = PresetToken <$> psHomePresetToken ps,
+                  pccIdleTimeoutS = psIdleTimeoutS ps,
+                  pccMetrics = capMetrics sup.csConfig
+                }
+          modifyIORef' sup.csPtz (Map.insert (csId snap) h)
+          logInfo ("CaptureSupervisor: PTZ controller started for " <> csSlug snap)
 
 -- | Spawn the analysis pair (frame source + analyzer) for a camera.
 --
@@ -434,6 +481,7 @@ readFallbackScale = do
 stopCamera :: CaptureSupervisor -> CameraId -> IO ()
 stopCamera sup camId = do
   stopAnalysisPair
+  stopPtzController
   Clip.closeCameraClip sup.csConfig sup.csClipState camId
   Clip.unregisterCamera sup.csClipState camId
   mHandle <-
@@ -460,6 +508,14 @@ stopCamera sup camId = do
       forM_ mAna $ \h -> do
         cancel h.ahSource
         cancel h.ahAnalyzer
+    stopPtzController = do
+      mPtz <-
+        atomicModifyIORef'
+          sup.csPtz
+          (\m -> (Map.delete camId m, Map.lookup camId m))
+      forM_ mPtz $ \(cmdLoop, ticker) -> do
+        cancel cmdLoop
+        cancel ticker
 
 -- | Convenience: stop + start. Useful when only config has changed
 -- (e.g. RTSP URL rotation) and the caller already has the new

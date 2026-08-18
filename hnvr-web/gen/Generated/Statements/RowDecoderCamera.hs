@@ -1,83 +1,84 @@
-{-# LANGUAGE ApplicativeDo #-}
-{-# LANGUAGE OverloadedLabels #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ApplicativeDo, OverloadedLabels, TypeApplications, ScopedTypeVariables #-}
 -- This file is auto generated and will be overriden regulary.
 {-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches #-}
-
 module Generated.Statements.RowDecoderCamera (rowDecoder) where
 
-import qualified Data.Aeson
-import Data.Default (def)
-import qualified Data.Dynamic
-import Data.Functor.Contravariant (contramap, (>$<))
-import Data.Int (Int16, Int32, Int64)
-import Data.Scientific (Scientific)
-import Data.Text (Text)
-import qualified Data.Time.Calendar
-import Data.Time.Clock (UTCTime)
-import Data.Time.LocalTime (LocalTime, TimeOfDay)
-import Data.UUID (UUID)
-import qualified Database.PostgreSQL.Simple.Types
-import GHC.Records
+import Prelude (($), (.), (<$>), (<*>), (<>), (+), (*), (-), show, fromIntegral, length, null, zip, mconcat, (++), Maybe(..), (!!), map, Bool(..), Int, Integer, pure, (&&), not)
 import Generated.ActualTypes
 import Generated.Enums
+import IHP.ModelSupport.Types (Id'(..), MetaBag(..))
+import qualified Hasql.Statement as Statement
 import qualified Hasql.Decoders as Decoders
 import qualified Hasql.Encoders as Encoders
 import qualified Hasql.Mapping.IsScalar as Mapping
 import Hasql.PostgresqlTypes ()
-import qualified Hasql.Statement as Statement
 import IHP.Job.Queue ()
-import IHP.ModelSupport.Types (Id' (..), MetaBag (..))
-import qualified IHP.QueryBuilder as QueryBuilder
-import PostgresqlTypes.Inet (Inet)
-import PostgresqlTypes.Interval (Interval)
+import Data.Functor.Contravariant (contramap, (>$<))
+import Data.Default (def)
+import qualified Data.Dynamic
+import Data.UUID (UUID)
+import Data.Text (Text)
+import Data.Int (Int16, Int32, Int64)
+import Data.Time.Clock (UTCTime)
+import Data.Time.LocalTime (LocalTime, TimeOfDay)
+import qualified Data.Time.Calendar
+import Data.Scientific (Scientific)
+import qualified Data.Aeson
+import qualified Database.PostgreSQL.Simple.Types
 import PostgresqlTypes.Point (Point)
 import PostgresqlTypes.Polygon (Polygon)
+import PostgresqlTypes.Inet (Inet)
 import PostgresqlTypes.Tsvector (Tsvector)
-import Prelude (Bool (..), Int, Integer, Maybe (..), fromIntegral, length, map, mconcat, not, null, pure, show, zip, (!!), ($), (&&), (*), (+), (++), (-), (.), (<$>), (<*>), (<>))
+import PostgresqlTypes.Interval (Interval)
 
+import qualified IHP.QueryBuilder as QueryBuilder
+import GHC.Records
 rowDecoder :: Decoders.Row Generated.ActualTypes.Camera
 rowDecoder = do
-  id <- Decoders.column (Decoders.nonNullable Mapping.decoder)
-  slug <- Decoders.column (Decoders.nonNullable Decoders.text)
-  name <- Decoders.column (Decoders.nonNullable Decoders.text)
-  rtspUrl <- Decoders.column (Decoders.nonNullable Decoders.text)
-  rtspTransport <- Decoders.column (Decoders.nonNullable Decoders.text)
-  host <- Decoders.column (Decoders.nullable Decoders.text)
-  username <- Decoders.column (Decoders.nullable Decoders.text)
-  passwordEnc <- Decoders.column (Decoders.nullable (Database.PostgreSQL.Simple.Types.Binary <$> Decoders.bytea))
-  passwordNonce <- Decoders.column (Decoders.nullable (Database.PostgreSQL.Simple.Types.Binary <$> Decoders.bytea))
-  codec <- Decoders.column (Decoders.nonNullable Mapping.decoder)
-  rtspSubUrl <- Decoders.column (Decoders.nullable Decoders.text)
-  useSubstreamForAnalysis <- Decoders.column (Decoders.nonNullable Decoders.bool)
-  substreamCodec <- Decoders.column (Decoders.nonNullable Mapping.decoder)
-  substreamWidth <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  substreamHeight <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  recordAudio <- Decoders.column (Decoders.nonNullable Decoders.bool)
-  analysisFps <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int4))
-  modelName <- Decoders.column (Decoders.nonNullable Decoders.text)
-  enabled <- Decoders.column (Decoders.nonNullable Decoders.bool)
-  retentionHours <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int4))
-  assignedHost <- Decoders.column (Decoders.nullable Decoders.text)
-  manualAssign <- Decoders.column (Decoders.nonNullable Decoders.bool)
-  onvifPort <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  mgmtProto <- Decoders.column (Decoders.nonNullable Decoders.text)
-  mainVideoEncoding <- Decoders.column (Decoders.nullable Decoders.text)
-  mainVideoWidth <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  mainVideoHeight <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  mainVideoFps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  mainVideoBitrateKbps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  mainVideoGovLength <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  subVideoEncoding <- Decoders.column (Decoders.nullable Decoders.text)
-  subVideoWidth <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  subVideoHeight <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  subVideoFps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  subVideoBitrateKbps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  subVideoGovLength <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  audioEncoding <- Decoders.column (Decoders.nullable Decoders.text)
-  audioBitrateKbps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  audioSampleRateKhz <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
-  createdAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
-  updatedAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
-  pure (let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTransport host username passwordEnc passwordNonce codec rtspSubUrl useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz createdAt updatedAt def {originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord)} in theRecord)
+    id <- Decoders.column (Decoders.nonNullable Mapping.decoder)
+    slug <- Decoders.column (Decoders.nonNullable Decoders.text)
+    name <- Decoders.column (Decoders.nonNullable Decoders.text)
+    rtspUrl <- Decoders.column (Decoders.nonNullable Decoders.text)
+    rtspTransport <- Decoders.column (Decoders.nonNullable Decoders.text)
+    host <- Decoders.column (Decoders.nullable Decoders.text)
+    username <- Decoders.column (Decoders.nullable Decoders.text)
+    passwordEnc <- Decoders.column (Decoders.nullable (Database.PostgreSQL.Simple.Types.Binary <$> Decoders.bytea))
+    passwordNonce <- Decoders.column (Decoders.nullable (Database.PostgreSQL.Simple.Types.Binary <$> Decoders.bytea))
+    codec <- Decoders.column (Decoders.nonNullable Mapping.decoder)
+    rtspSubUrl <- Decoders.column (Decoders.nullable Decoders.text)
+    useSubstreamForAnalysis <- Decoders.column (Decoders.nonNullable Decoders.bool)
+    substreamCodec <- Decoders.column (Decoders.nonNullable Mapping.decoder)
+    substreamWidth <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    substreamHeight <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    recordAudio <- Decoders.column (Decoders.nonNullable Decoders.bool)
+    analysisFps <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int4))
+    modelName <- Decoders.column (Decoders.nonNullable Decoders.text)
+    enabled <- Decoders.column (Decoders.nonNullable Decoders.bool)
+    retentionHours <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int4))
+    assignedHost <- Decoders.column (Decoders.nullable Decoders.text)
+    manualAssign <- Decoders.column (Decoders.nonNullable Decoders.bool)
+    onvifPort <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    mgmtProto <- Decoders.column (Decoders.nonNullable Decoders.text)
+    mainVideoEncoding <- Decoders.column (Decoders.nullable Decoders.text)
+    mainVideoWidth <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    mainVideoHeight <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    mainVideoFps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    mainVideoBitrateKbps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    mainVideoGovLength <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    subVideoEncoding <- Decoders.column (Decoders.nullable Decoders.text)
+    subVideoWidth <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    subVideoHeight <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    subVideoFps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    subVideoBitrateKbps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    subVideoGovLength <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    audioEncoding <- Decoders.column (Decoders.nullable Decoders.text)
+    audioBitrateKbps <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    audioSampleRateKhz <- Decoders.column (Decoders.nullable (fromIntegral <$> Decoders.int4))
+    ptzEnabled <- Decoders.column (Decoders.nonNullable Decoders.bool)
+    ptzProfileToken <- Decoders.column (Decoders.nullable Decoders.text)
+    ptzHomePresetId <- Decoders.column (Decoders.nullable Mapping.decoder)
+    ptzIdleTimeoutS <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int4))
+    ptzViewerControl <- Decoders.column (Decoders.nonNullable Decoders.bool)
+    createdAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
+    updatedAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
+    pure (let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTransport host username passwordEnc passwordNonce codec rtspSubUrl useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz ptzEnabled ptzProfileToken ptzHomePresetId ptzIdleTimeoutS ptzViewerControl createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)

@@ -15,6 +15,7 @@ import qualified Hnvr.Core.IdSpec as IdSpec
 import qualified Hnvr.Core.MetricsSpec as MetricsSpec
 import qualified Hnvr.Core.OnvifSpec as OnvifSpec
 import qualified Hnvr.Core.PlaylistSpec as PlaylistSpec
+import qualified Hnvr.Core.PtzSpec as PtzSpec
 import qualified Hnvr.Core.RecordingSpec as RecordingSpec
 import qualified Hnvr.Core.SegmentSpec as SegmentSpec
 import qualified Hnvr.Core.TimeSpec as TimeSpec
@@ -41,6 +42,7 @@ main =
         MetricsSpec.tests,
         OnvifSpec.tests,
         PlaylistSpec.tests,
+        PtzSpec.tests,
         RecordingSpec.tests,
         SegmentSpec.tests,
         TimeSpec.tests,

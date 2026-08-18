@@ -3,3 +3,4 @@ module Generated.CameraInclude where
 import Generated.ActualTypes
 import IHP.ModelSupport (Include, GetModelById)
 
+type instance Include "ptzHomePresetId" (Camera' ptzHomePresetId) = Camera' (GetModelById ptzHomePresetId)

@@ -44,7 +44,12 @@ data Metrics = Metrics
     mRecordInference :: !(Text -> Double -> IO ()),
     -- | Analysis fell back to relay main-stream-with-scale for a
     -- camera. Arg: camera slug.
-    mSubstreamFallback :: !(Text -> IO ())
+    mSubstreamFallback :: !(Text -> IO ()),
+    -- | One PTZ command executed by a controller. Args: camera slug,
+    -- command name, source (@web_ui@\/@idle_timeout@\/...).
+    mPtzCommand :: !(Text -> Text -> Text -> IO ()),
+    -- | Wall seconds of one PTZ SOAP round-trip. Arg: camera slug.
+    mPtzCommandSeconds :: !(Text -> Double -> IO ())
   }
 
 noOpMetrics :: Metrics
@@ -53,7 +58,9 @@ noOpMetrics =
     { mFrameDecoded = \_ -> pure (),
       mFrameDropped = \_ -> pure (),
       mRecordInference = \_ _ -> pure (),
-      mSubstreamFallback = \_ -> pure ()
+      mSubstreamFallback = \_ -> pure (),
+      mPtzCommand = \_ _ _ -> pure (),
+      mPtzCommandSeconds = \_ _ -> pure ()
     }
 
 -- | Distribution statistics snapshot (mirror of ekg-core's

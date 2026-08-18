@@ -73,6 +73,11 @@ CREATE TABLE cameras (
     audio_encoding          TEXT,
     audio_bitrate_kbps      INT,
     audio_sample_rate_khz   INT,
+    ptz_enabled         BOOLEAN NOT NULL DEFAULT FALSE,
+    ptz_profile_token   TEXT,
+    ptz_home_preset_id  UUID,
+    ptz_idle_timeout_s  INT NOT NULL DEFAULT 30,
+    ptz_viewer_control  BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     FOREIGN KEY (assigned_host) REFERENCES hosts(id) ON DELETE SET NULL
@@ -237,3 +242,43 @@ CREATE TABLE audit_log (
 );
 
 CREATE INDEX audit_ts_idx ON audit_log (ts DESC);
+
+-- Phase 5: PTZ presets + per-command audit (migration 0011).
+CREATE TABLE ptz_presets (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id       UUID NOT NULL,
+    name            TEXT NOT NULL,
+    onvif_token     TEXT,
+    pantilt_x       REAL,
+    pantilt_y       REAL,
+    zoom            REAL,
+    is_home         BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (camera_id, name),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+);
+
+CREATE INDEX ptz_presets_cam_idx ON ptz_presets (camera_id);
+
+ALTER TABLE cameras
+    ADD CONSTRAINT cameras_ptz_home_preset_fk
+    FOREIGN KEY (ptz_home_preset_id) REFERENCES ptz_presets(id) ON DELETE SET NULL;
+
+CREATE TYPE ptz_source AS ENUM ('web_ui', 'auto_track', 'idle_timeout', 'api', 'schedule');
+
+CREATE TABLE ptz_audit_log (
+    id              BIGSERIAL PRIMARY KEY,
+    camera_id       UUID NOT NULL,
+    user_id         UUID,
+    command         TEXT NOT NULL,
+    args            JSONB,
+    source          ptz_source NOT NULL,
+    duration_ms     INT,
+    ok              BOOLEAN NOT NULL DEFAULT TRUE,
+    error           TEXT,
+    ts              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX ptz_audit_cam_ts_idx ON ptz_audit_log (camera_id, ts DESC);

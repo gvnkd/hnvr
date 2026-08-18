@@ -16,6 +16,7 @@ module Hnvr.Nats.Subjects
     health,
     configCameras,
     ptzStatus,
+    ptzAudit,
     leader,
   )
 where
@@ -61,6 +62,12 @@ configCameras slug = "hnvr.config.cameras." <> slug
 -- | @hnvr.ptz.status.<cam>@ — host owning cam → all. Max-age 2s.
 ptzStatus :: Text -> Text
 ptzStatus camSlug = "hnvr.ptz.status." <> camSlug
+
+-- | @hnvr.ptz.audit@ — host owning cam → leader. One 'PtzAuditRecord'
+-- per executed command; the leader's PtzAuditWriter persists rows
+-- (nodes have no DB access).
+ptzAudit :: Text
+ptzAudit = "hnvr.ptz.audit"
 
 -- | @hnvr.leader@ — JetStream KV bucket with TTL 10s for leader lease.
 leader :: Text

@@ -62,3 +62,7 @@ type instance PrimaryKey "event_clip_events" = UUID
 instance Default (Id' "event_clip_events") where def = Id def
 type instance PrimaryKey "audit_log" = Integer
 instance Default (Id' "audit_log") where def = Id def
+type instance PrimaryKey "ptz_presets" = UUID
+instance Default (Id' "ptz_presets") where def = Id def
+type instance PrimaryKey "ptz_audit_log" = Integer
+instance Default (Id' "ptz_audit_log") where def = Id def

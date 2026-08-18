@@ -646,6 +646,9 @@
   .table tbody tr:last-child td {
     border-bottom: 0;
   }
+  .table tbody tr.row-disabled td {
+    color: var(--text-dim);
+  }
   .table tbody tr.row-link {
     cursor: pointer;
   }
@@ -715,6 +718,18 @@
   .badge-warn  { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, transparent); color: var(--warn); }
   .badge-info  { background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 35%, transparent); color: var(--info); }
   .badge-mute  { background: var(--panel-2);   border-color: var(--border); color: var(--text-dim); }
+
+  /* PTZ panel (live view, Phase 5) */
+  .ptz-body { @apply flex items-start gap-6 flex-wrap; }
+  .ptz-pad {
+    display: grid;
+    grid-template-columns: repeat(3, 2.75rem);
+    gap: 0.25rem;
+  }
+  .ptz-pad .btn { @apply text-base; height: 2.75rem; padding: 0; }
+  .ptz-col { @apply flex flex-col gap-3; }
+  .ptz-row { @apply flex items-center gap-2 flex-wrap; }
+  .ptz-row select { min-width: 10rem; }
 
   /* IHP flash messages (renderFlashMessages emits .alert.alert-*) */
   .alert {
@@ -836,7 +851,11 @@
     background: var(--panel-solid);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-pop);
+    max-height: 92vh;
+    overflow-y: auto;
   }
+  .live-overlay-ptz:empty { display: none; }
+  .live-overlay-ptz .card { border: none; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; }
   .live-overlay-head {
     @apply flex items-center gap-2 px-4 py-2.5;
     border-bottom: 1px solid var(--border);

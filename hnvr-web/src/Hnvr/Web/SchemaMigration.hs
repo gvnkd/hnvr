@@ -106,6 +106,11 @@ mgmtProtoSql = $(embedFile "migrations/0009-mgmt-proto.sql")
 cleanupSql :: ByteString
 cleanupSql = $(embedFile "migrations/0010-cleanup.sql")
 
+-- | Phase 5: PTZ columns on cameras + ptz_presets + ptz_audit_log.
+-- See the file header.
+ptzSql :: ByteString
+ptzSql = $(embedFile "migrations/0011-ptz.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -165,6 +170,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0010-cleanup" cleanupSql) True conn
     handleResult "0010-cleanup" cleanupRes
+    ptzRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0011-ptz" ptzSql) True conn
+    handleResult "0011-ptz" ptzRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

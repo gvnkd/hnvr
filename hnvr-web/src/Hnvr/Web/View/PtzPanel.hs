@@ -1,0 +1,69 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoImplicitPrelude #-}
+
+-- | Shared PTZ control panel markup (Phase 5). Rendered directly on
+-- /ShowLive and inside per-camera @\<template\>@s on the dashboard
+-- (app.js clones the template into the fullscreen overlay on open).
+-- Behaviour lives in @/static/ptz.js@ (@HNVR.ptz(cameraId, root)@).
+--
+-- No top-level signature: the Html type carries implicit params
+-- (pitfall #36), the enclosing view's scope provides them.
+module Hnvr.Web.View.PtzPanel
+  ( ptzPanel,
+  )
+where
+
+import Generated.Types
+import IHP.ViewPrelude
+
+ptzPanel camera presets =
+  [hsx|
+  <div class="card" id="ptz-panel" data-camera-id={cid}>
+    <div class="card-header">
+      <span>PTZ</span>
+      <span id="ptz-status" class="badge badge-mute">…</span>
+    </div>
+    <div class="card-body ptz-body">
+      <div class="ptz-pad">
+        <button class="btn btn-ghost" data-vx="-0.5" data-vy="0.5">↖</button>
+        <button class="btn btn-ghost" data-vx="0" data-vy="0.5">↑</button>
+        <button class="btn btn-ghost" data-vx="0.5" data-vy="0.5">↗</button>
+        <button class="btn btn-ghost" data-vx="-0.5" data-vy="0">←</button>
+        <button class="btn btn-ghost" disabled>·</button>
+        <button class="btn btn-ghost" data-vx="0.5" data-vy="0">→</button>
+        <button class="btn btn-ghost" data-vx="-0.5" data-vy="-0.5">↙</button>
+        <button class="btn btn-ghost" data-vx="0" data-vy="-0.5">↓</button>
+        <button class="btn btn-ghost" data-vx="0.5" data-vy="-0.5">↘</button>
+      </div>
+      <div class="ptz-col">
+        <div class="ptz-row">
+          <span class="text-sm muted">zoom</span>
+          <button class="btn btn-ghost" data-vz="-0.5">−</button>
+          <button class="btn btn-ghost" data-vz="0.5">+</button>
+        </div>
+        <div class="ptz-row">
+          <select id="ptz-preset-select">{forEach presets presetOption}</select>
+          <button class="btn btn-ghost" id="ptz-preset-go">go</button>
+          <button class="btn btn-ghost" id="ptz-preset-save">save</button>
+          <button class="btn btn-ghost" id="ptz-preset-del">delete</button>
+          <a class="btn btn-ghost" href={presetsUrl}>manage</a>
+        </div>
+        <div class="ptz-row">
+          <button class="btn" id="ptz-home">⌂ home</button>
+          <button class="btn" id="ptz-stop">⏹ stop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+|]
+  where
+    cid = tshow (camera |> get #id)
+    presetsUrl = "/PtzPresets?ptzCameraId=" <> cid
+    presetOption preset =
+      [hsx|<option value={token} data-preset-id={pid}>{label}</option>|]
+      where
+        token = fromMaybe "" preset.onvifToken
+        pid = tshow (preset |> get #id)
+        label = (if preset.isHome then "⌂ " else "") <> preset.name
