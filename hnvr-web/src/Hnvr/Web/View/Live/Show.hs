@@ -141,5 +141,6 @@ whepJs cam =
     <> "  else { status.textContent = 'Error: ' + state.replace(/^error:\\s*/, ''); setLeds('led-off', 'led-off'); }"
     <> "});"
     <> "document.getElementById('hnvr-live-fs').addEventListener('click', function () {"
-    <> "  if (video.requestFullscreen) video.requestFullscreen();"
+    <> "  var f = video.closest('.video-frame');"
+    <> "  if (f && f.requestFullscreen) f.requestFullscreen();"
     <> "});"

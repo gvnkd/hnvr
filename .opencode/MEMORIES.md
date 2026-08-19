@@ -3,13 +3,23 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
-> **Zoom/pan fullscreen + overlay-close fixes (Aug 19 2026 — v0.8.0.1)**:
-> (1) Wheel zoom dead in fullscreen: Chrome's native fullscreen media
-> controls consume wheel events (volume scroll) INSIDE the video's
-> shadow root with stopPropagation — bubble-phase host listeners never
-> fire. The zoompan wheel listener now runs in CAPTURE phase. (Headless
-> Chromium doesn't reproduce the consumption — the e2e fullscreen spec
-> passes pre-fix too; desktop verification only.) (2) Pan drag ending
+> **Zoom/pan fullscreen + overlay-close fixes (Aug 19 2026 — v0.8.0.1,
+> completed v0.8.0.2)**: (0) **v0.8.0.1's capture-phase wheel fix was
+> insufficient — fullscreen zoom stayed invisible.** Root cause: a
+> fullscreened `<video>` ELEMENT can bypass the compositor (hardware
+> overlay / direct scanout) and ignore CSS transforms entirely; the
+> transform applied (visible after exiting fullscreen) but rendered
+> nothing. Fix (the YouTube pattern): fullscreen the WRAPPER div
+> (`.live-overlay-video` / `.video-frame`), transform the video inside
+> it; native `::-webkit-media-controls-fullscreen-button` hidden so
+> Chrome's own control-bar button can't take the video-element shortcut;
+> archive player gained an explicit fullscreen button; zoompan re-clamps
+> on fullscreenchange. (1) Wheel listener ALSO stays capture-phase:
+> Chrome's fullscreen media controls consume wheel (volume scroll) in
+> the shadow root with stopPropagation. (Headless Chromium reproduces
+> neither behavior — software compositing — so both fullscreen paths are
+> desktop-verified only; the e2e spec asserts the wrapper is the
+> fullscreenElement.) (2) Pan drag ending
 > on the dashboard overlay backdrop closed the player: Chrome dispatches
 > the trailing click on the NEAREST COMMON ANCESTOR of press/release
 > targets (= the overlay → its click-to-close). Click suppression after

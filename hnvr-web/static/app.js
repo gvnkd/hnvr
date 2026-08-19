@@ -449,6 +449,15 @@
         }, 300);
       }
     });
+    // Fullscreen entry/exit changes the element's box — re-clamp the
+    // pan offsets so a zoom carried across the boundary can't leave the
+    // frame shifted. (Fullscreen targets the WRAPPER div, not the
+    // video: a fullscreened <video> can bypass the compositor via a
+    // hardware overlay and ignore CSS transforms entirely — that was
+    // the "zoom dead in fullscreen, applied on exit" bug.)
+    document.addEventListener("fullscreenchange", function () {
+      apply();
+    });
     // Pointer left the document mid-drag: end the pan (no trailing
     // click exists in that case, so no suppression needed).
     document.addEventListener("mouseleave", function () {
@@ -639,7 +648,10 @@
     liveSession = HNVR.whep(slug, video, setState);
 
     overlay.querySelector("[data-live-fullscreen]").onclick = function () {
-      if (video.requestFullscreen) video.requestFullscreen();
+      // Fullscreen the WRAPPER, not the <video> — see HNVR.zoompan's
+      // fullscreenchange comment.
+      var frame = overlay.querySelector(".live-overlay-video");
+      if (frame && frame.requestFullscreen) frame.requestFullscreen();
     };
   }
   function closeLive() {

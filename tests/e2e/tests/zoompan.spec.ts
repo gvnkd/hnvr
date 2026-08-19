@@ -53,10 +53,10 @@ test.describe('Video zoom/pan', () => {
     expect(transformAfterReset).toBe('');
   });
 
-  test('wheel zooms in fullscreen (capture-phase listener)', async ({loggedInPage: page}) => {
-    // Chrome's native fullscreen media controls consume wheel events
-    // (volume scroll) inside the video's shadow root; the zoom listener
-    // must run in capture phase to see them.
+  test('wheel zooms in fullscreen (wrapper fullscreened)', async ({loggedInPage: page}) => {
+    // Fullscreen targets the wrapper (.video-frame), never the <video>:
+    // a fullscreened video element can bypass the compositor (hardware
+    // overlay) and ignore the zoom transform entirely.
     await page.goto('/Cameras');
     const firstShowLink = page.locator('tbody tr').first().getByRole('link', {name: 'Show'});
     const hasCamera = await firstShowLink.count();
@@ -70,8 +70,12 @@ test.describe('Video zoom/pan', () => {
     const video = page.locator('#hnvr-player');
     await expect(video).toBeVisible();
 
-    await video.evaluate((el) => (el as HTMLVideoElement).requestFullscreen());
+    await page.locator('#hnvr-player-fs').click();
     await page.waitForFunction(() => !!document.fullscreenElement);
+    const fsIsWrapper = await page.evaluate(
+      () => document.fullscreenElement!.classList.contains('video-frame')
+    );
+    expect(fsIsWrapper).toBe(true);
     await page.mouse.move(400, 300);
     await page.mouse.wheel(0, -240);
     await expect(video).toHaveClass(/is-zoomed/);

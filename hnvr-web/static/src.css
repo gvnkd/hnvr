@@ -888,6 +888,27 @@
   video.is-zoomed { cursor: grab; }
   video.is-zoomed.is-panning { cursor: grabbing; }
 
+  /* Fullscreen must target the wrapper div, never the <video> element
+     itself: a fullscreened video can bypass the compositor (hardware
+     overlay) and ignore the zoom transform. Hide the native fullscreen
+     button so it can't be used to take the shortcut. */
+  video::-webkit-media-controls-fullscreen-button { display: none; }
+  .live-overlay-video:fullscreen,
+  .video-frame:fullscreen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    border-radius: 0;
+  }
+  .live-overlay-video:fullscreen video,
+  .video-frame:fullscreen video {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+    object-fit: contain;
+  }
+
   /* ── Events: animated thumbnails + lightbox ──────────────────── */
   .ev-thumb {
     position: relative;

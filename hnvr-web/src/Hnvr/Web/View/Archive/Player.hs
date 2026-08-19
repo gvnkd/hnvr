@@ -43,6 +43,8 @@ instance View PlayerView where
       <div class="video-status">
         <span id="hnvr-status-led" class="led led-warn"></span>
         <span id="hnvr-status">Loading player…</span>
+        <span class="faint">·</span>
+        <button class="btn btn-ghost btn-sm" id="hnvr-player-fs">fullscreen</button>
       </div>
       <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
       {scriptTag}
@@ -92,6 +94,10 @@ instance View PlayerView where
           <> "} else {"
           <> "  status.textContent = 'HLS not supported in this browser'; setLed('led-off');"
           <> "}"
+          <> "document.getElementById('hnvr-player-fs').addEventListener('click', function () {"
+          <> "  var f = video.closest('.video-frame');"
+          <> "  if (f && f.requestFullscreen) f.requestFullscreen();"
+          <> "});"
       seekJs = case startOffset of
         Just off ->
           "  video.addEventListener('loadedmetadata', () => { video.currentTime = "
