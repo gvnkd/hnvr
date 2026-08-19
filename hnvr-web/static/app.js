@@ -630,17 +630,21 @@
     var slugEl = overlay.querySelector(".live-overlay-head .slug");
     if (slugEl) slugEl.textContent = slug;
 
-    /* PTZ panel: clone the camera's template into the overlay slot
-       (template only exists for ptz_enabled cameras). */
+    /* PTZ drawer: clone the camera's template into the overlay slot
+       (template only exists for ptz_enabled cameras AND logged-in
+       users — the server omits them otherwise, so tpl is also the
+       toggle-visibility signal). */
     var ptzSlot = overlay.querySelector(".live-overlay-ptz");
+    var ptzToggle = overlay.querySelector(".live-overlay-head [data-ptz-toggle]");
+    var tpl = document.querySelector('template[data-ptz-for="' + slug + '"]');
     if (ptzSlot) {
       ptzSlot.innerHTML = "";
-      var tpl = document.querySelector('template[data-ptz-for="' + slug + '"]');
       if (tpl && camId && HNVR.ptz) {
         ptzSlot.appendChild(tpl.content.cloneNode(true));
         livePtz = HNVR.ptz(camId, ptzSlot);
       }
     }
+    if (ptzToggle) ptzToggle.hidden = !tpl;
 
     overlay.hidden = false;
     requestAnimationFrame(function () {
@@ -704,6 +708,8 @@
     }
     var ptzSlot = overlay.querySelector(".live-overlay-ptz");
     if (ptzSlot) ptzSlot.innerHTML = "";
+    var ptzToggle = overlay.querySelector(".live-overlay-head [data-ptz-toggle]");
+    if (ptzToggle) ptzToggle.hidden = true;
     var video = overlay.querySelector("video");
     if (video) video.srcObject = null;
     setTimeout(function () {
@@ -787,6 +793,16 @@
       btn.addEventListener("click", function () {
         HNVR.toggleFullscreen(btn.closest(".video-frame, .live-overlay-video"));
       });
+    });
+    // PTZ drawer slide toggle (ShowLive page + dashboard overlay).
+    // Scoped to the enclosing overlay when the clicked button lives in
+    // one so the page-level and overlay drawers never cross-talk.
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-ptz-toggle]");
+      if (!btn) return;
+      var scope = btn.closest(".live-overlay") || document;
+      var drawer = scope.querySelector(".ptz-drawer");
+      if (drawer) drawer.classList.toggle("open");
     });
     initCollapsibles();
     initSortableTables();

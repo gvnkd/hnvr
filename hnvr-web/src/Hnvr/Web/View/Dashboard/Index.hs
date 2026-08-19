@@ -8,6 +8,7 @@ module Hnvr.Web.View.Dashboard.Index (IndexView (..)) where
 import Data.Time.Clock (UTCTime)
 import Generated.Types
 import Hnvr.Core.CameraStatus (CameraStatus (..))
+import Hnvr.Web.Auth ()
 import Hnvr.Web.CameraStatus (cameraStatusFor, hostDisplayLive)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.PtzPanel (ptzPanel)
@@ -47,6 +48,7 @@ instance View IndexView where
               <span class="live-overlay-status-text">Connecting…</span>
             </span>
             <span class="spacer"></span>
+            <button class="btn btn-ghost btn-sm" data-ptz-toggle="1" hidden>PTZ</button>
             <button class="btn btn-ghost btn-sm" data-live-fullscreen="1">fullscreen</button>
             <button class="btn btn-ghost btn-sm" data-live-close="1">close ✕</button>
           </div>
@@ -64,7 +66,14 @@ instance View IndexView where
     where
       nCams = tshow (length cameras) :: Text
       nHosts = tshow (length hosts) :: Text
-      ptzCams = filter (.ptzEnabled) cameras
+      -- PTZ drawer templates only for logged-in operators: the
+      -- dashboard is anonymous-readable and the PTZ POST endpoints
+      -- require a session, so anonymous visitors get no PTZ markup
+      -- at all (app.js also keeps the overlay toggle hidden when no
+      -- template exists for the opened camera).
+      ptzCams
+        | isJust (currentUserOrNothing :: Maybe User) = filter (.ptzEnabled) cameras
+        | otherwise = []
 
       -- Per-PTZ-camera panel templates; app.js clones the matching
       -- template into the overlay's .live-overlay-ptz slot on open.

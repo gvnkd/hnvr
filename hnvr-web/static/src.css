@@ -719,7 +719,47 @@
   .badge-info  { background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 35%, transparent); color: var(--info); }
   .badge-mute  { background: var(--panel-2);   border-color: var(--border); color: var(--text-dim); }
 
-  /* PTZ panel (live view, Phase 5) */
+  /* PTZ panel (live view, Phase 5) — slides in from the right as a
+     drawer; [data-ptz-toggle] buttons drive .open via app.js. Fixed
+     positioning is viewport-relative on /ShowLive and overlay-relative
+     inside the dashboard overlay (its backdrop-filter is the containing
+     block — same rectangle either way). Not visible while the video
+     wrapper is fullscreen (the drawer lives outside the fullscreen
+     element) — same constraint the old inline panel had. */
+  .ptz-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(22rem, 92vw);
+    z-index: 90; /* above .live-overlay (80) */
+    display: flex;
+    flex-direction: column;
+    background: var(--panel-solid);
+    border-left: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-pop);
+    transform: translateX(105%);
+    visibility: hidden;
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 0.25s;
+  }
+  .ptz-drawer.open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .ptz-drawer-head {
+    @apply flex items-center gap-2 px-4 py-2.5;
+    border-bottom: 1px solid var(--border);
+    font-family: theme("fontFamily.mono");
+    color: var(--text-strong);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+  .ptz-drawer-head .spacer { flex: 1; }
+  .ptz-drawer-body {
+    @apply p-4;
+    overflow-y: auto;
+  }
   .ptz-body { @apply flex items-start gap-6 flex-wrap; }
   .ptz-pad {
     display: grid;
@@ -854,8 +894,7 @@
     max-height: 92vh;
     overflow-y: auto;
   }
-  .live-overlay-ptz:empty { display: none; }
-  .live-overlay-ptz .card { border: none; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; }
+  .live-overlay-ptz { display: contents; }
   .live-overlay-head {
     @apply flex items-center gap-2 px-4 py-2.5;
     border-bottom: 1px solid var(--border);

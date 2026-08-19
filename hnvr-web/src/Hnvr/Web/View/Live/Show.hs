@@ -16,6 +16,7 @@ module Hnvr.Web.View.Live.Show (ShowView (..)) where
 import Data.Time.Clock (UTCTime)
 import Generated.Types
 import Hnvr.Core.CameraStatus (CameraStatus (..))
+import Hnvr.Web.Auth ()
 import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.PtzPanel (ptzPanel)
@@ -42,6 +43,7 @@ instance View ShowView where
           <div class="subtitle">WebRTC via WHEP · {fromMaybe "—" camera.assignedHost}</div>
         </div>
         <div class="actions">
+          {ptzToggle}
           <a class="btn btn-ghost" href={archiveUrl}>Archive</a>
           <a class="btn btn-ghost" href="/Cameras">Cameras</a>
         </div>
@@ -70,6 +72,12 @@ instance View ShowView where
     where
       archiveUrl = "/PlayerArchive?cameraId=" <> tshow (camera |> get #id)
       camStatus = cameraStatusFor hosts now camera
+      -- PTZ controls are for operators only: /ShowLive is
+      -- anonymous-readable, so the drawer, its toggle and the ptz.js
+      -- bootstrap all stay unrendered without a session (the POST
+      -- endpoints are ensureIsUser-gated regardless).
+      showPtz = camera.ptzEnabled && loggedIn
+      loggedIn = isJust (currentUserOrNothing :: Maybe User)
       -- Initial header LED from the server-known worker state; the WHEP
       -- client takes over once the page's WebRTC session negotiates.
       hdrLedClass = case camStatus of
@@ -91,17 +99,22 @@ instance View ShowView where
       -- a single body-level splice. See pitfall #63.
       scriptTag = preEscapedTextValue ("<script>" <> whepJs camera <> feedJs camera <> "</script>" :: Text)
       ptzScriptTag =
-        if camera.ptzEnabled
+        if showPtz
           then preEscapedTextValue ("<script src=\"/static/ptz.js\"></script><script>HNVR.ptz('" <> tshow (camera |> get #id) <> "');</script>" :: Text)
           else mempty
 
-      -- PTZ control panel (Phase 5): shared markup from
-      -- 'Hnvr.Web.View.PtzPanel' (also used by the dashboard overlay);
-      -- hidden unless ptz_enabled, behaviour in /static/ptz.js.
-      ptzPanel' =
-        if not camera.ptzEnabled
+      -- PTZ sliding side-panel (shared markup from
+      -- 'Hnvr.Web.View.PtzPanel'; also used by the dashboard overlay).
+      -- The toggle button rides the header actions row; sliding is the
+      -- delegated [data-ptz-toggle] handler in app.js.
+      ptzToggle =
+        if not showPtz
           then mempty
-          else [hsx|<div class="mt-4">{ptzPanel camera presets}</div>|]
+          else [hsx|<button class="btn btn-ghost" data-ptz-toggle="1">PTZ</button>|]
+      ptzPanel' =
+        if not showPtz
+          then mempty
+          else ptzPanel camera presets
 
 -- | Live event feed poller: refreshes the panel from the fragment
 -- endpoint every 5 s (design 05 §"Live event feed"; a fetch poller

@@ -3,6 +3,30 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **PTZ panel → sliding side-drawer + auth gate (Aug 19 2026 — v0.10.0.0)**:
+> `ptzPanel` markup is now `<aside class="ptz-drawer" id="ptz-panel">`
+> (fixed, right edge, `translateX(105%)` → `.open`, z 90 above the
+> overlay's 80); toggles are any `[data-ptz-toggle]` button via ONE
+> delegated document click handler in app.js — scoped to
+> `btn.closest(".live-overlay") || document` so the /ShowLive page
+> drawer and the overlay drawer never cross-talk. Dashboard overlay
+> head gained a `hidden` PTZ toggle; app.js openLive unhides it only
+> when a `template[data-ptz-for=<slug>]` exists, closeLive re-hides.
+> `.live-overlay-ptz` slot is now `display: contents` (drawer is
+> fixed-position; the slot carries no layout). **Auth gate**: the
+> dashboard + /ShowLive are ANONYMOUS-READABLE (no ensureIsUser on
+> those controllers — only the PTZ POST endpoints were gated), so the
+> panel used to render for logged-out visitors as dead UI. Now both
+> views compute `loggedIn = isJust (currentUserOrNothing :: Maybe User)`
+> (needs `import Hnvr.Web.Auth ()` in the view module) and render no
+> PTZ markup at all when anonymous (no templates, no drawer, no
+> ptz.js). Verified: curl anon vs logged-in (0 vs full markup),
+> Playwright scratch script (drawer slides x=1280→928 and back;
+> overlay toggle/drawer ok), full e2e 32 passed + 2 skips.
+> **Process note**: `pkill -f result/bin/hnvr-leader` kills SERGEY'S
+> live dev leader too — it runs from ./result/bin. Scope kills by
+> port/PID, or accept restarting it (restarted on the new build).
+
 > **S3 moved to external SeaweedFS + app config file (Aug 19 2026 — v0.9.0.0)**:
 > MinIO is GONE from devenv; everything records to the external
 > SeaweedFS at `http://192.168.0.254:8333`, bucket **`hnvr`** (was
