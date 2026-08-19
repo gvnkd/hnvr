@@ -120,7 +120,10 @@ instance Controller CamerasController where
     now <- liftIO getCurrentTime
     render ShowView {..}
   action NewCameraAction = do
-    let camera = newRecord @Camera
+    -- newRecord defaults analysisFps to 0, which violates the form's
+    -- min="1" and makes HTML5 validation silently block every submit.
+    -- Default to the documented 5 fps (design 03 §2b).
+    let camera = newRecord @Camera |> set #analysisFps 5
     render NewView {..}
   action EditCameraAction {cameraId} = do
     camera <- fetch cameraId

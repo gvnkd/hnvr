@@ -127,6 +127,7 @@ feedJs cam =
 whepJs :: Camera -> Text
 whepJs cam =
   "const video = document.getElementById('hnvr-live');"
+    <> "HNVR.zoompan(video);"
     <> "const status = document.getElementById('hnvr-live-status');"
     <> "const led = document.getElementById('hnvr-live-led');"
     <> "const hdrLed = document.getElementById('hnvr-live-hdr-led');"

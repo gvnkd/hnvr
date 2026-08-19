@@ -3,44 +3,27 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
-> **Audio: muxed into recording + frequency filter (Aug 19 2026 — v0.7.0.0)**:
-> Sergey reported archive audio never plays + live sound reachable only in
-> browser-fullscreen. Three root causes, three fixes:
-> (1) **Archive had no audio path at all** — the recording ffmpeg ran `-an`
-> and a separate parallel ffmpeg dumped audio to unindexed `.m4a` objects
-> (no DB rows, no HLS audio group). Replaced with in-band muxing: the
-> single recording ffmpeg now does `-af
-> "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000"
-> -c:a aac -b:a 64k` when `record_audio=true` (`audioArgs` + the
-> `concurrently` dual-ffmpeg + `.m4a` path are GONE from
-> `Hnvr.Capture.{Ffmpeg,Worker}`). Verified: ffmpeg 7.1 writes ONE moof
-> with 2 trafs per fragment (no per-track moof+mdat split), so the Fmp4
-> slicer is untouched. **Filter order is load-bearing**: aresample to
-> 48 kHz BEFORE the lowpass — at the G.711 native 8 kHz a 14 kHz lowpass
-> is above Nyquist and computes garbage biquad coefficients. Cascaded
-> biquads (4th order) measured: -24 dB @ 30 Hz, -52 dB @ 20 kHz, flat @
-> 1 kHz. Live (WHEP) audio is NOT filtered — mediamtx has no DSP.
-> (2) `MediaFragment` carries per-fragment `hasAudio` (moof traf count
-> > 1) → `Segment.sHasAudio`/`SegmentWritten.swHasAudio` → real
-> `segments.has_audio` (EventWriter hardcoded FALSE before).
-> `SegmentWritten` FromJSON is now hand-written with `.:?`+`.!= False`
-> (old nodes' payloads still decode; false is true for them anyway).
-> (3) **Dashboard overlay + /ShowLive `<video>` had no `controls`
-> attribute at all** (and `muted`) — the only sound UI was the browser's
-> own fullscreen chrome (Firefox shows native controls in fullscreen
-> even without the attribute — that's the "only in fullscreen" report).
-> Both videos now have `controls`; app.js `openLive` sets
-> `video.muted=false` on open (a click is a user gesture, so the
-> autoplay policy allows it). /ShowLive stays muted-by-default (page
-> load, no gesture). Backyard was the only camera audible live simply
-> because others were never unmuted — mediamtx shows G711 tracks on all
-> dev paths; low_ent (OpenIPC/Majestic) may have no audio track at all
-> (check `GET /v3/paths/list` `tracks2`). Old `.m4a` objects in S3 are
-> now permanent orphans (retention is row-tracked) — one-off `mc rm`
-> cleanup if any exist (dev had none). Deploy: restart leader with
-> ./result-web (v0.7.0.0). Dev-verified live: new segments probe as
-> h264+aac/48k/mono, `has_audio=t` rows flowing, playlist serves the
-> audio-bearing init.mp4.
+> **Video zoom/pan + stale-CRUD-spec fix (Aug 19 2026 — v0.8.0.0)**:
+> `HNVR.zoompan(video)` in app.js — wheel = zoom at cursor (1.25x
+> notches, clamp [1,8], transform-origin 0 0, `translate(tx,ty) scale(z)`,
+> pan clamped to frame edges), LMB drag pans (only when zoomed — at 1x
+> nothing is intercepted so click-to-play still works; drags >4px swallow
+> the trailing click; drags starting in the bottom 48px control strip are
+> ignored). Zoom-out to 1x clears the transform — NO dblclick reset
+> (Chrome toggles fullscreen on video dblclick; page JS can't reliably
+> preventDefault that UA behavior). Wired into all three players:
+> dashboard overlay (video now wrapped in `.live-overlay-video` clip div —
+> the panel is overflow-y:auto for PTZ, transforms would otherwise spill
+> into scrollable overflow), /ShowLive, archive player; overlay close
+> resets the view. e2e `zoompan.spec.ts`. **Found while at it**:
+> cameras-crud spec was stale since v0.5.2.0 (still filled the dropped
+> `port` input) AND /NewCamera was broken for real users —
+> `newRecord` defaults analysisFps to 0 which violates the input's
+> `min="1"`, so HTML5 constraint validation silently blocked EVERY
+> create submit (no POST ever reaches the server; IHP logs completed
+> requests only, so nothing in the log either). Fix: NewCameraAction
+> sets analysisFps=5 (design default). Full suite: 29 passed + 2
+> conditional skips.
 >
 > Architecture (follows design 01/05/06 with noted deviations):
 >   * `Hnvr.Core.Ptz` — pure wire types: PtzCommand (sum, strict

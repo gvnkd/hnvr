@@ -50,7 +50,9 @@ instance View IndexView where
             <button class="btn btn-ghost btn-sm" data-live-fullscreen="1">fullscreen</button>
             <button class="btn btn-ghost btn-sm" data-live-close="1">close ✕</button>
           </div>
-          <video autoplay muted controls></video>
+          <div class="live-overlay-video">
+            <video autoplay muted controls></video>
+          </div>
           <div class="live-overlay-ptz"></div>
         </div>
       </div>

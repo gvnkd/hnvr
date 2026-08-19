@@ -873,12 +873,20 @@
   .live-overlay-head .spacer {
     flex: 1;
   }
+  .live-overlay-video {
+    overflow: hidden;
+    background: #000;
+  }
   .live-overlay video {
     display: block;
     width: 100%;
     aspect-ratio: 16 / 9;
     background: #000;
   }
+
+  /* ── Zoom/pan cursor affordances (HNVR.zoompan) ─────────────── */
+  video.is-zoomed { cursor: grab; }
+  video.is-zoomed.is-panning { cursor: grabbing; }
 
   /* ── Events: animated thumbnails + lightbox ──────────────────── */
   .ev-thumb {

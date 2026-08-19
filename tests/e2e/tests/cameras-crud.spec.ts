@@ -34,7 +34,6 @@ async function createCamera(page: Page, slug: string, name: string): Promise<voi
   await page.locator('input[name="name"]').fill(name);
   await page.locator('input[name="rtspUrl"]').fill(STUB_RTSP_URL);
   await page.locator('input[name="host"]').fill('192.168.0.99');
-  await page.locator('input[name="port"]').fill('554');
   await page.getByRole('button', {name: /create camera/i}).click();
   // Successful create → 302 to /ShowCamera?cameraId=<uuid>
   await page.waitForURL(/\/ShowCamera\?cameraId=/);

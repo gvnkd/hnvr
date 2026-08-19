@@ -70,6 +70,7 @@ instance View PlayerView where
 
       js =
         "const video = document.getElementById('hnvr-player');"
+          <> "HNVR.zoompan(video);"
           <> "const status = document.getElementById('hnvr-status');"
           <> "const led = document.getElementById('hnvr-status-led');"
           <> "function setLed(cls) { led.className = 'led ' + cls; }"

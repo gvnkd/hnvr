@@ -342,6 +342,123 @@
     };
   };
 
+  /* ── Video zoom/pan (wheel = zoom at cursor, LMB drag = pan) ── */
+  /* Digital zoom for every player surface (dashboard overlay,
+   * /ShowLive, archive player). transform-origin is fixed at 0 0 and
+   * the transform is `translate(tx,ty) scale(z)`, so the untransformed
+   * layout position of the element is getBoundingClientRect() minus
+   * (tx,ty) and a content point p sits at screen rect.left + z*p.
+   *
+   *  - wheel: zoom in/out by 1.25x per notch around the cursor, clamped
+   *    to [1, 8]; pan offsets clamped so the frame never exposes the
+   *    black container behind the video.
+   *  - LMB drag pans (only when zoomed; at z=1 nothing is intercepted
+   *    so click-to-play keeps working). A drag ending in a click event
+   *    is swallowed (>4px movement) so panning doesn't toggle pause.
+   *  - zoom back out to 1x (wheel down) clears the transform; no
+   *    dblclick reset — Chrome toggles fullscreen on video dblclick and
+   *    we can't reliably preventDefault that UA behavior.
+   *  - drags starting in the bottom 48 px (native control strip) are
+   *    left alone so the scrubber/volume stay usable.
+   *
+   * Returns { reset() } — overlay close resets the view. */
+  HNVR.zoompan = function (video) {
+    if (!video || video.dataset.zoompanBound) return null;
+    video.dataset.zoompanBound = "1";
+    video.style.transformOrigin = "0 0";
+    var z = 1,
+      tx = 0,
+      ty = 0;
+    var MAXZ = 8;
+    var drag = null,
+      moved = 0,
+      suppressClick = false;
+
+    function clamp() {
+      var W = video.offsetWidth,
+        H = video.offsetHeight;
+      tx = Math.min(0, Math.max(W - z * W, tx));
+      ty = Math.min(0, Math.max(H - z * H, ty));
+    }
+    function apply() {
+      if (z <= 1) {
+        z = 1;
+        tx = 0;
+        ty = 0;
+        video.style.transform = "";
+        video.classList.remove("is-zoomed");
+      } else {
+        clamp();
+        video.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + z + ")";
+        video.classList.add("is-zoomed");
+      }
+    }
+
+    video.addEventListener(
+      "wheel",
+      function (e) {
+        e.preventDefault();
+        var rect = video.getBoundingClientRect();
+        var factor = e.deltaY < 0 ? 1.25 : 0.8;
+        var z2 = Math.min(MAXZ, Math.max(1, z * factor));
+        if (z2 === z) return;
+        var s = z2 / z;
+        // Keep the content point under the cursor fixed on screen.
+        tx += (e.clientX - rect.left) * (1 - s);
+        ty += (e.clientY - rect.top) * (1 - s);
+        z = z2;
+        apply();
+      },
+      { passive: false }
+    );
+
+    video.addEventListener("mousedown", function (e) {
+      if (e.button !== 0 || z <= 1) return;
+      var rect = video.getBoundingClientRect();
+      if (video.controls && (e.clientY - rect.top) / z > video.offsetHeight - 48) return;
+      drag = { x: e.clientX, y: e.clientY };
+      moved = 0;
+      video.classList.add("is-panning");
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove", function (e) {
+      if (!drag) return;
+      var dx = e.clientX - drag.x,
+        dy = e.clientY - drag.y;
+      moved += Math.abs(dx) + Math.abs(dy);
+      tx += dx;
+      ty += dy;
+      drag = { x: e.clientX, y: e.clientY };
+      apply();
+    });
+    document.addEventListener("mouseup", function () {
+      if (!drag) return;
+      drag = null;
+      video.classList.remove("is-panning");
+      if (moved > 4) suppressClick = true;
+    });
+    video.addEventListener(
+      "click",
+      function (e) {
+        if (suppressClick) {
+          suppressClick = false;
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      },
+      true
+    );
+
+    return {
+      reset: function () {
+        z = 1;
+        tx = 0;
+        ty = 0;
+        apply();
+      },
+    };
+  };
+
   /* ── Dashboard camera wall: low-fps live frames ─────────────── */
   function liveOverlayOpen() {
     var o = document.getElementById("live-overlay");
@@ -426,6 +543,7 @@
   /* ── Fullscreen live overlay (FLIP expand from card) ────────── */
   var liveSession = null;
   var livePtz = null;
+  var liveZoom = null;
   function openLive(card) {
     var overlay = document.getElementById("live-overlay");
     if (!overlay) return;
@@ -437,6 +555,7 @@
     // fullscreen-ish live view. `muted` attribute stays in markup so
     // nothing autoplays with sound on page load.
     video.muted = false;
+    liveZoom = HNVR.zoompan(video);
     var statusEl = overlay.querySelector(".live-overlay-status-text");
     var ledEl = overlay.querySelector(".led");
     var slugEl = overlay.querySelector(".live-overlay-head .slug");
@@ -509,6 +628,10 @@
     if (livePtz) {
       livePtz.close();
       livePtz = null;
+    }
+    if (liveZoom) {
+      liveZoom.reset();
+      liveZoom = null;
     }
     var ptzSlot = overlay.querySelector(".live-overlay-ptz");
     if (ptzSlot) ptzSlot.innerHTML = "";
