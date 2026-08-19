@@ -3,6 +3,22 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **dblclick fullscreen + floating fs button (Aug 19 2026 — v0.8.0.3)**:
+> Sergey: dblclick entered fullscreen but zoom stayed dead, and no
+> fs-exit without Escape. Root cause: Chrome's UA dblclick on
+> `<video controls>` fullscreens the VIDEO ELEMENT itself, bypassing
+> the wrapper (hardware overlay → transform invisible). Fix: zoompan
+> intercepts dblclick in capture phase at the host (stopPropagation
+> before the shadow-root handler sees it) and routes to
+> `HNVR.toggleFullscreen(wrapper)` — dblclick now enters AND exits
+> wrapper fullscreen; bottom-48px control strip excluded. Native
+> control-bar fs button stays hidden (it hardcodes video-element
+> fullscreen); instead every wrapper has a floating `.zoompan-fs`
+> corner button (visible on hover, wired centrally via
+> `data-zoompan-fs`). NOTE: headless chromium has NO UA
+> dblclick-fullscreen behavior at all — the e2e spec exercises only
+> our handler; the UA interception needs desktop verification.
+>
 > **Zoom/pan fullscreen + overlay-close fixes (Aug 19 2026 — v0.8.0.1,
 > completed v0.8.0.2)**: (0) **v0.8.0.1's capture-phase wheel fix was
 > insufficient — fullscreen zoom stayed invisible.** Root cause: a

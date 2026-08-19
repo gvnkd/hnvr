@@ -909,6 +909,23 @@
     object-fit: contain;
   }
 
+  /* Floating on-video fullscreen button (the native one is hidden —
+     it would fullscreen the bare video element and break zoom). */
+  .live-overlay-video { position: relative; }
+  .zoompan-fs {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .video-frame:hover .zoompan-fs,
+  .live-overlay-video:hover .zoompan-fs,
+  .zoompan-fs:focus-visible {
+    opacity: 1;
+  }
+
   /* ── Events: animated thumbnails + lightbox ──────────────────── */
   .ev-thumb {
     position: relative;

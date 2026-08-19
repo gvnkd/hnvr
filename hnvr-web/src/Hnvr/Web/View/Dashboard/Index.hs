@@ -52,6 +52,7 @@ instance View IndexView where
           </div>
           <div class="live-overlay-video">
             <video autoplay muted controls></video>
+            <button class="btn btn-ghost btn-sm zoompan-fs" data-zoompan-fs="1">fullscreen</button>
           </div>
           <div class="live-overlay-ptz"></div>
         </div>

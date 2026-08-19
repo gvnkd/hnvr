@@ -85,6 +85,42 @@ test.describe('Video zoom/pan', () => {
     await page.evaluate(() => document.exitFullscreen());
   });
 
+  test('dblclick toggles wrapper fullscreen (enter AND exit)', async ({loggedInPage: page}) => {
+    // dblclick is intercepted in capture phase so Chrome's UA
+    // video-element fullscreen never bypasses the wrapper. Headless
+    // chromium lacks the UA dblclick behavior entirely, so this tests
+    // OUR handler: dblclick enters wrapper fullscreen, dblclick exits.
+    await page.goto('/Cameras');
+    const firstShowLink = page.locator('tbody tr').first().getByRole('link', {name: 'Show'});
+    const hasCamera = await firstShowLink.count();
+    test.skip(!hasCamera, 'no cameras in DB — run cameras-crud.spec first');
+
+    await firstShowLink.click();
+    await page.waitForURL(/\/ShowCamera\?cameraId=/);
+    const cameraId = new URL(page.url()).searchParams.get('cameraId');
+
+    await page.goto(`/PlayerArchive?cameraId=${cameraId}`);
+    const video = page.locator('#hnvr-player');
+    await expect(video).toBeVisible();
+    const box = await video.boundingBox();
+    expect(box).toBeTruthy();
+    // Stay off the native control strip (bottom 48 px is excluded).
+    const cx = box!.x + box!.width / 2;
+    const cy = box!.y + box!.height / 2 - 60;
+
+    await page.mouse.dblclick(cx, cy);
+    await page.waitForFunction(() => !!document.fullscreenElement);
+    const fsIsWrapper = await page.evaluate(
+      () => document.fullscreenElement!.classList.contains('video-frame')
+    );
+    expect(fsIsWrapper).toBe(true);
+
+    // dblclick again (video now fills the screen) → exit fullscreen.
+    const viewport = page.viewportSize()!;
+    await page.mouse.dblclick(viewport.width / 2, viewport.height / 2 - 60);
+    await page.waitForFunction(() => !document.fullscreenElement);
+  });
+
   test('pan drag ending on the overlay backdrop does NOT close the overlay', async ({loggedInPage: page}) => {
     // Chrome dispatches the click after a drag on the nearest common
     // ancestor of the press/release points — a pan released over the

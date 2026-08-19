@@ -39,6 +39,7 @@ instance View PlayerView where
 
       <div class="video-frame">
         <video id="hnvr-player" controls></video>
+        <button class="btn btn-ghost btn-sm zoompan-fs" data-zoompan-fs="1">fullscreen</button>
       </div>
       <div class="video-status">
         <span id="hnvr-status-led" class="led led-warn"></span>
@@ -95,8 +96,7 @@ instance View PlayerView where
           <> "  status.textContent = 'HLS not supported in this browser'; setLed('led-off');"
           <> "}"
           <> "document.getElementById('hnvr-player-fs').addEventListener('click', function () {"
-          <> "  var f = video.closest('.video-frame');"
-          <> "  if (f && f.requestFullscreen) f.requestFullscreen();"
+          <> "  HNVR.toggleFullscreen(video.closest('.video-frame'));"
           <> "});"
       seekJs = case startOffset of
         Just off ->

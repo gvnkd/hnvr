@@ -49,6 +49,7 @@ instance View ShowView where
 
       <div class="video-frame">
         <video id="hnvr-live" autoplay muted controls></video>
+        <button class="btn btn-ghost btn-sm zoompan-fs" data-zoompan-fs="1">fullscreen</button>
       </div>
       <div class="video-status">
         <span id="hnvr-live-led" class="led led-warn"></span>
@@ -141,6 +142,5 @@ whepJs cam =
     <> "  else { status.textContent = 'Error: ' + state.replace(/^error:\\s*/, ''); setLeds('led-off', 'led-off'); }"
     <> "});"
     <> "document.getElementById('hnvr-live-fs').addEventListener('click', function () {"
-    <> "  var f = video.closest('.video-frame');"
-    <> "  if (f && f.requestFullscreen) f.requestFullscreen();"
+    <> "  HNVR.toggleFullscreen(video.closest('.video-frame'));"
     <> "});"

@@ -343,6 +343,19 @@
   };
 
   /* ── Video zoom/pan (wheel = zoom at cursor, LMB drag = pan) ── */
+  /* Fullscreen always targets the WRAPPER div, never the <video>
+   * element (hardware overlays ignore transforms — see the
+   * fullscreenchange comment below). HNVR.toggleFullscreen is the one
+   * entry point; zoompan additionally intercepts dblclick on the video
+   * so Chrome's UA "dblclick = fullscreen the video element" never
+   * bypasses the wrapper. */
+  HNVR.toggleFullscreen = function (el) {
+    if (!el) return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (el.requestFullscreen) el.requestFullscreen();
+  };
+
+  /* ── Video zoom/pan (wheel = zoom at cursor, LMB drag = pan) ── */
   /* Digital zoom for every player surface (dashboard overlay,
    * /ShowLive, archive player). transform-origin is fixed at 0 0 and
    * the transform is `translate(tx,ty) scale(z)`, so the untransformed
@@ -355,9 +368,10 @@
    *  - LMB drag pans (only when zoomed; at z=1 nothing is intercepted
    *    so click-to-play keeps working). A drag ending in a click event
    *    is swallowed (>4px movement) so panning doesn't toggle pause.
-   *  - zoom back out to 1x (wheel down) clears the transform; no
-   *    dblclick reset — Chrome toggles fullscreen on video dblclick and
-   *    we can't reliably preventDefault that UA behavior.
+   *  - zoom back out to 1x (wheel down) clears the transform; dblclick
+   *    toggles wrapper fullscreen (intercepted in capture phase —
+   *    Chrome's own dblclick fullscreens the bare video element, which
+   *    breaks zoom via hardware overlay).
    *  - drags starting in the bottom 48 px (native control strip) are
    *    left alone so the scrubber/volume stay usable.
    *
@@ -479,6 +493,27 @@
           e.preventDefault();
           e.stopPropagation();
         }
+      },
+      true
+    );
+
+    // dblclick = toggle wrapper fullscreen. Capture phase +
+    // stopPropagation is load-bearing: Chrome's media controls toggle
+    // VIDEO-element fullscreen on dblclick from inside the shadow root —
+    // that path bypasses the wrapper and its hardware overlay ignores
+    // the zoom transform. Stopping the event at the host keeps the
+    // shadow handler from ever seeing it. The bottom control strip is
+    // excluded so control dblclicks behave natively.
+    var wrapper =
+      video.closest(".video-frame, .live-overlay-video") || video.parentElement;
+    video.addEventListener(
+      "dblclick",
+      function (e) {
+        var rect = video.getBoundingClientRect();
+        if (video.controls && e.clientY - rect.top > rect.height - 48) return;
+        e.preventDefault();
+        e.stopPropagation();
+        HNVR.toggleFullscreen(wrapper);
       },
       true
     );
@@ -648,10 +683,7 @@
     liveSession = HNVR.whep(slug, video, setState);
 
     overlay.querySelector("[data-live-fullscreen]").onclick = function () {
-      // Fullscreen the WRAPPER, not the <video> — see HNVR.zoompan's
-      // fullscreenchange comment.
-      var frame = overlay.querySelector(".live-overlay-video");
-      if (frame && frame.requestFullscreen) frame.requestFullscreen();
+      HNVR.toggleFullscreen(overlay.querySelector(".live-overlay-video"));
     };
   }
   function closeLive() {
@@ -747,6 +779,13 @@
     document.querySelectorAll("[data-theme-option]").forEach(function (el) {
       el.addEventListener("click", function () {
         HNVR.setTheme(el.getAttribute("data-theme-option"));
+      });
+    });
+    // Floating on-video fullscreen buttons (wrapper fullscreen — see
+    // HNVR.toggleFullscreen).
+    document.querySelectorAll("[data-zoompan-fs]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        HNVR.toggleFullscreen(btn.closest(".video-frame, .live-overlay-video"));
       });
     });
     initCollapsibles();
