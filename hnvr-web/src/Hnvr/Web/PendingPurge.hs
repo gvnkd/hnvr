@@ -103,9 +103,9 @@ forkCameraPurge cameraId = do
   pure ()
   where
     worker = do
-      mS3 <- S3.readS3ConfigFromEnv
+      mS3 <- S3.readS3Config
       case mS3 of
-        Nothing -> logWarn "PendingPurge: HNVR_S3_* env not set; batch stays pending"
+        Nothing -> logWarn "PendingPurge: S3 config missing (hnvr.yaml + HNVR_S3_*); batch stays pending"
         Just s3cfg -> do
           dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
           bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn -> do
@@ -115,9 +115,9 @@ forkCameraPurge cameraId = do
 -- | One sweeper pass over all cameras' stale batches.
 sweepOnce :: IO ()
 sweepOnce = do
-  mS3 <- S3.readS3ConfigFromEnv
+  mS3 <- S3.readS3Config
   case mS3 of
-    Nothing -> logWarn "PendingPurge: HNVR_S3_* env not set; skipping sweep"
+    Nothing -> logWarn "PendingPurge: S3 config missing (hnvr.yaml + HNVR_S3_*); skipping sweep"
     Just s3cfg -> do
       dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
       bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn -> do

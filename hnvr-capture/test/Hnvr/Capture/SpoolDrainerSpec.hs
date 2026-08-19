@@ -55,6 +55,8 @@ tests =
                       s3cPublicEndpoint = Nothing,
                       s3cAccessKey = "k",
                       s3cSecretKey = "s",
+                      s3cRoAccessKey = Nothing,
+                      s3cRoSecretKey = Nothing,
                       s3cBucket = "hnvr-test"
                     }
           -- minio-hs retries connection failures with growing backoff,

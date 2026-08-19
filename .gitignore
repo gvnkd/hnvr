@@ -68,6 +68,8 @@ tmp/
 *.log
 *.log.*
 *.secret
+# App config with real credentials (see hnvr.example.yaml)
+/hnvr.yaml
 # MediaMTX auto-generated MoQ TLS certs (created in CWD on first run)
 auto.crt
 auto.key

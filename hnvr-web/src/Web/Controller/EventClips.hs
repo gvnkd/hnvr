@@ -56,7 +56,7 @@ instance Controller EventClipsController where
     m3u8 <- case clip.pendingDeleteAt of
       Just _ -> pure renderEmptyPlaylist
       Nothing -> do
-        cfg <- liftIO S3.readS3ConfigFromEnv
+        cfg <- liftIO S3.readS3Config
         case cfg of
           Nothing -> pure renderEmptyPlaylist
           Just c -> liftIO (buildClipPlaylist clip c)
@@ -83,7 +83,7 @@ instance Controller EventClipsController where
         _ <-
           liftIO $ Async.async $ do
             r <- try $ do
-              mS3 <- S3.readS3ConfigFromEnv
+              mS3 <- S3.readS3Config
               forM_ mS3 $ \cfg -> do
                 failures <- purgeClipObjects cfg prefix
                 when (failures == 0)

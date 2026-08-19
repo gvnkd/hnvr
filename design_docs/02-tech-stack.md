@@ -129,8 +129,9 @@ SORT (Bewley et al. 2016) in `Hnvr.Cv.Tracker.Sort`: ~250 LOC. Kalman filter wit
 | IHP's bundled `postgresql-libpq` | IHP-managed | Don't add `postgresql-simple` or `persistent` — IHP owns the DB layer. (HNVR's leader-side LISTEN/NOTIFY loops and migrations DO use `postgresql-simple` directly, outside IHP's Hasql pool, because Hasql 1.9.x has no Notification module and IHP v1.6.0's `sqlExec` is broken for DDL — see pitfalls #41, #42.) |
 
 **SeaweedFS / MinIO specifics**
-- S3 API endpoint via env var `HNVR_S3_ENDPOINT` (e.g. `https://s3.example.internal`).
-- Browser-facing presigned URLs use `HNVR_S3_PUBLIC_ENDPOINT` when set (e.g. `https://s3.example.com`); the signed URL's host is part of the SigV4 signature, so an internal `localhost` endpoint would otherwise leak into archive playlists and event thumbnails. Falls back to `HNVR_S3_ENDPOINT`. Use `scheme://host[:port]` (no path prefix).
+- Connection params come from the YAML app config (`hnvr.yaml`, path via `HNVR_CONFIG`; see `hnvr.example.yaml`). `HNVR_S3_*` env vars remain as per-field overrides (tests, one-off binaries).
+- Browser-facing presigned URLs use `public_endpoint` (or `HNVR_S3_PUBLIC_ENDPOINT`) when set; the signed URL's host is part of the SigV4 signature, so an internal `localhost` endpoint would otherwise leak into archive playlists and event thumbnails. Falls back to `endpoint`. Use `scheme://host[:port]` (no path prefix).
+- Presigned URLs handed to browsers are signed with the read-only `ro_access_key`/`ro_secret_key` identity when configured (SeaweedFS `Read`/`List` actions only) — the admin key never leaves the server.
 - Path-style addressing — minio-hs default; no virtual-hosted-style.
 - Lifecycle policies: SeaweedFS supports per-bucket TTL, but we sweep ourselves via `Hnvr.Web.RetentionSweeper` (M6, Aug 11 2026) — don't rely on it.
 - Erasure coding is internal to SeaweedFS — we just see a normal S3 API.

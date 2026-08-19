@@ -355,8 +355,8 @@ buildPlaylist camera segments cfg = do
       cs <$> S3.presignGetUrlWithConfig cfg bucket seg.objectKey 3600
     entry seg url = (realToFrac (diffUTCTime seg.endTs seg.startTs), url)
 
--- | Read S3 config from environment variables. Returns Nothing if any
--- required var is missing. Reads each request — fine for v1; a future
--- slice will cache via FrameworkConfig + sops-nix.
+-- | Resolve S3 config from hnvr.yaml + HNVR_S3_* env overrides.
+-- Returns Nothing if neither source is complete. Reads each request —
+-- fine for v1; a future slice will cache via FrameworkConfig.
 readS3Config :: IO (Maybe S3.S3Config)
-readS3Config = S3.readS3ConfigFromEnv
+readS3Config = S3.readS3Config

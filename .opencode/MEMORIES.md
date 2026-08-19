@@ -3,6 +3,39 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **S3 moved to external SeaweedFS + app config file (Aug 19 2026 — v0.9.0.0)**:
+> MinIO is GONE from devenv; everything records to the external
+> SeaweedFS at `http://192.168.0.254:8333`, bucket **`hnvr`** (was
+> `hnvr-recordings`). Credentials now live in a YAML app config, NOT in
+> the flake/env: **`Hnvr.Core.Config`** (new, hnvr-core; `yaml` dep)
+> parses `hnvr.yaml` — path from `$HNVR_CONFIG`, default `./hnvr.yaml`
+> (CWD). Dev copy at repo root is **gitignored** (`/hnvr.yaml` in
+> .gitignore); `hnvr.example.yaml` is the committed template.
+> `Hnvr.Storage.S3.readS3Config` merges file + `HNVR_S3_*` env (env
+> wins per-section; all 7 hnvr-web call sites switched from
+> readS3ConfigFromEnv). **ro identity for browsers**: `S3Config` gained
+> `s3cRoAccessKey`/`s3cRoSecretKey` (env `HNVR_S3_RO_*`) —
+> `presignConnectInfo` signs with the ro pair when both are set, so
+> presigned archive/clip/thumbnail URLs handed to browsers carry the
+> SeaweedFS `hnvr-ro` identity (Read/List only), never the admin key.
+> Verified live: `HNVR_TEST_INTEGRATION=1 HNVR_CONFIG=$PWD/hnvr.yaml
+> cabal test hnvr-storage` does a real put + presigned-ro HTTP GET
+> round-trip (S3Spec "ro-presigned URL actually GETs the object");
+> pure lane asserts the ro key lands in X-Amz-Credential (setRegion
+> "us-east-1" disables minio-hs's region-discovery HTTP call, so the
+> presign test stays offline). module.nix: new
+> `services.hnvr.leader.configFile` (→ `HNVR_CONFIG`; point at the
+> sops `hnvr-config` secret, owner = hnvr user); the four
+> `hnvr-s3-*` sops fragment keys were REMOVED from the preStart
+> EnvironmentFile wiring — secrets-template.yaml now carries a single
+> `hnvr-config` key holding the whole YAML. devenv env exports
+> `HNVR_CONFIG=${devenv.root}/hnvr.yaml`; metrics stays on 9102.
+> **Ops**: a running leader without hnvr.yaml keeps working via
+> HNVR_S3_* env (override path), but to actually switch it to
+> SeaweedFS it needs the file or the new env values. Structure is
+> section-based (`s3:` only for now; unknown keys ignored — nats/db/
+> data_key sections land as their consumers migrate).
+
 > **dblclick fullscreen + floating fs button (Aug 19 2026 — v0.8.0.3)**:
 > Sergey: dblclick entered fullscreen but zoom stayed dead, and no
 > fs-exit without Escape. Root cause: Chrome's UA dblclick on

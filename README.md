@@ -97,27 +97,31 @@ In a separate terminal inside the shell:
 devenv up     # process-compose TUI; Ctrl-C or 'q' to stop
 ```
 
-Brings up four services with readiness probes:
+Brings up three services with readiness probes:
 
 | Service | Port(s) | Health check |
 |---------|---------|--------------|
 | PostgreSQL 18 | 15432 | (devenv `pg_isready`) |
-| MinIO (S3) | 9100 (API), 9101 (console) | `GET /minio/health/live` |
 | NATS + JetStream | 4222, monitor 8222 | `GET /healthz` |
 | MediaMTX | 9997 (REST), 8889 (WebRTC) | `GET /v3/info` |
+
+S3 is the external SeaweedFS (`http://192.168.0.254:8333`, bucket
+`hnvr`) — no local MinIO. Credentials live in the gitignored
+`hnvr.yaml` at the repo root (copy `hnvr.example.yaml` and fill in the
+keys); `HNVR_CONFIG` points the binaries at it. The `ro_*` key pair in
+that file signs the presigned GET URLs handed to end-user browsers, so
+browser-facing URLs carry a read-only identity. `HNVR_S3_*` env vars
+(incl. `HNVR_S3_PUBLIC_ENDPOINT`, `HNVR_S3_RO_ACCESS_KEY`,
+`HNVR_S3_RO_SECRET_KEY`) override the file when set.
 
 > **Port 15432, not 5432** — Sergey's dev box runs a system postgres on
 > :5432 (langfuse). The devenv PG uses :15432; `DATABASE_URL` is
 > pre-wired accordingly.
 
-Env vars consumed by HNVR binaries (`HNVR_NATS_URI`, `HNVR_S3_*`,
+Env vars consumed by HNVR binaries (`HNVR_NATS_URI`, `HNVR_CONFIG`,
 `DATABASE_URL`, `HNVR_MEDIAMTX_*`, `PORT=18001`) are exported inside
 the shell — `./result/bin/hnvr-leader` and cabal-built integration
-binaries drop straight in without manual `export`. Set
-`HNVR_S3_PUBLIC_ENDPOINT` when archive/event links must be reachable
-from a browser on another host; presigned URLs are signed against that
-host and otherwise fall back to `HNVR_S3_ENDPOINT`. Use
-`scheme://host[:port]` (no path prefix).
+binaries drop straight in without manual `export`.
 
 ### Stop a hung devenv
 

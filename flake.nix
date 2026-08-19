@@ -32,7 +32,7 @@
     # Phase 6+ (disks):
     #   disko.url = "github:nix-community/disko";
 
-    # devenv — manages local dev services (Postgres, MinIO, NATS, MediaMTX)
+    # devenv — manages local dev services (Postgres, NATS, MediaMTX)
     # via `devenv up` inside `nix develop`. Flake-integrated: the devShell
     # is built via devenv.lib.mkShell instead of plain pkgs.mkShell, so
     # `nix develop` lands in a devenv-aware shell.
@@ -342,22 +342,17 @@
         };
 
         # -------------------------------------------------------------
-        # devenv-only pkgs instance. MinIO is `meta.insecure = true` in
-        # nixpkgs and the eval check looks at `config.permittedInsecurePackages`,
-        # which can only be set via `import nixpkgs { config = ...; }` (not
-        # via overlays on legacyPackages). We compose IHP's overlay on top
-        # so `ghc912` resolves the same way as the main `pkgs` above; our
-        # hnvrHaskellOverlay layers on top of that to expose our packages
-        # for fast cabal-style iteration inside the devenv shell.
-        #
-        # Production deployments use the SeaweedFS SaaS for object storage,
-        # never this dev MinIO — the bypass is dev-shell-only.
+        # devenv-only pkgs instance. Kept separate from the main `pkgs`
+        # so the dev shell can carry dev-only config knobs without
+        # touching the production package set. We compose IHP's overlay
+        # on top so `ghc912` resolves the same way as the main `pkgs`
+        # above; our hnvrHaskellOverlay layers on top of that to expose
+        # our packages for fast cabal-style iteration inside the devenv
+        # shell.
         # -------------------------------------------------------------
-        minioVersion = (import nixpkgs { inherit system; overlays = [ ihp.overlays.default ]; }).minio.name;
         devenvPkgs = import nixpkgs {
           inherit system;
           overlays = [ ihp.overlays.default mediamtxOverlay ];
-          config.permittedInsecurePackages = [ minioVersion ];
         };
         devenvHpkgs = devenvPkgs.ghc912.extend (hnvrHaskellOverlay devenvPkgs.haskell.lib);
 
@@ -521,21 +516,18 @@
         #
         # Replaces the previous plain `pkgs.mkShell`. The shell still
         # works under `nix develop` and direnv (`use flake`), but now
-        # also exposes `devenv up` which launches the four services
-        # the leader VM normally provides (Postgres, MinIO, NATS,
-        # MediaMTX). Env vars consumed by HNVR binaries (HNVR_NATS_URI,
-        # HNVR_S3_*, DATABASE_URL, etc.) are pre-wired so cabal-built
+        # also exposes `devenv up` which launches the dev services
+        # (Postgres, NATS, MediaMTX). S3 is the external SeaweedFS at
+        # 192.168.0.254:8333 — credentials come from the gitignored
+        # hnvr.yaml at the repo root (see hnvr.example.yaml), NOT from
+        # this flake. Env vars consumed by HNVR binaries (HNVR_NATS_URI,
+        # HNVR_CONFIG, DATABASE_URL, etc.) are pre-wired so cabal-built
         # binaries drop straight into a working environment.
         #
         # `nix develop` MUST be invoked with `--no-pure-eval` (or via
         # direnv which already does so) — `devenv up` needs to query
         # the working directory at runtime, which pure eval forbids.
         # See https://devenv.sh/guides/using-with-flakes/.
-        #
-        # MinIO is `meta.insecure = true` in nixpkgs (CVE history).
-        # We construct a dedicated pkgs instance for the devenv shell
-        # only — production deployments use the SeaweedFS SaaS, never
-        # this dev MinIO.
         # -------------------------------------------------------------
         devShells.default = devenv.lib.mkShell {
           inherit inputs;
@@ -626,20 +618,9 @@
                 '';
               };
 
-              # MinIO — S3-compatible storage for fMP4 segments. Buckets
-              # are auto-created on first start; no `mc mb` needed.
-              # Matches the credentials used in MEMORIES.md pitfall #30
-              # and the hnvr-s3-upload integration binary examples.
-              services.minio = {
-                enable = true;
-                # 0.0.0.0 so browsers on other hosts can fetch presigned
-                # URLs via HNVR_S3_PUBLIC_ENDPOINT (LAN dev box).
-                listenAddress = "0.0.0.0:9100";
-                consoleAddress = "127.0.0.1:9101";
-                accessKey = "minioadmin";
-                secretKey = "minioadmin";
-                buckets = [ "hnvr-recordings" ];
-              };
+              # S3 is NOT a devenv service: dev records straight into
+              # the external SeaweedFS (http://192.168.0.254:8333,
+              # bucket `hnvr`) via hnvr.yaml — see HNVR_CONFIG below.
 
               # NATS — IPC spine. Auth + JetStream on; matches what the
               # VM runs (nix/nats-server.nix) and the URI form the binaries
@@ -695,18 +676,6 @@
                   --watch
               '';
 
-              # MinIO's built-in devenv service module defines
-              # `processes.minio.exec` but no readiness probe — the TUI
-              # shows "no health status" until we add one. /minio/health/
-              # live is MinIO's official unauthenticated liveness check.
-              processes.minio.ready = {
-                exec = "${pkgs.curl}/bin/curl -fsS -o /dev/null http://127.0.0.1:9100/minio/health/live";
-                initial_delay = 2;
-                period = 5;
-                probe_timeout = 3;
-                failure_threshold = 5;
-              };
-
               # ---- Environment variables consumed by HNVR binaries ------
               #
               # These mirror what the NixOS leader VM sets via the
@@ -717,17 +686,11 @@
               env = {
                 HNVR_NATS_URI = "nats://nats:nats@localhost:4222";
                 HNVR_HOST = "hnvr-2";
-                # Server-side S3 endpoint. If the browser is not on the
-                # same host, also set HNVR_S3_PUBLIC_ENDPOINT to the
-                # browser-reachable S3 address; presigned URLs are signed
-                # against that host (falling back to this endpoint).
-                HNVR_S3_ENDPOINT = "http://localhost:9100";
-                # Browser-facing presign host (this dev box's LAN IP);
-                # thumbnails/archive URLs signed against it.
-                HNVR_S3_PUBLIC_ENDPOINT = "http://192.168.0.156:9100";
-                HNVR_S3_ACCESS_KEY = "minioadmin";
-                HNVR_S3_SECRET_KEY = "minioadmin";
-                HNVR_S3_BUCKET = "hnvr-recordings";
+                # S3 (SeaweedFS) credentials live in the gitignored
+                # hnvr.yaml at the repo root — copy hnvr.example.yaml
+                # and fill in the keys. HNVR_S3_* env vars still
+                # override the file when set (integration tests).
+                HNVR_CONFIG = "${config.devenv.root}/hnvr.yaml";
                 HNVR_MEDIAMTX_API = "http://127.0.0.1:9997";
                 HNVR_MEDIAMTX_WEBRTC = "http://127.0.0.1:8889";
                 # ConfigSyncer writes here in prod (/run/hnvr/mediamtx.yml).
@@ -781,8 +744,9 @@
                 # engine, ~1 min; later starts load from cache).
                 HNVR_TRT_CACHE_DIR = "${config.env.DEVENV_STATE}/trt-cache";
                 # Prometheus metrics endpoint (Hnvr.Web.Metrics, own
-                # warp — leader + node). 9102 because devenv MinIO owns
-                # :9100; production default stays 9100.
+                # warp — leader + node). 9102 stays as the dev port
+                # (9100 was the old devenv MinIO's port; kept to avoid
+                # churn with running dev processes).
                 HNVR_METRICS_PORT = "9102";
               };
 
@@ -808,11 +772,11 @@
                 echo "  HNVR dev shell — $(ghc --version)"
                 echo "  Build:     cabal build all"
                 echo "  REPL:      cabal repl"
-                echo "  Services:  devenv up   (postgres :15432, minio :9100,"
+                echo "  Services:  devenv up   (postgres :15432,"
                 echo "                          nats :4222, mediamtx :9997)"
+                echo "  S3:        hnvr.yaml → http://192.168.0.254:8333 (bucket hnvr)"
                 echo "  Health:    curl localhost:8222/healthz         (nats)"
                 echo "             curl localhost:9997/v2/config/paths  (mediamtx)"
-                echo "             curl localhost:9101/minio/health/live (minio)"
                 echo "  E2E:       cd tests/e2e && npm install && npx playwright install chromium && npm test"
                 echo ""
               '';

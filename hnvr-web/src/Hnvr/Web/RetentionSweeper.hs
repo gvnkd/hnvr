@@ -71,9 +71,9 @@ startRetentionSweeper = do
 -- config is missing or no DB connection.
 sweepOnce :: IO ()
 sweepOnce = do
-  mS3 <- S3.readS3ConfigFromEnv
+  mS3 <- S3.readS3Config
   case mS3 of
-    Nothing -> logWarn "RetentionSweeper: HNVR_S3_* env not set; skipping sweep"
+    Nothing -> logWarn "RetentionSweeper: S3 config missing (hnvr.yaml + HNVR_S3_*); skipping sweep"
     Just s3cfg -> do
       dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
       bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn -> do

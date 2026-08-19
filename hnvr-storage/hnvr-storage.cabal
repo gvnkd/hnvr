@@ -46,6 +46,7 @@ test-suite hnvr-storage-test
     , bytestring
     , containers
     , hnvr-storage
+    , http-conduit
     , minio-hs
     , tasty
     , tasty-hunit

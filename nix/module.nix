@@ -76,7 +76,21 @@ in
         part of the SigV4 signature, so when HNVR_S3_ENDPOINT is an
         internal address (localhost/VPC) set this to the address clients
         use (for example https://s3.example.com). Null falls back to
-        HNVR_S3_ENDPOINT.
+        HNVR_S3_ENDPOINT. Superseded by the @public_endpoint@ field of
+        the config file (see configFile) — this env var overrides it.
+      '';
+    };
+
+    configFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        HNVR_CONFIG: path to the YAML app config (S3 credentials etc.,
+        see hnvr.example.yaml). Typically the sops-nix secret
+        @config.sops.secrets.hnvr-config.path@ — that secret's owner
+        must be the hnvr user since the service reads it at runtime
+        (not via systemd EnvironmentFile). Null = rely on HNVR_S3_* env
+        vars alone.
       '';
     };
 
@@ -181,6 +195,8 @@ in
         HNVR_MODEL_DIR = cfg.modelDir;
       } // lib.optionalAttrs (cfg.s3PublicEndpoint != null) {
         HNVR_S3_PUBLIC_ENDPOINT = cfg.s3PublicEndpoint;
+      } // lib.optionalAttrs (cfg.configFile != null) {
+        HNVR_CONFIG = toString cfg.configFile;
       } // cfg.environment;
 
       serviceConfig = {
@@ -239,12 +255,11 @@ in
         # sops-nix may have rotated the underlying /run/secrets/* value
         # between activations.
         mkdir -p ${cfg.dataDir}/env
+        # S3 creds moved into the YAML config file (cfg.configFile /
+        # sops secret hnvr-config); the HNVR_S3_* env fragment keys are
+        # gone — env remains an override, not the primary source.
         for kv in \
             "HNVR_DATA_KEY=hnvr-data-key" \
-            "HNVR_S3_ENDPOINT=hnvr-s3-endpoint" \
-            "HNVR_S3_ACCESS_KEY=hnvr-s3-access-key" \
-            "HNVR_S3_SECRET_KEY=hnvr-s3-secret-key" \
-            "HNVR_S3_BUCKET=hnvr-s3-bucket" \
             "DATABASE_URL=hnvr-db-url" \
             "INITIAL_ADMIN_EMAIL=initial-admin-email" \
             "INITIAL_ADMIN_PASSWORD=initial-admin-password"; do
@@ -267,10 +282,6 @@ in
         map (k: "${cfg.dataDir}/env/${k}")
           [
             "HNVR_DATA_KEY"
-            "HNVR_S3_ENDPOINT"
-            "HNVR_S3_ACCESS_KEY"
-            "HNVR_S3_SECRET_KEY"
-            "HNVR_S3_BUCKET"
             "DATABASE_URL"
             "INITIAL_ADMIN_EMAIL"
             "INITIAL_ADMIN_PASSWORD"

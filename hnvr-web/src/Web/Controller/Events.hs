@@ -185,7 +185,7 @@ defaultDbUrl = "postgresql:///hnvr?host=/run/postgresql"
 -- 'Nothing'; upload failures degrade to a placeholder in the view.
 presignThumbs :: [EventRow] -> IO [Maybe Text]
 presignThumbs rows = do
-  mS3 <- liftIO S3.readS3ConfigFromEnv
+  mS3 <- liftIO S3.readS3Config
   case mS3 of
     Nothing -> pure (map (const Nothing) rows)
     Just cfg -> do

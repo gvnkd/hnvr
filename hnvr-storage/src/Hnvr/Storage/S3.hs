@@ -27,6 +27,7 @@ module Hnvr.Storage.S3
     connectInfo,
     presignConnectInfo,
     readS3ConfigFromEnv,
+    readS3Config,
 
     -- * Operations
     runS3,
@@ -47,6 +48,7 @@ module Hnvr.Storage.S3
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Exception (throwIO)
 import qualified Data.ByteArray as BA (ScrubbedBytes, convert)
 import Data.ByteString (ByteString)
@@ -60,6 +62,7 @@ import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import qualified Hnvr.Core.Config as AppCfg
 import Network.Minio
   ( AccessKey (..),
     Bucket,
@@ -101,6 +104,14 @@ data S3Config = S3Config
     s3cPublicEndpoint :: !(Maybe Text),
     s3cAccessKey :: !Text,
     s3cSecretKey :: !Text,
+    -- | Read-only identity used ONLY for browser-facing presigned GET
+    -- URLs. When both are 'Just', 'presignConnectInfo' signs with this
+    -- pair instead of the primary credentials, so URLs handed to
+    -- end-user browsers carry a read-only identity (SeaweedFS
+    -- @Read:\<bucket\>@ + @List:\<bucket\>@ actions) rather than the
+    -- admin key. 'Nothing' falls back to the primary pair.
+    s3cRoAccessKey :: !(Maybe Text),
+    s3cRoSecretKey :: !(Maybe Text),
     -- | Used by helpers; the @putObject*@ functions take an explicit
     -- 'Bucket' so callers can target multiple buckets (segments,
     -- event thumbnails, exports) from one 'S3Config'.
@@ -112,26 +123,36 @@ data S3Config = S3Config
 -- endpoint ('s3cEndpoint'); browser-facing presigned URLs should use
 -- 'presignConnectInfo' instead.
 connectInfo :: S3Config -> ConnectInfo
-connectInfo = connectInfoWith s3cEndpoint
+connectInfo = connectInfoWith s3cEndpoint s3cAccessKey s3cSecretKey
 
 -- | Build the 'ConnectInfo' used for presigned GET URLs. Picks
 -- 's3cPublicEndpoint' when set so the signature's host header matches a
 -- URL the browser can actually reach; falls back to 's3cEndpoint'.
+-- Signs with the read-only identity ('s3cRoAccessKey' /
+-- 's3cRoSecretKey') when both are set.
 presignConnectInfo :: S3Config -> ConnectInfo
 presignConnectInfo =
-  connectInfoWith (\c -> fromMaybe (s3cEndpoint c) (s3cPublicEndpoint c))
+  connectInfoWith
+    (\c -> fromMaybe (s3cEndpoint c) (s3cPublicEndpoint c))
+    (\c -> fromMaybe (s3cAccessKey c) (s3cRoAccessKey c))
+    (\c -> fromMaybe (s3cSecretKey c) (s3cRoSecretKey c))
 
-connectInfoWith :: (S3Config -> Text) -> S3Config -> ConnectInfo
-connectInfoWith pick cfg =
+connectInfoWith ::
+  (S3Config -> Text) ->
+  (S3Config -> Text) ->
+  (S3Config -> Text) ->
+  S3Config ->
+  ConnectInfo
+connectInfoWith pickEndpoint pickAk pickSk cfg =
   setCreds
     CredentialValue
-      { cvAccessKey = AccessKey (s3cAccessKey cfg),
+      { cvAccessKey = AccessKey (pickAk cfg),
         cvSecretKey =
           SecretKey
-            (BA.convert (TE.encodeUtf8 (s3cSecretKey cfg)) :: BA.ScrubbedBytes),
+            (BA.convert (TE.encodeUtf8 (pickSk cfg)) :: BA.ScrubbedBytes),
         cvSessionToken = Nothing
       }
-    (fromStringCI (pick cfg))
+    (fromStringCI (pickEndpoint cfg))
   where
     fromStringCI :: Text -> ConnectInfo
     fromStringCI url = fromString (T.unpack url)
@@ -139,16 +160,17 @@ connectInfoWith pick cfg =
 -- | Read the standard @HNVR_S3_*@ environment variables. Required:
 -- @HNVR_S3_ENDPOINT@, @HNVR_S3_ACCESS_KEY@, @HNVR_S3_SECRET_KEY@,
 -- @HNVR_S3_BUCKET@. Optional: @HNVR_S3_PUBLIC_ENDPOINT@ (browser-facing
--- presign host; ignored when empty).
+-- presign host; ignored when empty), @HNVR_S3_RO_ACCESS_KEY@ +
+-- @HNVR_S3_RO_SECRET_KEY@ (read-only presign identity; both or neither).
 readS3ConfigFromEnv :: IO (Maybe S3Config)
 readS3ConfigFromEnv = do
-  let lookupText var = fmap T.pack <$> lookupEnv var
-      nonEmpty t = if T.null t then Nothing else Just t
   mEndpoint <- lookupText "HNVR_S3_ENDPOINT"
   mPublicEndpoint <- (>>= nonEmpty) <$> lookupText "HNVR_S3_PUBLIC_ENDPOINT"
   mAccessKey <- lookupText "HNVR_S3_ACCESS_KEY"
   mSecretKey <- lookupText "HNVR_S3_SECRET_KEY"
   mBucket <- lookupText "HNVR_S3_BUCKET"
+  mRoAccessKey <- (>>= nonEmpty) <$> lookupText "HNVR_S3_RO_ACCESS_KEY"
+  mRoSecretKey <- (>>= nonEmpty) <$> lookupText "HNVR_S3_RO_SECRET_KEY"
   pure $ do
     endpoint <- mEndpoint
     accessKey <- mAccessKey
@@ -160,7 +182,52 @@ readS3ConfigFromEnv = do
           s3cPublicEndpoint = mPublicEndpoint,
           s3cAccessKey = accessKey,
           s3cSecretKey = secretKey,
+          s3cRoAccessKey = mRoAccessKey,
+          s3cRoSecretKey = mRoSecretKey,
           s3cBucket = bucket
+        }
+  where
+    lookupText var = fmap T.pack <$> lookupEnv var
+    nonEmpty t = if T.null t then Nothing else Just t
+
+-- | Resolve the effective 'S3Config': the YAML config file
+-- ('Hnvr.Core.Config.loadAppConfig', path from @$HNVR_CONFIG@ or
+-- @.\/hnvr.yaml@) merged with the @HNVR_S3_*@ environment variables.
+-- An env var, when set, wins over the file field — the file carries
+-- the real credentials, env stays the ad-hoc override for tests and
+-- one-off binaries.
+readS3Config :: IO (Maybe S3Config)
+readS3Config = do
+  mFile <- (>>= AppCfg.acS3) <$> AppCfg.loadAppConfig
+  mEnv <- readS3ConfigFromEnv
+  pure $ case (mFile, mEnv) of
+    (Nothing, Nothing) -> Nothing
+    (Just f, Nothing) -> Just (fromSection f)
+    (Nothing, Just e) -> Just e
+    (Just f, Just e) -> Just (mergeEnv (fromSection f) e)
+  where
+    fromSection s =
+      S3Config
+        { s3cEndpoint = AppCfg.ssEndpoint s,
+          s3cPublicEndpoint = AppCfg.ssPublicEndpoint s,
+          s3cAccessKey = AppCfg.ssAccessKey s,
+          s3cSecretKey = AppCfg.ssSecretKey s,
+          s3cRoAccessKey = AppCfg.ssRoAccessKey s,
+          s3cRoSecretKey = AppCfg.ssRoSecretKey s,
+          s3cBucket = AppCfg.ssBucket s
+        }
+    -- 'readS3ConfigFromEnv' is all-or-nothing on the four required
+    -- fields, so a present env config carries them all; the file only
+    -- fills the optional gaps env leaves unset.
+    mergeEnv f e =
+      f
+        { s3cPublicEndpoint = s3cPublicEndpoint e <|> s3cPublicEndpoint f,
+          s3cRoAccessKey = s3cRoAccessKey e <|> s3cRoAccessKey f,
+          s3cRoSecretKey = s3cRoSecretKey e <|> s3cRoSecretKey f,
+          s3cEndpoint = s3cEndpoint e,
+          s3cAccessKey = s3cAccessKey e,
+          s3cSecretKey = s3cSecretKey e,
+          s3cBucket = s3cBucket e
         }
 
 -- | Run an S3 operation. Wraps 'runMinio' and throws an 'error' on

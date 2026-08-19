@@ -208,14 +208,14 @@ gated var act = do
 -- don't crash the leader.
 startNodeRoles :: Bus.Bus -> Text -> IO ()
 startNodeRoles bus host = do
-  mS3 <- S3.readS3ConfigFromEnv
+  mS3 <- S3.readS3Config
   spool <- fromMaybe "/var/lib/hnvr/spool" <$> Env.lookupEnv "HNVR_SPOOL_DIR"
   (_, metrics) <- ensureMetrics
   let cfg =
         CaptureConfig
           { capBus = Just bus,
             capS3 = S3.connectInfo <$> mS3,
-            capBucket = maybe "hnvr-recordings" S3.s3cBucket mS3,
+            capBucket = maybe "hnvr" S3.s3cBucket mS3,
             capHostId = HostId host,
             capSpoolDir = spool,
             capMetrics = metrics

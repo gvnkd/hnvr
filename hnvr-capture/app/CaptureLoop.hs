@@ -85,6 +85,8 @@ parseFlags ("--s3" : ep : ak : sk : bucket : rest) o =
                   s3cPublicEndpoint = Nothing,
                   s3cAccessKey = T.pack ak,
                   s3cSecretKey = T.pack sk,
+                  s3cRoAccessKey = Nothing,
+                  s3cRoSecretKey = Nothing,
                   s3cBucket = T.pack bucket
                 }
         }

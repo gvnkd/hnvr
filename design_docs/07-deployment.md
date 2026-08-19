@@ -198,9 +198,9 @@ in {
       environment = {
         HNVR_HOST             = name;
         HNVR_NATS_URI         = "nats://nats:nats@127.0.0.1:4222";
-        HNVR_S3_ENDPOINT      = "https://s3.example.internal";
-        HNVR_S3_ACCESS_KEY    = "@${config.sops.secrets.hnvr-s3-access-key.path}";
-        HNVR_S3_SECRET_KEY    = "@${config.sops.secrets.hnvr-s3-secret-key.path}";
+        # S3 creds live in the YAML app config (hnvr.example.yaml);
+        # the sops secret holds the whole file, owned by the hnvr user.
+        HNVR_CONFIG           = "${config.sops.secrets.hnvr-config.path}";
         HNVR_EXEC_PROVIDERS   = execProviders;
         HNVR_MODEL_DIR        = "${models}";
         HNVR_TRT_CACHE_DIR    = "${cfg.dataDir}/trt-cache";
@@ -243,12 +243,9 @@ in {
         HNVR_HOST             = name;
         DATABASE_URL          = "@${config.sops.secrets.hnvr-db-url.path}";
         HNVR_NATS_URI         = "nats://nats:nats@127.0.0.1:4222";
-        HNVR_S3_ENDPOINT      = "https://s3.example.internal";
-        # Browser-reachable endpoint for presigned archive/event URLs;
-        # omit when HNVR_S3_ENDPOINT is already public.
-        HNVR_S3_PUBLIC_ENDPOINT = "https://s3.example.com";
-        HNVR_S3_ACCESS_KEY    = "@${config.sops.secrets.hnvr-s3-access-key.path}";
-        HNVR_S3_SECRET_KEY    = "@${config.sops.secrets.hnvr-s3-secret-key.path}";
+        # S3 creds + optional ro (browser presign) identity live in the
+        # YAML app config; sops secret hnvr-config, owned by hnvr user.
+        HNVR_CONFIG           = "${config.sops.secrets.hnvr-config.path}";
         HNVR_EXEC_PROVIDERS   = execProviders;
         HNVR_MODEL_DIR        = "${models}";
         HNVR_MEDIAMTX_CONFIG_PATH = "/run/hnvr/mediamtx.yml";

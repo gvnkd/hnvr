@@ -1,0 +1,27 @@
+# HNVR app config — EXAMPLE. Copy to hnvr.yaml and fill in real values:
+#   cp hnvr.example.yaml hnvr.yaml
+# hnvr.yaml is gitignored; never commit real credentials.
+#
+# Read at process start by Hnvr.Core.Config. Path: $HNVR_CONFIG, else
+# ./hnvr.yaml (CWD-relative; the systemd unit's WorkingDirectory is the
+# data dir). HNVR_S3_* env vars override the file when set.
+#
+# Unknown top-level keys are ignored — the file can grow new sections
+# without breaking older binaries.
+s3:
+  # S3 API endpoint (server-side put/list/delete).
+  endpoint: "http://192.168.0.254:8333"
+  # Optional: browser-reachable endpoint used ONLY for presigned GET
+  # URLs. The signed host is part of the SigV4 signature. Omit to fall
+  # back to `endpoint`.
+  public_endpoint: "http://192.168.0.254:8333"
+  bucket: "hnvr"
+  # Server-side identity (needs Admin/Read/Write/List/Tagging on the
+  # bucket).
+  access_key: "ACCESS_KEY_HERE"
+  secret_key: "SECRET_KEY_HERE"
+  # Optional read-only identity (Read/List only). When both are set,
+  # presigned URLs handed to end-user browsers are signed with this
+  # pair instead of the server-side key.
+  ro_access_key: "RO_ACCESS_KEY_HERE"
+  ro_secret_key: "RO_SECRET_KEY_HERE"

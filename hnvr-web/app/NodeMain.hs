@@ -90,18 +90,19 @@ main = do
     forM_ (csbCameras batch) (startCamera sup)
     void $ forever $ threadDelay 1_000_000_000
 
--- | Construct the process-wide 'CaptureConfig' from environment.
--- Defaults match the devenv service wiring (MinIO on :9100,
--- @hnvr-recordings@ bucket, spool dir @/var/lib/hnvr/spool@).
+-- | Construct the process-wide 'CaptureConfig' from the config file +
+-- environment ('S3.readS3Config' merges both). Bucket default matches
+-- the SeaweedFS @hnvr@ bucket; spool dir defaults to
+-- @/var/lib/hnvr/spool@.
 buildCaptureConfig :: Bus -> Text -> Metrics -> IO CaptureConfig
 buildCaptureConfig bus host metrics = do
-  mS3 <- S3.readS3ConfigFromEnv
+  mS3 <- S3.readS3Config
   spool <- fromMaybe "/var/lib/hnvr/spool" <$> Env.lookupEnv "HNVR_SPOOL_DIR"
   pure
     CaptureConfig
       { capBus = Just bus,
         capS3 = S3.connectInfo <$> mS3,
-        capBucket = maybe "hnvr-recordings" S3.s3cBucket mS3,
+        capBucket = maybe "hnvr" S3.s3cBucket mS3,
         capHostId = HostId host,
         capSpoolDir = spool,
         capMetrics = metrics

@@ -41,6 +41,8 @@ run endpoint ak sk bucket file key = do
             s3cPublicEndpoint = Nothing,
             s3cAccessKey = ak,
             s3cSecretKey = sk,
+            s3cRoAccessKey = Nothing,
+            s3cRoSecretKey = Nothing,
             s3cBucket = bucket
           }
       ci = connectInfo cfg
