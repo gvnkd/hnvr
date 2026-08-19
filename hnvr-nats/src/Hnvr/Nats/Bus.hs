@@ -26,6 +26,7 @@ module Hnvr.Nats.Bus
     publishJson,
     subscribe,
     readMessage,
+    drainSubscription,
     Subscription,
     unsubscribe,
     Message (..),
@@ -156,6 +157,19 @@ subscribe bus subject = do
 -- | Read the next message from a subscription's channel. Blocks.
 readMessage :: Subscription -> IO Message
 readMessage sub = atomically $ readTChan (subChan sub)
+
+-- | Remove and return all currently-queued messages, oldest first.
+-- Non-blocking; pairs with 'readMessage' for consumers that coalesce
+-- bursty commands (PTZ latest-wins — a superseded intent must never
+-- execute late).
+drainSubscription :: Subscription -> IO [Message]
+drainSubscription sub = atomically (go [])
+  where
+    go acc = do
+      m <- tryReadTChan (subChan sub)
+      case m of
+        Nothing -> pure (reverse acc)
+        Just x -> go (x : acc)
 
 -- | Cancel a subscription. Best-effort.
 unsubscribe :: Bus -> Subscription -> IO ()

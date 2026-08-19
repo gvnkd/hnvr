@@ -34,18 +34,18 @@
 module Hnvr.Ptz.Controller
   ( PtzControllerConfig (..),
     startPtzController,
+    coalesceBatch,
   )
 where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Async, async)
-import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Control.Exception (SomeAsyncException (..), SomeException, fromException, throwIO, try)
-import Control.Monad (forever, when)
+import Control.Monad (forM_, forever, when)
 import Data.Aeson (Value, decodeStrict', encode, toJSON)
 import qualified Data.ByteString.Lazy as BL
-import Data.Either (fromRight)
-import Data.Maybe (isNothing)
+import Data.Maybe (isJust, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime)
@@ -78,29 +78,72 @@ data PtzControllerConfig = PtzControllerConfig
 startPtzController :: PtzControllerConfig -> IO (Async (), Async ())
 startPtzController cfg = do
   lastActivity <- newTVarIO Nothing
+  -- One blocking GetStatus at startup. Firmwares answering xsi:nil (or
+  -- erroring) get position polling DISABLED: on the Hik-OEM floor_2_5
+  -- the nil path takes ~4 s per call — after EVERY command that backed
+  -- the queue up for seconds (Aug-18 lag report). Supported cameras
+  -- answer fast and get a 1 Hz position refresh in the ticker instead.
+  (statusSupported, pos0) <- probeStatusSupport cfg.pccDriver
+  posCache <- newTVarIO pos0
+  now0 <- getCurrentTime
+  uiState <- newTVarIO (PtzIdle, "start", now0)
   sub <- Bus.subscribe cfg.pccBus (Subjects.commandPtz cfg.pccSlug)
   cmdLoop <- async $ forever $ do
-    msg <- Bus.readMessage sub
-    r <- try (handleMessage cfg lastActivity msg)
-    case r of
-      Right () -> pure ()
-      Left (e :: SomeException) -> case fromException e of
-        Just (SomeAsyncException _) -> throwIO e
-        Nothing -> logError ("PtzController " <> cfg.pccSlug <> ": " <> T.pack (show e))
+    first <- Bus.readMessage sub
+    rest <- Bus.drainSubscription sub
+    let plan = coalesceBatch (first : rest)
+        dropped = length rest + 1 - length plan
+    when (dropped > 0) $
+      logInfo
+        ( "PtzController "
+            <> cfg.pccSlug
+            <> ": dropped "
+            <> tshow dropped
+            <> " superseded command(s)"
+        )
+    forM_ plan $ \msg -> guarded "" (handleMessage cfg lastActivity uiState posCache msg)
   ticker <- async $ forever $ do
     threadDelay 1_000_000
-    r <- try (idleTick cfg lastActivity)
-    case r of
-      Right () -> pure ()
-      Left (e :: SomeException) -> case fromException e of
-        Just (SomeAsyncException _) -> throwIO e
-        Nothing -> logError ("PtzController " <> cfg.pccSlug <> " idle tick: " <> T.pack (show e))
+    guarded " idle tick" (idleTick cfg lastActivity uiState posCache)
+    when statusSupported $
+      guarded " status refresh" (refreshPosition cfg uiState posCache)
   logInfo ("PtzController: started for " <> cfg.pccSlug)
   pure (cmdLoop, ticker)
+  where
+    tshow :: (Show a) => a -> Text
+    tshow = T.pack . show
+    guarded label act = do
+      r <- try act
+      case r of
+        Right () -> pure ()
+        Left (e :: SomeException) -> case fromException e of
+          Just (SomeAsyncException _) -> throwIO e
+          Nothing -> logError ("PtzController " <> cfg.pccSlug <> label <> ": " <> T.pack (show e))
+
+-- | Given the pending batch (oldest first), pick what to execute:
+-- every request/reply message (a caller is blocked waiting for an
+-- answer) plus only the NEWEST fire-and-forget message. Pad intents
+-- supersede each other; executing a stale one late is the "camera
+-- replays old commands" lag (Aug-18 report). Dropped messages are not
+-- audited — they never executed.
+coalesceBatch :: [Message] -> [Message]
+coalesceBatch msgs =
+  [m | (i, m) <- indexed, isJust (msgReplyTo m) || Just i == lastFf]
+  where
+    indexed = zip [0 ..] msgs
+    lastFf = case [i | (i, m) <- indexed, isNothing (msgReplyTo m)] of
+      [] -> Nothing
+      is -> Just (maximum is)
 
 -- | One received command: decode → execute → status + audit + reply.
-handleMessage :: PtzControllerConfig -> TVar (Maybe UTCTime) -> Message -> IO ()
-handleMessage cfg lastActivity msg =
+handleMessage ::
+  PtzControllerConfig ->
+  TVar (Maybe UTCTime) ->
+  TVar (PtzState, Text, UTCTime) ->
+  TVar (Maybe PtzPosition) ->
+  Message ->
+  IO ()
+handleMessage cfg lastActivity uiState posCache msg =
   case decodeStrict' (msgPayload msg) of
     Nothing -> do
       logWarn ("PtzController " <> cfg.pccSlug <> ": undecodable command payload")
@@ -112,7 +155,7 @@ handleMessage cfg lastActivity msg =
       let ok = isNothing mErr
           cmdName = commandName (pcmCommand cmdMsg)
       mPtzCommand cfg.pccMetrics cfg.pccSlug cmdName (ptzSourceText (pcmSource cmdMsg))
-      publishStatus cfg (stateAfter (pcmCommand cmdMsg)) cmdName now
+      publishStatus cfg uiState posCache (stateAfter (pcmCommand cmdMsg)) cmdName now
       publishAudit cfg cmdMsg ok mErr
       replyTo msg $ case (mErr, result) of
         (Just e, _) -> PtzReplyError e
@@ -158,19 +201,55 @@ execute cfg cmd = do
     noPayload (Left e) = Left (errText e)
     noPayload (Right ()) = Right Nothing
 
--- | Status broadcast after every command. Position readout is
--- best-effort — a failing GetStatus must not mask the command result.
-publishStatus :: PtzControllerConfig -> PtzState -> Text -> UTCTime -> IO ()
-publishStatus cfg st cmdName now = do
-  mPos <- fromRight Nothing <$> Drv.getStatus cfg.pccDriver
-  let msg =
-        PtzStatusMsg
-          { psmState = st,
-            psmPosition = mPos,
-            psmLastCommand = cmdName,
-            psmLastCommandAt = T.pack (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" now)
-          }
-  Bus.publishJson cfg.pccBus (Subjects.ptzStatus cfg.pccSlug) msg
+-- | Status broadcast after every command. Position comes from the
+-- cache — NO per-command GetStatus (see 'probeStatusSupport').
+publishStatus ::
+  PtzControllerConfig ->
+  TVar (PtzState, Text, UTCTime) ->
+  TVar (Maybe PtzPosition) ->
+  PtzState ->
+  Text ->
+  UTCTime ->
+  IO ()
+publishStatus cfg uiState posCache st cmdName now = do
+  mPos <- readTVarIO posCache
+  atomically (writeTVar uiState (st, cmdName, now))
+  Bus.publishJson cfg.pccBus (Subjects.ptzStatus cfg.pccSlug) (statusMsg st mPos cmdName now)
+
+statusMsg :: PtzState -> Maybe PtzPosition -> Text -> UTCTime -> PtzStatusMsg
+statusMsg st mPos cmdName now =
+  PtzStatusMsg
+    { psmState = st,
+      psmPosition = mPos,
+      psmLastCommand = cmdName,
+      psmLastCommandAt = T.pack (formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" now)
+    }
+
+-- | Startup GetStatus probe: @(supported, initialPosition)@. A nil or
+-- erroring GetStatus marks the camera unsupported — the ticker then
+-- never calls it again (a ~4 s blocking nil path would stall every
+-- status refresh otherwise).
+probeStatusSupport :: OnvifPtz -> IO (Bool, Maybe PtzPosition)
+probeStatusSupport drv = do
+  r <- Drv.getStatus drv
+  pure $ case r of
+    Right mp -> (isJust mp, mp)
+    Left _ -> (False, Nothing)
+
+-- | 1 Hz position refresh for cameras whose GetStatus is fast
+-- ('probeStatusSupport'). Republishes the last UI state with a fresh
+-- position so the status feed stays alive between commands.
+refreshPosition ::
+  PtzControllerConfig -> TVar (PtzState, Text, UTCTime) -> TVar (Maybe PtzPosition) -> IO ()
+refreshPosition cfg uiState posCache = do
+  r <- Drv.getStatus cfg.pccDriver
+  case r of
+    Left _ -> pure ()
+    Right mp -> do
+      (st, cmdName, at) <- atomically $ do
+        writeTVar posCache mp
+        readTVar uiState
+      Bus.publishJson cfg.pccBus (Subjects.ptzStatus cfg.pccSlug) (statusMsg st mp cmdName at)
 
 publishAudit :: PtzControllerConfig -> PtzCommandMsg -> Bool -> Maybe Text -> IO ()
 publishAudit cfg cmdMsg ok mErr =
@@ -189,8 +268,13 @@ publishAudit cfg cmdMsg ok mErr =
 -- | Idle ticker: when the timeout elapsed since the last command and a
 -- home return is configured (or an origin fallback applies), issue it
 -- once (source @idle_timeout@) and clear the activity stamp.
-idleTick :: PtzControllerConfig -> TVar (Maybe UTCTime) -> IO ()
-idleTick cfg lastActivity = do
+idleTick ::
+  PtzControllerConfig ->
+  TVar (Maybe UTCTime) ->
+  TVar (PtzState, Text, UTCTime) ->
+  TVar (Maybe PtzPosition) ->
+  IO ()
+idleTick cfg lastActivity uiState posCache = do
   mLast <- readTVarIO lastActivity
   case (mLast, cfg.pccIdleTimeoutS > 0) of
     (Just last', True) -> do
@@ -209,7 +293,7 @@ idleTick cfg lastActivity = do
         case mErr of
           Nothing -> mPtzCommand cfg.pccMetrics cfg.pccSlug "go_home" "idle_timeout"
           Just e -> logWarn ("PtzController " <> cfg.pccSlug <> ": idle return-home failed: " <> e)
-        publishStatus cfg PtzReturningHome "go_home" now
+        publishStatus cfg uiState posCache PtzReturningHome "go_home" now
         publishAudit cfg cmdMsg ok mErr
     _ -> pure ()
 

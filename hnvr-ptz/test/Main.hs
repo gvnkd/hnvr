@@ -6,7 +6,9 @@ import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import Hnvr.Core.Onvif
 import Hnvr.Core.Ptz
+import Hnvr.Nats.Bus (Message (..))
 import Hnvr.Onvif.Client
+import Hnvr.Ptz.Controller (coalesceBatch)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -142,5 +144,23 @@ tests =
               Right ts -> do
                 length ts @?= 2
                 fst (head ts) @?= "PROFILE_000"
+        ],
+      testGroup
+        "coalesceBatch (latest-wins, Aug-18 lag fix)"
+        [ testCase "keeps the newest fire-and-forget, drops superseded" $
+            coalesceBatch [ff "a", ff "b", ff "c"] @?= [ff "c"],
+          testCase "stop supersedes a pending move" $
+            coalesceBatch [ff "move", ff "stop"] @?= [ff "stop"],
+          testCase "keeps every request/reply message in order" $
+            coalesceBatch [rr "get", rr "set"] @?= [rr "get", rr "set"],
+          testCase "reply-needed never drops the newest motion intent" $
+            coalesceBatch [ff "m1", rr "get", ff "m2", rr "set"] @?= [rr "get", ff "m2", rr "set"],
+          testCase "mixed: reply-needed + newest fire-and-forget, order kept" $
+            coalesceBatch [ff "m1", rr "get", ff "stop"] @?= [rr "get", ff "stop"],
+          testCase "empty batch" $
+            coalesceBatch [] @?= ([] :: [Message])
         ]
     ]
+  where
+    ff n = Message {msgSubject = "s", msgPayload = n, msgReplyTo = Nothing}
+    rr n = Message {msgSubject = "s", msgPayload = n, msgReplyTo = Just "_INBOX.x"}

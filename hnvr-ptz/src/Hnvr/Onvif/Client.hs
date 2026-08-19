@@ -599,10 +599,12 @@ soapCall mgr creds url ns op inner = do
     -- re-initializing after a previous Set (NoResponseDataReceived).
     -- Wait out the busy window and retry once on a fresh connection;
     -- our writes carry absolute values, so a duplicate Set is safe.
+    -- PTZ ops are latency-critical (hold-to-move): a dead keep-alive
+    -- socket there costs 150 ms, not 3 s.
     r0 <- try (HC.httpLbs req mgr)
     case r0 of
       Left (_ :: SomeException) -> do
-        threadDelay 3000000
+        threadDelay (if ns == "tptz" then 150000 else 3000000)
         HC.httpLbs req mgr
       Right r -> pure r
   pure $ case eRes of

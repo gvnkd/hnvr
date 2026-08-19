@@ -43,6 +43,7 @@ test-suite hnvr-ptz-test
     , bytestring
     , containers
     , hnvr-core
+    , hnvr-nats
     , hnvr-ptz
     , tasty
     , tasty-hunit
