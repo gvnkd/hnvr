@@ -38,10 +38,10 @@ The whole thing is written in Haskell, packaged as a NixOS flake, deployed acros
 |----|-------|-----|-----|-------|------------------|
 | 192.168.0.196 | HEVC | 4000×3000 | 15 | pcm_mulaw 16k | `user=admin&password=...&channel=0&stream=MainStream` |
 | 192.168.0.197 | H.264 | 3840×2160 | 15 | pcm_mulaw 16k | same scheme |
-| 192.168.0.198 | HEVC | 3072×2048 | 25 | pcm_alaw 8k  | `user=admin&password=...&channel=0&stream=0` |
+| 192.168.0.198 | HEVC | 2592×1520 | 15 | pcm_alaw 8k  | query-style `/stream=0` (main) / `/stream=1` (sub) — reflashed to **OpenIPC/Majestic** (imx335); static IP, ONVIF on port 80 |
 
 **Implications**
-- Two URL schemes (`stream=MainStream` vs `stream=0`) — abstract behind a per-camera `rtsp_url_template` config field.
+- Two URL schemes (`stream=MainStream` query-param style vs Majestic's `/stream=0`) — stored verbatim in the per-camera `rtsp_url` field (the templating idea was dropped).
 - HEVC dominant — segmenter produces `mp4` with `hev1` box (ffmpeg native); HLS playback via `hls.js` in Chrome (no Safari in v1).
 - 4K HEVC @ 25 fps ≈ 2–4 GB/hr/cam. 20 cams × 7 days ≈ **7–14 TB** hot storage in SeaweedFS.
 - Audio is mu-law/a-law — keep muxed, don't transcode.
@@ -52,12 +52,12 @@ Two Nvidia-equipped hosts, networked on the same LAN:
 
 | Host | Role (default) | GPU | Compute | VRAM | Notes |
 |------|----------------|-----|---------|------|-------|
-| **hnvr-1** | Capture ingest (50% of cameras) + local analysis | GTX 1070 (Pascal) | 6.1 | 8 GB GDDR5 | CUDA EP only — TensorRT EP unsupported on Pascal for recent TRT versions |
+| **hnvr-1** | Capture ingest (50% of cameras) + local analysis | GTX 1070 (Pascal) | 6.1 | 8 GB GDDR5 | CPU EP — cuDNN ≥ 9.12 dropped Pascal, so neither CUDA nor TensorRT EP is viable |
 | **hnvr-2** (this node) | Capture ingest (50%) + local analysis + web + MediaMTX + NATS leader | RTX 4090 (Ada) | 8.9 | 24 GB GDDR6X | TensorRT 10 EP, full feature set |
 
 **Inference plan**
 - RTX 4090: YOLOv8n-320 via TensorRT EP → ~1 ms/frame; can do **YOLOv8s-640** at 100+ fps if accuracy demands.
-- GTX 1070: YOLOv8n-320 via CUDA EP → ~5 ms/frame; fine for 10 cameras at 5 fps (50 fps throughput).
+- GTX 1070: YOLOv8n-320 via CPU EP (cuDNN ≥ 9.12 dropped Pascal) — slower per frame, so hnvr-1 carries fewer analysis cameras.
 - CPU EP is the always-available fallback on any host.
 
 ## Key design decisions (locked)
@@ -67,8 +67,8 @@ Two Nvidia-equipped hosts, networked on the same LAN:
 | Deployment | **NixOS flake, multi-host, systemd** | Matches existing workflow; per-host NixOS config in same flake |
 | Compiler | **GHC 9.12** (IHP experimental support) | Sergey's preference; bleeding edge — see "Risk" below |
 | Language | **Haskell** | Single language across config/SQL/HTTP/CV |
-| Web framework | **IHP HEAD pinned to a commit with GHC 9.12 support** | Schema designer, autorefresh, auth, SSR |
-| IPC | **NATS + JetStream** | Lightweight; covers events/commands/health/config; clusterable post-v1 |
+| Web framework | **IHP pinned to release v1.6.0** (flake input `github:digitallyinduced/ihp/v1.6.0`) | Schema designer, autorefresh, auth, SSR |
+| IPC | **NATS (core only; JetStream deferred)** | Lightweight; covers events/commands/health/config; clusterable post-v1 |
 | CV runtime | **ONNX Runtime via internal Haskell FFI binding** (`hs-onnxruntime-capi` is too stale) | EP-agnostic: CPU / CUDA / TensorRT from one API |
 | Stream ingestion | **ffmpeg subprocess, two independent RTSP pulls per camera** | Main stream `-c:v copy` to fMP4; sub-stream decoded for CV. Independent failure domains, ~50% LAN bandwidth saved vs decoding main twice |
 | Recording container | **Fragmented MP4, 1-sec fragments → SeaweedFS (S3 API)** | HLS-ready; atomic upload; time-range queries |
@@ -85,8 +85,8 @@ Two Nvidia-equipped hosts, networked on the same LAN:
 
 | Risk | Mitigation |
 |------|------------|
-| IHP only "experimental" on 9.12 | Pin `ihp` flake input to a known-good commit; CI verifies `cabal build all` |
-| `amazonka-s3 2.0` caps at GHC 9.6 | Use `jailbreakCabal` override in `flake.nix`; bump upper bounds; track upstream PR |
+| IHP only "experimental" on 9.12 | Pin the `ihp` flake input to the v1.6.0 release tag; CI verifies `cabal build all` |
+| `amazonka-s3` too heavy / capped for GHC 9.12 | Dropped amazonka entirely — storage lib is **minio-hs**, vendored at `vendored/minio-hs` with in-tree fixes (ListObjectsV2 continuation-token, deleteObject status validation) |
 | `massiv`, `linear`, `cryptonite` upper bounds | Same `allow-newer` strategy; these packages are typically forward-compatible |
 | `hs-onnxruntime-capi` won't build at all | Don't use it. Write internal ~150 LOC binding to ONNX Runtime C API |
 | `IHPSchemaCompiler` quirks on PG 18 | IHP uses libpq; no PG-version coupling expected; smoke test in CI |
@@ -126,7 +126,7 @@ Two Nvidia-equipped hosts, networked on the same LAN:
    │   │ Analyzer×N  │─┐                           │                       │
    │   └─────────────┘ │                           │                       │
    │                   │ NATS                      │                       │
-   │                   │ (JetStream)               │                       │
+   │                   │ (core NATS)               │                       │
    │                   │  ▲  ▲  ▲                  │                       │
    │                   │  │  │  │                  │                       │
    │   ┌───────────────┘  │  │                  ┌──┴──────────────────┐    │

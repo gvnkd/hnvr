@@ -154,12 +154,12 @@ data Segment = Segment
 1. Segmenter closes a fragment at wall-clock second boundary.
 2. Compute `sSha = sha256 sBytes`.
 3. Object key: `cam-196/2026-08-07/14-30-15.mp4` (UTC, `%Y-%m-%d/%H-%M-%S`).
-4. `PutObject` to SeaweedFS bucket `hnvr-recordings`, headers:
+4. `PutObject` to the external SeaweedFS (`http://192.168.0.254:8333`), single bucket `hnvr`, headers:
    - `Content-Type: video/mp4`
    - `x-amz-meta-sha256: <hex>`
    - `x-amz-meta-camera-id: cam-196`
    - `x-amz-meta-host-id: hnvr-1`
-5. On 200 OK, publish a `SegmentWritten` event to NATS subject `hnvr.events` (JetStream). Leader's `EventWriter` consumes and inserts the `segments` row.
+5. On 200 OK, publish a `SegmentWritten` event to NATS subject `hnvr.events` (core NATS — JetStream deferred). Leader's `EventWriter` consumes and inserts the `segments` row.
 
 **Why publish via NATS instead of direct Postgres insert?** All Postgres writes happen on the leader (single SaaS connection string, single writer simplifies the IHP schema sync). Workers don't need DB credentials at all — only NATS + S3 credentials.
 
@@ -167,28 +167,29 @@ data Segment = Segment
 
 ## SeaweedFS bucket layout
 
+Everything lives in a **single bucket `hnvr`** on the external SeaweedFS
+(`http://192.168.0.254:8333`) — recordings, event thumbnails, and event clips
+(the originally-planned `hnvr-recordings` / `hnvr-events` / `hnvr-exports`
+split never shipped):
+
 ```
-hnvr-recordings/                                -- bucket 1: video
+hnvr/                                           -- the only bucket
   cam-196/
     2026-08-07/
-      14/
-        14-30-15.mp4
-        14-30-16.mp4
+      14-30-15.mp4                              -- recording segments
+      14-30-15-track-42.png                     -- event thumbnails/crops
+      ...
+    clips/
+      2026-08-07/14-30-15.123/                  -- event clips (v0.4.0.0)
+        init.mp4
+        14-30-15.123.mp4
         ...
   cam-197/...
   cam-198/...
-
-hnvr-events/                                    -- bucket 2: thumbnails / crops
-  cam-196/
-    2026-08-07/
-      14-30-15-track-42.png
-      ...
-
-hnvr-exports/                                   -- bucket 3: user-initiated clip exports
-  <uuid>.mp4
 ```
 
-Three buckets give different retention policies (event thumbnails kept longer than segments; exports deleted 24h after download).
+Retention is per-camera (`cameras.retention_hours`) and per-clip
+(`event_clips.retention_hours`, snapshotted from the rule at creation).
 
 ## PostgreSQL indexes (on the external PG 18)
 
@@ -207,12 +208,37 @@ BRIN on `start_ts` is critical: 20 rows/cam/min ≈ 17 M rows/year/cam. BRIN on 
 
 `RetentionSweeper` runs every hour on the leader:
 
-1. Query `retention_policies` per camera (default: 7 days for video, 30 days for event thumbnails).
+1. Per-camera cutoff from `cameras.retention_hours` (default 168 h; the
+   `retention_policies` table idea was dropped — retention is hours-based,
+   `INTERVAL '1 hour'` arithmetic).
 2. List SeaweedFS objects under `cam-X/` older than cutoff via `ListObjectsV2` (paginated, 1000 at a time).
 3. Batch `DeleteObjects` (max 1000 per request).
 4. `DELETE FROM segments WHERE camera_id=$1 AND end_ts < $2` in 10 000-row chunks until `row_count = 0`.
 
+It also sweeps expired `event_clips` (prefix-scoped exact delete) and stale
+tombstones (90 s grace). Tombstoned rows (`pending_delete_at`) are skipped by
+the retention path — they belong to the purge worker.
+
 Idempotent — safe to kill mid-run. SeaweedFS deletion happens first; if the sweeper dies after delete but before PG delete, the next run completes the cleanup.
+
+## Event clips (shipped, v0.4.0.0)
+
+Rules with `clip_retention_hours` set produce event video clips: a per-camera
+ring buffer (`Hnvr.Capture.RingBuffer`) snapshots the main fragment stream at
+rule fire (`[ts - clip_preroll_sec, ts]`), `Hnvr.Node.ClipRecorder` extends one
+open clip per camera on subsequent fires, and a 1 s ticker closes + uploads
+`init.mp4` + fragments under `<slug>/clips/<YYYY-MM-DD/HH-MM-SS.mmm>/`.
+Playback via `/PlayerEventClip` + `/PlaylistEventClip`; the old `export_jobs`
+clip-export design never shipped — event clips replaced it.
+
+## Tombstone deletion (shipped, v0.3.0.0)
+
+User-initiated recording deletion is two-phase: `PurgeRecordingAction` stamps
+`segments.pending_delete_at` synchronously (all read paths filter it out), then
+an async purge worker deletes the S3 objects, re-lists the window, and hard-
+DELETEs the rows only once verified empty. A 60 s sweeper (90 s grace) resumes
+batches whose worker died. `event_clips` gained the same tombstone column in
+0007.
 
 ## Throughput budget (worst case, 20 cameras split 10/10 across hosts)
 
@@ -252,7 +278,7 @@ cameras (
   analysis_fps    INT DEFAULT 5,
   -- lifecycle
   enabled         BOOL DEFAULT true,
-  retention_days  INT DEFAULT 7,
+  retention_hours INT DEFAULT 168,
   -- assignment (managed by leader's AssignmentCoordinator)
   assigned_host   TEXT                          -- 'hnvr-1' | 'hnvr-2' | NULL
 )

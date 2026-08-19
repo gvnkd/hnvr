@@ -45,7 +45,7 @@ The Worker is integration territory.
 | `Hnvr.Capture.Fmp4` | unit (P0) | Negative cases: truncated box header (fewer than 8 bytes), truncated 64-bit size, missing `tfdt` (returns 0), stray `mdat` before `moof` (absorbed into init) | P0 |
 | `Hnvr.Capture.Ffmpeg` | golden (P1) | `recordingArgs` produces the documented arg list for TCP + UDP transports; pin to a snapshot | P1 |
 | `Hnvr.Capture.Worker` | integration (P1) | `backoffDuration` table (2/4/8/16/30/30/...); `countRecent` keeps last 60 s; `transition` state machine covers every documented edge (Pending→Backoff, 5-in-60s→FailedPermanent, FailedPermanent cooldown→Pending, Stopped idempotent) | P1 |
-| `Hnvr.Capture.Worker` | integration (P1) | Full loop against a real ffmpeg reading `tests/fixtures/fmp4/cam-197-init.mp4` on stdin via a fake RTSP (`ffmpeg -re -i fixture.mp4 -f rtsp rtsp://localhost:8554/test`) → assert fragments land in MinIO + `hnvr.events` is published | P1 |
+| `Hnvr.Capture.Worker` | integration (P1) | Full loop against a real ffmpeg reading `tests/fixtures/fmp4/cam-197-init.mp4` on stdin via a fake RTSP (`ffmpeg -re -i fixture.mp4 -f rtsp rtsp://localhost:8554/test`) → assert fragments land in the external SeaweedFS bucket + `hnvr.events` is published | P1 |
 
 **Estimated effort:** 3 days. Property suite for Fmp4 is the bulk.
 
@@ -59,18 +59,18 @@ The Worker is integration territory.
 
 **Estimated effort:** 1.5 days. Spawn-and-wait plumbing dominates.
 
-### hnvr-storage (P1 — needs MinIO)
+### hnvr-storage (P1 — needs the external SeaweedFS)
 
 | Module | Test type | What to assert | Priority |
 |--------|-----------|----------------|----------|
-| `Hnvr.Storage.S3` | integration (P1) | Against devenv MinIO at `:9100`: `putObjectBytes` then `getObject` roundtrip; content-type preserved; `listObjects` returns uploaded keys in lexicographic order; `removeObject` is idempotent; `presignUrl` returns a URL that `wreq` GETs successfully | P1 |
+| `Hnvr.Storage.S3` | integration (P1) | Against the external SeaweedFS (`http://192.168.0.254:8333`, bucket `hnvr`) via `HNVR_TEST_INTEGRATION=1 HNVR_CONFIG=...`: `putObjectBytes` then `getObject` roundtrip; content-type preserved; `listObjects` returns uploaded keys in lexicographic order; `removeObject` is idempotent; `presignUrl` returns a URL that GETs successfully — incl. the ro-identity presigned round-trip (`ro_access_key`/`ro_secret_key` sign browser URLs) | P1 |
 | `Hnvr.Storage.S3` | integration (P1) | Error paths: bucket-not-found, connection refused, malformed endpoint | P1 |
 
-**Estimated effort:** 1 day. MinIO fixture already in devenv.
+**Estimated effort:** 1 day. MinIO is gone from devenv; tests target the real bucket.
 
 ### hnvr-cv (P2 — gated on Phase 3 implementation)
 
-Currently all stubs. Tests land alongside the implementation per `08-roadmap.md` Phase 3.
+Phase 3 is done — the modules below are implemented and tested per this plan.
 
 | Module | Test type | What to assert | Priority |
 |--------|-----------|----------------|----------|
@@ -85,11 +85,16 @@ Currently all stubs. Tests land alongside the implementation per `08-roadmap.md`
 
 ### hnvr-ptz (P2/P3 — gated on Phase 5)
 
+Phase 5 is done. The `Driver` typeclass was **dropped** (resolved-endpoint
+record + Either-returning IO ops in `Hnvr.Ptz.Onvif.OnvifPtz`), so there are
+no typeclass laws to test; instead the pure ONVIF response parsers are
+fixture-tested (7 fixtures captured from the live cameras 196/197/198, incl.
+capabilities, nil status, and a 255-slot preset list).
+
 | Module | Test type | What to assert | Priority |
 |--------|-----------|----------------|----------|
-| `Hnvr.Ptz.Driver` | unit (P2) | `Driver` typeclass laws — every instance has `moveAbsolute`/`moveRelative`/`preset` returning immediately | P2 |
-| `Hnvr.Ptz.Onvif` | integration (P3) | Against a mock ONVIF server (Python `onvif-cli` or a small wai stub): `ContinuousMove`, `Stop`, `GotoPreset` produce well-formed SOAP envelopes; WS-Security header present | P3 |
-| `Hnvr.Ptz.Controller` | property (P3) | PID controller converges; rate-limited commands don't exceed documented Hz; manual override cancels auto-track | P3 |
+| `Hnvr.Onvif.Client` parsers | unit + fixture (P2) | Pure parsers against committed fixtures: capabilities, profile tokens, presets, nil status | done |
+| `Hnvr.Ptz.Controller` | property (P3) | State machine transitions; idle timeout → go_home | P3 |
 
 **Estimated effort:** 3 days, gated on Phase 5.
 
@@ -109,7 +114,7 @@ Currently all stubs. Tests land alongside the implementation per `08-roadmap.md`
 | `Hnvr.Web.HealthCache` | integration (P1) | Publish `hnvr.health.<host>` → row upserted in `hosts` table; stale (>15 s) host row marked unhealthy on next sweep | P1 |
 | `Hnvr.Web.AssignmentCoordinator` | integration (P1) | 5 s poll picks lex-smallest healthy host; `manual_assign=true` never overridden; host-down → reassign within 15 s; `hnvr.commands.control.<old>.<cam>.stop` published on cross-host reassign (audit-fix Aug 10 2026) | P1 |
 | `Hnvr.Web.ConfigBroadcaster` | integration (P1) | PG LISTEN `cameras_events` → republish on `hnvr.config.cameras.<slug>` with the row JSON | P1 |
-| `Hnvr.Web.MediaMTXConfigSyncer` | integration (P1) | PG LISTEN → `/run/hnvr/mediamtx.yml` regenerated; per-path v3 API calls (`POST /v3/config/paths/add/<slug>`, `PATCH`, `DELETE`) issued to a mock HTTP server; idempotent on re-listen (pitfall #61) | P1 |
+| `Hnvr.Web.MediaMTXConfigSyncer` | integration (P1) | PG LISTEN → per-path v3 API calls (`POST /v3/config/paths/add`, `PATCH /v3/config/paths/patch`, `DELETE /v3/config/paths/delete`) issued to a mock HTTP server; idempotent on re-listen (pitfall #61) | P1 |
 | `Hnvr.Web.WhepProxy` | WAI unit (P1) | Path translation `POST /whep/<slug>` → mediamtx; `PATCH /whep/<slug>/session/<id>` translates correctly (pitfall #62 Aug 10 2026 fix); Location header rewritten back; 404 for unknown slug | P1 |
 | `Hnvr.Node.HealthReporter` | integration (P1) | Publishes `hnvr.health.<this_host>` every 5 s with monotonic timestamps | P1 |
 | `Hnvr.Node.ConfigWatcher` | integration (P1) | Subscribes three subjects (`assign.>`, `control.<host>.>`, `config.cameras.>`); handler decodes + logs without throwing | P1 |
@@ -130,21 +135,31 @@ Currently all stubs. Tests land alongside the implementation per `08-roadmap.md`
 
 In-repo, Nix-managed via `pkgs.nodePackages` + `playwright-driver`.
 
-| Spec | What it covers | Priority |
-|------|----------------|----------|
-| `login.spec.ts` | `/NewSession` → admin login → cookie set → redirect to `/`; logout clears cookie | P3 |
-| `cameras-crud.spec.ts` | Add camera via UI → probe → assign → edit → delete; admin gate kicks non-logged-in | P3 |
-| `archive-playback.spec.ts` | Open archive for a seeded camera; assert `<video>` element reaches `HAVE_METADATA`; hls.js triggers `MANIFEST_PARSED` | P3 |
-| `live-view.spec.ts` | Open `/ShowLive?cameraId=…`; assert WHEP POST returns 201; `<video>` reaches `readyState >= 2`; covers pitfall #63 (inline JS now splices correctly) | P3 |
-| `archive-browser.spec.ts` | `pageSize` hard cap, pagination badge + "Next →" link, filter-form round-trip, delete form action URL + hidden-input name-prefix contract, full delete round-trip preserves filter + page params | P3 (added Aug 12 2026) |
-| `failover.spec.ts` | Two-node setup via devenv; kill node process; assert AssignmentCoordinator reassigns within 15 s; live view for reassigned camera recovers | P3 |
+Shipped suite: **8 spec files, 34 tests = 32 passed + 2 conditional skips.**
+There is no `failover.spec` and no PTZ spec (PTZ was verified via curl; a
+spec waits on real PTZ hardware).
+
+| Spec | What it covers | Status |
+|------|----------------|--------|
+| `login.spec.ts` | `/NewSession` → admin login → cookie set → redirect to `/`; logout clears cookie | shipped |
+| `cameras-crud.spec.ts` | Add camera via UI → probe → assign → edit → delete; admin gate kicks non-logged-in | shipped |
+| `archive-playback.spec.ts` | Open archive for a seeded camera; assert `<video>` element reaches `HAVE_METADATA`; hls.js triggers `MANIFEST_PARSED` | shipped |
+| `live-view.spec.ts` | Open `/ShowLive?cameraId=…`; assert WHEP POST returns 201; `<video>` reaches `readyState >= 2` | shipped |
+| `archive-browser.spec.ts` | `pageSize` hard cap, pagination, filter-form round-trip, delete round-trip preserves filter + page params | shipped |
+| `rules.spec.ts` | Rule CRUD incl. geometry canvas | shipped |
+| `ui-v2.spec.ts` | UI v2: theming (midnight/daylight), collapsible sidebar, sortable tables | shipped |
+| `zoompan.spec.ts` | Zoom/pan on all video (wheel zoom, drag pan, dblclick wrapper-fullscreen) | shipped |
+| ~~`failover.spec.ts`~~ | Two-node reassign test | never written |
 
 **Estimated effort:** 4 days. Includes Playwright project setup + Nix
 wiring (`playwright-test` + browser binaries via `pkgs.playwright-driver`).
 
-## NixOS VM test (`nixosTests.hnvr-failover`) — P3
+## NixOS VM test — P3
 
-Closes the open Phase 2 demo item from MEMORIES.md. Lives in `nix/vm-test.nix`.
+The shipped VM test is a **leader smoke test**
+(`nix build .#checks.x86_64-linux.hnvr-leader-smoke`): boots a VM, curls
+`/healthz` + `/NewSession` (~10 s). The two-node `hnvr-failover` reassign
+test sketched below was never built — it remains the open Phase 2 demo item.
 
 ```nix
 # Sketch

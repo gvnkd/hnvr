@@ -1,6 +1,6 @@
 # HNVR — Web UI & Live View
 
-Web layer is IHP (pinned to a `master` commit supporting GHC 9.12). Live video is delegated to MediaMTX (WebRTC WHEP) running **on the leader host only** (hnvr-2, RTX 4090). The IHP app renders HTML, manages config, generates HLS playlists for archive, and reverse-proxies the WHEP endpoint.
+Web layer is IHP (pinned to release **v1.6.0**). Live video is delegated to MediaMTX (WebRTC WHEP) running **on the leader host only** (hnvr-2, RTX 4090). The IHP app renders HTML, manages config, generates HLS playlists for archive, and proxies the WHEP endpoint via WAI middleware.
 
 ## IHP application structure
 
@@ -10,8 +10,11 @@ hnvr-web/
 ├── Config/Config.hs              -- env-driven IHP config
 ├── static/
 │   ├── hls.js                    -- vendored, HLS.js for fallback player
-│   ├── chart.js                  -- dashboard
-│   └── app.css                   -- tailwind via IHP default
+│   ├── app.js                    -- vanilla JS (live wall, WHEP overlay, zoom/pan)
+│   ├── ptz.js                    -- PTZ drawer JS (hold-to-move pad, presets, 1 Hz status poll)
+│   └── app.css                   -- compiled by tailwind standalone CLI from src.css
+│                                 --   (no npm/postcss); CSS-vars theming, two themes
+│                                 --   (midnight dark / daylight light, localStorage hnvr-theme)
 ├── Application/Schema.sql        -- IHP schema (see 06-data-model.md)
 ├── Web/
 │   ├── FrontController.hs        -- routes
@@ -78,19 +81,20 @@ First-run bootstrap: an `admin` user is created from `INITIAL_ADMIN_EMAIL` / `IN
 | POST   | `/cameras/:id/assign`     | Cameras#assign         | admin | override `assigned_host`
 | GET    | `/rules`                  | Rules#index            | viewer+ |
 | POST   | `/rules`                  | Rules#create           | admin |
-| GET    | `/cameras/:slug/presets`  | Presets#index          | viewer+ |
-| POST   | `/cameras/:slug/presets`  | Presets#create         | admin |
-| DELETE | `/cameras/:slug/presets/:id` | Presets#destroy     | admin |
-| POST   | `/cameras/:id/ptz`        | Cameras#ptz            | admin (or viewer if `ptz_viewer_control`) |
+| GET    | `/cameras/:slug/presets`  | Presets#index          | viewer+ | (shipped as `/PtzPresets?cameraId=…`)
+| POST   | `/cameras/:slug/presets`  | Presets#create         | admin | (shipped as `/PtzPresets`)
+| DELETE | `/cameras/:slug/presets/:id` | Presets#destroy     | admin | (shipped as `/DeletePtzPreset?…`)
+| POST   | `/cameras/:id/ptz`        | Cameras#ptz            | admin (or viewer if `ptz_viewer_control`) | (shipped as `POST /PtzCamera?ptzCameraId=…`, fire-and-forget) |
 | GET    | `/live/:slug`             | Live#show              | viewer+ |
 | ANY    | `/whep/:slug`             | (proxy to MediaMTX)    | viewer+ |
 | GET    | `/archive/:slug`          | Archive#index          | viewer+ |
 | GET    | `/archive/:slug/playlist.m3u8` | Archive#playlist  | viewer+ |
-| GET    | `/archive/:slug/clip`     | Archive#export         | viewer+ |
+| GET    | `/archive/:slug/clip`     | Archive#export         | viewer+ | (never shipped — event clips replaced it, see below) |
 | GET    | `/events`                 | Events#index           | viewer+ |
 | GET    | `/events/:id/thumb`       | Events#thumb           | viewer+ |
 | GET    | `/api/v1/events.json`     | Api#events             | viewer+ (token) |
-| GET    | `/metrics`                | (EKG / Prometheus)     | localhost only |
+| GET    | `/status`                 | unauthenticated JSON (app/host/startedAt/uptimeSeconds/version) | public |
+| GET    | `/metrics`                | Prometheus, **separate warp** on `HNVR_METRICS_PORT` (default 9100; devenv 9102) — not an IHP endpoint | localhost only |
 
 ## Live view page
 
@@ -151,7 +155,14 @@ Either works. Start with v1 simple.
 
 ## PTZ control (live view, only shown when `camera.ptz_enabled=true`)
 
-Right-hand panel of `/live/<slug>` shows a PTZ control widget when the camera has `ptz_enabled=true`. Hidden otherwise.
+The PTZ widget is a **sliding right-edge drawer** (`<aside class="ptz-drawer">`,
+`translateX(105%)` → `.open`), toggled by any `[data-ptz-toggle]` button via a
+single delegated click handler in `app.js`. It exists on both `/ShowLive` and
+the dashboard's fullscreen live overlay (per-camera
+`<template data-ptz-for=<slug>>` cloned into the overlay). **Auth gate**: no
+PTZ markup is rendered for anonymous visitors at all (no templates, no drawer,
+no `ptz.js`) — the dashboard and /ShowLive are anonymous-readable, so the
+drawer would otherwise be dead UI.
 
 ### Layout
 
@@ -161,9 +172,7 @@ Right-hand panel of `/live/<slug>` shows a PTZ control widget when the camera ha
 │                                          │
 │           ┌─────────────────┐            │
 │           │      ▲          │            │
-│           │      ▲          │            │
-│           │  ◀       ▶       │            │
-│           │      ▼          │            │
+│           │  ◀       ▶      │            │
 │           │      ▼          │            │
 │           └─────────────────┘            │
 │                                          │
@@ -180,46 +189,45 @@ Right-hand panel of `/live/<slug>` shows a PTZ control widget when the camera ha
 
 ### Joystick behavior
 
-- Each of the 8 directional buttons issues `ContinuousMove(vx, vy, 0)` with the speed proportional to how long the click is held (200 ms ramp from 0.1 → 0.5 by default).
-- Release (`mouseup` / `mouseleave`) issues `Stop`.
+- Each of the 8 directional buttons issues `continuous_move {vx, vy}` while held (hold-to-move pad).
+- Release (`mouseup` / `mouseleave`) issues `stop`.
 - On touch devices, the same buttons work as touchstart/touchend.
-- Implementation: ~80 LOC of vanilla JS in `static/ptz.js` using `fetch` POSTs to `/cameras/:id/ptz`. No npm.
+- Implementation: `static/ptz.js` (`HNVR.ptz(cameraId, rootEl?)`, root-scoped, returns `{close()}`) POSTing to `/PtzCamera?ptzCameraId=<uuid>`. No npm.
 
 ### Server side
 
-```haskell
-action PtzAction { cameraId } = do
-    camera <- fetch cameraId
-    accessDeniedUnless (camera.ptzEnabled &&
-                        (currentUser.role == Admin || camera.ptzViewerControl))
-    cmd    <- paramOrValidationFailed "command"  -- continuous_move|stop|goto_preset|...
-    args   <- paramJson "args"
-    -- publish to host owning the camera
-    natsPublish ("hnvr.commands.ptz." <> camera.slug)
-                (encode PtzCommand { command = cmd, args = args
-                                   , source = "web_ui", userId = Just currentUserId })
-    -- audit (asynchronously via EventWriter)
-    publishAudit cameraId currentUserId cmd args
-    renderPlain "ok"
-```
+`POST /PtzCamera?ptzCameraId=<uuid>` is fire-and-forget: it auth-checks
+(`ptz_enabled && (admin || ptz_viewer_control)`), decodes the strict
+`PtzCommand` sum, and publishes a `PtzCommandMsg` on
+`hnvr.commands.ptz.<slug>`. `set_preset`/`get_presets` use a NATS
+request/reply (8 s timeout) instead. Presets CRUD lives at `/PtzPresets`
+(+Goto/Home/Purge; `format=json` branches serve ptz.js).
+
+There is **no node-side DB access**: after executing every command the node's
+PtzController publishes an audit record on `hnvr.ptz.audit`; the leader's
+`PtzAuditWriter` persists rows to `ptz_audit_log` with `ok`/`error` columns
+(execution, not publish intent).
 
 ### Preset management
 
-`/cameras/:slug/presets` shows all presets, allows:
-- **Set new**: button issues `SetPreset(name)` → ONVIF returns token → row in `ptz_presets` with `onvif_token`, position snapshot from `GetStatus`.
+`/PtzPresets` shows all presets, allows:
+- **Set new**: button issues `set_preset(name)` → ONVIF returns token → row in `ptz_presets` with `onvif_token`, position snapshot from `GetStatus`.
 - **Rename**: just updates `name` locally (ONVIF token stays).
-- **Go**: button issues `GotoPreset(token)`.
-- **Make home**: checkbox sets `is_home=true` and `cameras.ptz_home_preset_id`.
-- **Delete**: `RemovePreset(token)` then row delete.
+- **Go**: button issues `goto_preset(token)`.
+- **Make home**: sets `is_home=true` and `cameras.ptz_home_preset_id` (republished to the node via the full-snapshot assign).
+- **Delete**: `remove_preset(token)` then row delete.
 
 ### PTZ status indicator
 
-Top of the PTZ panel shows the camera's current state, polled via `autoRefresh` (1 Hz):
+Top of the drawer shows the camera's current state, polled at 1 Hz from
+`/PtzStatusCamera?cameraId=<uuid>`:
 
 - `Idle`, `ManualMove`, `GoingToPreset`, `ReturningHome`, `AutoTracking` (v1.1).
 - Last command timestamp + duration.
 
-State source: the host owning the camera publishes `hnvr.ptz.status.<cam>` every state change + every 2 s heartbeat. Leader caches latest value in `IORef` for fast reads.
+State source: the host owning the camera publishes `hnvr.ptz.status.<slug>` on
+every state change; the leader's `PtzStatusCache` subscription holds the
+latest value and serves the poll endpoint.
 
 ### Manual control preempts auto-track (v1.1)
 
@@ -229,9 +237,9 @@ When auto-track is enabled and the operator clicks any PTZ button, the PtzContro
 
 ### Configuration sync
 
-`MediaMTXConfigSyncer` (leader-only async thread) listens on Postgres LISTEN on `cameras_events` channel; whenever a camera row changes, regenerates `/run/hnvr/mediamtx.yml` from the IHP-stored cameras and `SIGHUP`s MediaMTX (live reload).
+`MediaMTXConfigSyncer` (leader-only async thread) LISTENs on the Postgres `cameras_events` channel (via pg-simple); whenever a camera row changes, it pushes the path config to MediaMTX's **`/v3` REST API** (`POST /v3/config/paths/add`, `PATCH /v3/config/paths/patch`, `DELETE /v3/config/paths/delete`). The mediamtx.yml-regen + SIGHUP approach was never shipped — MediaMTX v1.20.0's API covers live path management.
 
-Generated YAML:
+Equivalent pushed config (shown as YAML for readability):
 
 ```yaml
 # /run/hnvr/mediamtx.yml (managed by hnvr-leader, do not edit)
@@ -265,18 +273,19 @@ webrtcEncryption: no
 
 **Cross-host optimization (post-v1)**: run MediaMTX on each host, route WHEP to the host already pulling the camera. Skipped in v1 to keep one MediaMTX config in one place.
 
-### Reverse proxy (nginx on leader)
+### Reverse proxy
 
-```
-/whep/<slug>          → MediaMTX WHEP POST endpoint
-/live/<slug>/webrtc   → MediaMTX /<slug> WebRTC over WS (alt. transport)
-```
+No nginx was ever deployed in front of the leader. The WHEP endpoint is
+proxied by WAI middleware inside the IHP app (`/whep/<slug>` → MediaMTX's
+`http://127.0.0.1:8889/<slug>/whep`), which substitutes for the nginx layer
+entirely.
 
 Cookies set by IHP login are passed through; the proxy layer trusts the boundary.
 
 ### Password substitution
 
-The YAML is rendered **with credentials**; `mediamtx.yml` lives at `/run/hnvr/mediamtx.yml` (systemd `RuntimeDirectory=hnvr`), `0600`, owned by `hnvr`. Decrypted passwords come from the in-memory camera config cache.
+Path configs pushed via the /v3 API carry credentials in the RTSP source URL;
+decrypted passwords come from the in-memory camera config cache.
 
 ## Archive playback
 
@@ -310,24 +319,23 @@ IHP action:
 
 The browser loads this in `<video src="..."  controls>` via `hls.js` (Safari handles HLS natively but we don't ship HEVC HLS for Safari in v1). fMP4 fragments are directly playable as HLS segments thanks to our `+frag_keyframe+empty_moov+default_base_moof` flags at capture time.
 
-### Visual timeline
+### Archive browser
 
-A horizontal timeline above the player shows:
+The archive browser is a **server-rendered** page at `/Archive` (camera /
+date filters, pagination, recordings grouped by day). The player at
+`/PlayerArchive` uses hls.js and supports deep links (`?from&to&t`). The
+canvas-timeline + `static/timeline.js` idea was never built.
 
-- Density of segments (gaps visible as breaks).
-- Color ticks for events (red = line crossed, blue = zone enter).
-- Scrubbing changes `from`/`to`.
+### Event clips (replaces the clip-export design)
 
-Built with custom `<canvas>` + htmx polling for events. ~200 LOC of JS in `static/timeline.js`.
-
-### Clip export
-
-`POST /archive/cam-196/clip` with `{ from, to }`:
-
-1. Enqueue an `ExportJob` row.
-2. `ExportWorker` (leader-only async) uses `ffmpeg -f concat -safe 0 -i list.txt -c copy out.mp4` where `list.txt` lists presigned URLs. ~5 s per hour of video (zero re-encode).
-3. Upload to `hnvr-exports/<job-uuid>.mp4`, presigned URL returned to user, valid 24 h.
-4. Sweep deletes `hnvr-exports` objects older than 24 h.
+The `export_jobs` / `hnvr-exports` clip-export design **never shipped**. What
+shipped instead (v0.4.0.0) is rule-driven event video clips: rules with
+`clip_preroll_sec` / `clip_postroll_sec` / `clip_retention_hours` set cause the
+node to assemble a clip from its per-camera ring buffer at rule fire, upload it
+under `<slug>/clips/<YYYY-MM-DD/HH-MM-SS.mmm>/`, and link it to the events via
+`event_clips` / `event_clip_events`. Playback: `/PlayerEventClip` +
+`/PlaylistEventClip`; admin purge via `PurgeEventClipAction` (tombstone +
+async purge). /Events rows link straight to the clip ("▶ clip").
 
 ## Events view
 
@@ -343,7 +351,7 @@ Behind the scenes: `SELECT ... FROM events WHERE ... ORDER BY ts DESC LIMIT 200`
 
 ## Dashboard `/`
 
-- Grid of camera cards: live thumbnail (polled via `autoRefresh` every 10 s; JPEG from MediaMTX's `/<slug>/preview.jpg`).
+- Grid of camera cards: **live wall** — low-fps polling of `/debug-frame/<uuid>` (anonymous; 503 when the frame is >5 s stale) with dual-img crossfade + IntersectionObserver gating + error backoff. Clicking a card opens a FLIP-animated fullscreen WHEP overlay (shared `HNVR.whep` client with /ShowLive).
 - Per-camera event count in last hour.
 - Top-level stats: storage used, free space (queried from SeaweedFS), aggregate fps, host CPU/GPU.
 - **Per-host panel**: shows hnvr-1 and hnvr-2 with current camera assignments, CPU%, GPU mem, last health ts. Backed by `hnvr.health.<host>` consumed via NATS subscription.
@@ -361,7 +369,7 @@ When an admin edits a camera or a rule:
 1. IHP controller `PATCH /cameras/:id` updates Postgres row.
 2. Same transaction fires `NOTIFY cameras_events` (Postgres LISTEN/NOTIFY trigger).
 3. Listeners (all on leader):
-   - `MediaMTXConfigSyncer`: regenerates `mediamtx.yml` + SIGHUPs MediaMTX.
+   - `MediaMTXConfigSyncer`: pushes path add/patch/delete via the MediaMTX /v3 REST API.
    - `ConfigBroadcaster`: publishes `hnvr.config.cameras.<slug>` JSON to NATS.
    - `AssignmentCoordinator`: if `assigned_host` changed, publishes `hnvr.commands.assign.<slug>`.
 4. Each host's `ConfigWatcher` (NATS subscriber) updates its in-memory `IORef (Map CameraId Camera)`; the affected `CaptureSupervisor` starts/stops/restarts the worker.
@@ -382,4 +390,4 @@ No service restart needed for routine config changes.
 - Native mobile app.
 - Per-camera ACL (admin/viewer is enough for v1).
 - Email/Telegram/Mattermost alert delivery (a webhook out is enough; integration is a config setting).
-- Standby web node (post-v1 — leader election plumbing exists, second node not deployed).
+- Standby web node (post-v1 — leader election needs JetStream KV, which is deferred).

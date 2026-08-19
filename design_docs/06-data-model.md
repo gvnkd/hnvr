@@ -22,12 +22,11 @@ CREATE TABLE users (
     id              UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     email           TEXT NOT NULL UNIQUE,
     password_hash   TEXT NOT NULL,
-    role            TEXT NOT NULL DEFAULT 'viewer'
-                    CHECK (role IN ('admin', 'viewer')),
+    is_admin        BOOLEAN NOT NULL DEFAULT FALSE,   -- single admin user for v1; viewer role post-v1
     locked_at       TIMESTAMP WITH TIME ZONE,
     failed_login_attempts INT NOT NULL DEFAULT 0,
-    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    last_login_at   TIMESTAMP WITH TIME ZONE,          -- stamped by IHP AuthSupport beforeLogin hook
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 -- =========================================================
@@ -57,7 +56,7 @@ CREATE TABLE cameras (
     -- rtsp_template/port dropped in v0.5.2.0 (0010): templates never had
     -- form inputs (wiped NULL on every Save); port had no logic consumer.
     rtsp_url        TEXT NOT NULL,
-    host            INET,
+    host            TEXT,
     username        TEXT,
     password_enc    BYTEA,                                       -- AES-256-GCM ciphertext
     password_nonce  BYTEA,                                       -- GCM nonce
@@ -71,22 +70,20 @@ CREATE TABLE cameras (
     -- capture params
     codec           codec_kind NOT NULL DEFAULT 'unknown',
     record_audio    BOOLEAN NOT NULL DEFAULT FALSE,
-    record_video    BOOLEAN NOT NULL DEFAULT TRUE,
-    analysis_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     analysis_fps    INT NOT NULL DEFAULT 5 CHECK (analysis_fps BETWEEN 1 AND 25),
     -- analysis_width/height removed: analysis resolution == sub-stream resolution
     -- (or main-stream resolution when use_substream_for_analysis=FALSE)
     -- CV
     model_name      TEXT NOT NULL DEFAULT 'yolov8n-320',
-    confidence      REAL NOT NULL DEFAULT 0.35 CHECK (confidence BETWEEN 0 AND 1),
-    kept_classes    INT[] NOT NULL DEFAULT ARRAY[0,1,2,3,5,7],  -- COCO class ids
-    emit_track_lifecycle BOOLEAN NOT NULL DEFAULT FALSE,
-    -- PTZ (ONVIF Profile PT)
+    -- ONVIF desired-config (sparse, NULL = unmanaged; migration 0008) —
+    -- onvif_port, main_video_* / sub_video_* (encoding/width/height/fps/
+    -- bitrate_kbps/gov_length), audio_* (encoding/bitrate_kbps/
+    -- sample_rate_khz); mgmt_proto TEXT DEFAULT 'onvif' (0009)
+    -- PTZ (migration 0011; runtime ONVIF discovery + camera creds — the
+    -- ptz_onvif_url / ptz_username / ptz_password_* columns were never
+    -- created; the node resolves the PTZ XAddr via GetCapabilities and
+    -- reuses the camera's own username/password)
     ptz_enabled         BOOLEAN NOT NULL DEFAULT FALSE,
-    ptz_onvif_url       TEXT,                            -- http://192.168.0.196/onvif/device_service
-    ptz_username        TEXT,                            -- NULL = reuse camera.username
-    ptz_password_enc    BYTEA,                           -- NULL = reuse camera.password_enc
-    ptz_password_nonce  BYTEA,
     ptz_profile_token   TEXT,                            -- ONVIF media profile token, probed at config
     ptz_home_preset_id  UUID,                            -- FK added below (forward ref)
     ptz_idle_timeout_s  INT NOT NULL DEFAULT 30
@@ -94,7 +91,7 @@ CREATE TABLE cameras (
     ptz_viewer_control  BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE = viewers can use PTZ
     -- lifecycle
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
-    retention_days  INT NOT NULL DEFAULT 7 CHECK (retention_days BETWEEN 1 AND 365),
+    retention_hours INT NOT NULL DEFAULT 168,            -- hours; was retention_days pre-0007 (backfilled ×24)
     -- assignment
     assigned_host   TEXT REFERENCES hosts(id),                  -- 'hnvr-1' | 'hnvr-2'
     manual_assign   BOOLEAN NOT NULL DEFAULT FALSE,             -- TRUE = admin-pinned
@@ -106,7 +103,7 @@ CREATE INDEX cameras_assigned_idx ON cameras (assigned_host) WHERE enabled;
 -- =========================================================
 -- Rules (line crossing + zone intrusion)
 -- =========================================================
-CREATE TYPE rule_kind AS ENUM ('line_cross', 'zone_enter', 'zone_exit', 'zone_inside');
+CREATE TYPE rule_kind AS ENUM ('line_cross', 'zone_enter', 'zone_exit', 'zone_inside', 'zone_motion');
 
 CREATE TABLE rules (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -116,9 +113,14 @@ CREATE TABLE rules (
     -- geometry stored as JSONB (small tables, no perf concern)
     -- line_cross: { "a": [x,y], "b": [x,y], "direction": "positive" }
     -- zone_*:     { "polygon": [[x,y], ...] }
+    -- zone_motion adds "min_displacement" (normalized, default 0.03; 0005)
     geometry        JSONB NOT NULL,
     classes         INT[] NOT NULL DEFAULT ARRAY[0,1,2,3,5,7],
     cooldown_ms     INT NOT NULL DEFAULT 5000,
+    -- event clips (0007): NULL clip_retention_hours = clips off
+    clip_preroll_sec  INT NOT NULL DEFAULT 5,
+    clip_postroll_sec INT NOT NULL DEFAULT 5,
+    clip_retention_hours INT,
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
@@ -133,13 +135,12 @@ CREATE TABLE segments (
     camera_id       UUID NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
     start_ts        TIMESTAMP WITH TIME ZONE NOT NULL,
     end_ts          TIMESTAMP WITH TIME ZONE NOT NULL,
-    -- PG 18: derived date column for cheap partition pruning / queries
-    start_date      DATE GENERATED ALWAYS AS (start_ts::date) STORED,
     host_id         TEXT REFERENCES hosts(id),                  -- which host captured
     object_key      TEXT NOT NULL,                               -- 'cam-196/.../15.mp4'
     bytes           BIGINT NOT NULL,
     sha256          TEXT NOT NULL,
     has_audio       BOOLEAN NOT NULL DEFAULT FALSE,
+    pending_delete_at TIMESTAMP WITH TIME ZONE,                  -- tombstone (0006); read paths filter it out
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     -- uniqueness: one segment per (camera, start_ts)
     UNIQUE (camera_id, start_ts)
@@ -147,6 +148,8 @@ CREATE TABLE segments (
 -- Hot path: time-range scan per camera
 CREATE INDEX segments_cam_start_idx ON segments (camera_id, start_ts DESC);
 CREATE INDEX segments_start_ts_brin ON segments USING brin (start_ts);
+CREATE INDEX segments_pending_delete_idx ON segments (pending_delete_at)
+    WHERE pending_delete_at IS NOT NULL;
 
 -- =========================================================
 -- Events
@@ -171,7 +174,7 @@ CREATE TABLE events (
     -- denormalized for fast queries without join
     segment_ts      TIMESTAMP WITH TIME ZONE,                    -- wall-clock of containing segment
     host_id         TEXT REFERENCES hosts(id),                   -- emitting host
-    payload         JSONB,                                        -- extra data for system events
+    payload         JSONB,                                        -- full CvEvent JSON
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 CREATE INDEX events_cam_ts_idx   ON events (camera_id, ts DESC);
@@ -181,7 +184,47 @@ CREATE INDEX events_track_idx    ON events (camera_id, track_id, ts DESC)
                                   WHERE track_id IS NOT NULL;
 
 -- =========================================================
--- Recording gaps (intervals with no segment)
+-- Event clips (0007): node-assembled event video
+-- =========================================================
+CREATE TABLE event_clips (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id       UUID NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
+    rule_id         UUID REFERENCES rules(id) ON DELETE SET NULL,
+    started_at      TIMESTAMP WITH TIME ZONE NOT NULL,
+    duration_sec    INT NOT NULL,
+    object_prefix   TEXT NOT NULL,                    -- '<slug>/clips/<ts>/'
+    retention_hours INT NOT NULL,                     -- snapshotted from the rule
+    pending_delete_at TIMESTAMP WITH TIME ZONE,       -- tombstone, mirrors segments
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX event_clips_cam_ts_idx ON event_clips (camera_id, started_at DESC);
+
+-- Which events a clip covers (merged clips link multiple events)
+CREATE TABLE event_clip_events (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clip_id     UUID NOT NULL REFERENCES event_clips(id) ON DELETE CASCADE,
+    event_id    UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (clip_id, event_id)
+);
+
+-- =========================================================
+-- Camera drift (0008): desired-vs-observed ONVIF config
+-- =========================================================
+CREATE TABLE camera_drift (
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id     UUID NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
+    config_name   TEXT NOT NULL,
+    field_name    TEXT NOT NULL,
+    desired       TEXT NOT NULL,
+    observed      TEXT NOT NULL,
+    first_seen_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_seen_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (camera_id, config_name, field_name)
+);
+
+-- =========================================================
+-- Recording gaps (intervals with no segment) — design intent, not yet built
 -- =========================================================
 CREATE TABLE recording_gaps (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -195,7 +238,7 @@ CREATE TABLE recording_gaps (
 CREATE INDEX gaps_cam_idx ON recording_gaps (camera_id, from_ts DESC);
 
 -- =========================================================
--- Export jobs
+-- Export jobs — NEVER SHIPPED; event clips (0007, above) replaced the design
 -- =========================================================
 CREATE TYPE export_status AS ENUM ('pending', 'running', 'succeeded', 'failed');
 
@@ -264,6 +307,8 @@ CREATE TABLE ptz_audit_log (
     args            JSONB,                           -- {vx:0.5,vy:0.3,zoom:0.0} or {preset_token:...}
     source          ptz_source NOT NULL,
     duration_ms     INT,                             -- for continuous_move, how long the joystick was held
+    ok              BOOLEAN NOT NULL DEFAULT TRUE,   -- execution result (node-side),
+    error           TEXT,                            -- not publish intent; written by leader's PtzAuditWriter
     ts              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 CREATE INDEX ptz_audit_cam_ts_idx ON ptz_audit_log (camera_id, ts DESC);
@@ -271,38 +316,25 @@ CREATE INDEX ptz_audit_cam_ts_idx ON ptz_audit_log (camera_id, ts DESC);
 -- =========================================================
 -- Postgres LISTEN/NOTIFY triggers
 -- =========================================================
-CREATE OR REPLACE FUNCTION notify_change() RETURNS trigger AS $$
-BEGIN
-    PERFORM pg_notify(TG_ARGV[0], NEW.id::TEXT);
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER cameras_notify
-    AFTER INSERT OR UPDATE OR DELETE ON cameras
-    FOR EACH ROW EXECUTE FUNCTION notify_change('cameras_events');
-
-CREATE TRIGGER rules_notify
-    AFTER INSERT OR UPDATE OR DELETE ON rules
-    FOR EACH ROW EXECUTE FUNCTION notify_change('rules_events');
-
-CREATE TRIGGER hosts_notify
-    AFTER INSERT OR UPDATE ON hosts
-    FOR EACH ROW EXECUTE FUNCTION notify_change('hosts_events');
-
-CREATE TRIGGER ptz_presets_notify
-    AFTER INSERT OR UPDATE OR DELETE ON ptz_presets
-    FOR EACH ROW EXECUTE FUNCTION notify_change('ptz_presets_events');
+-- Reality: only ONE trigger exists — cameras_events_notify ON cameras,
+-- installed idempotently at leader boot by MediaMTXConfigSyncer (function
+-- hnvr_notify_cameras_events(), pg_notify('cameras_events', json payload)).
+-- ConfigBroadcaster reuses the same channel. The rules/hosts/ptz_presets
+-- triggers sketched below were never created (rules changes propagate via
+-- the full-snapshot assign republish instead).
 
 -- Required extensions (request from SaaS provider if not default)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";       -- uuid_generate_v4()
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";        -- backup for uuid gen
-CREATE EXTENSION IF NOT EXISTS "pg_partman";      -- partition management
 ```
 
 ## Generated Haskell types (IHP)
 
-IHP auto-generates, in `Generated/Haskell/Types.hs`:
+IHP auto-generates, in `Generated/Haskell/Types.hs` (abridged — field names
+follow the columns above; `rtspTemplate`/`port`/`rtspSubTemplate`/
+`displayName` and the phantom `ptzOnvifUrl`/`ptzUsername`/`ptzPassword*`
+fields were dropped in migrations 0010/0011, `retentionDays` is now
+`retentionHours`):
 
 ```haskell
 data Camera = Camera
@@ -310,43 +342,28 @@ data Camera = Camera
   , slug            :: !Text
   , name            :: !Text
   , rtspUrl         :: !Text
-  , rtspTemplate    :: !(Maybe Text)
-  , host            :: !(Maybe NetAddr)
-  , port            :: !Int
+  , host            :: !(Maybe Text)
   , username        :: !(Maybe Text)
   , passwordEnc     :: !(Maybe ByteString)
   , passwordNonce   :: !(Maybe ByteString)
   -- sub-stream
   , rtspSubUrl      :: !(Maybe Text)
-  , rtspSubTemplate :: !(Maybe Text)
   , useSubstreamForAnalysis :: !Bool
   , substreamCodec  :: !CodecKind
-  , substreamWidth  :: !(Maybe Int)
-  , substreamHeight :: !(Maybe Int)
-  -- capture
+  -- capture / CV
   , codec           :: !CodecKind
   , recordAudio     :: !Bool
-  , recordVideo     :: !Bool
-  , analysisEnabled :: !Bool
   , analysisFps     :: !Int
-  -- analysisWidth / analysisHeight removed: derived from sub/main stream at runtime
   , modelName       :: !Text
-  , confidence      :: !Float
-  , keptClasses     :: !(Vector Int32)
-  , emitTrackLifecycle :: !Bool
-  -- PTZ
+  -- ONVIF desired-config + mgmt_proto + PTZ columns (see SQL above)
   , ptzEnabled        :: !Bool
-  , ptzOnvifUrl       :: !(Maybe Text)
-  , ptzUsername       :: !(Maybe Text)
-  , ptzPasswordEnc    :: !(Maybe ByteString)
-  , ptzPasswordNonce  :: !(Maybe ByteString)
   , ptzProfileToken   :: !(Maybe Text)
   , ptzHomePresetId   :: !(Maybe UUID)
   , ptzIdleTimeoutS   :: !Int
   , ptzViewerControl  :: !Bool
-  -- lifecycle
+  -- lifecycle / assignment
   , enabled         :: !Bool
-  , retentionDays   :: !Int
+  , retentionHours  :: !Int
   , assignedHost    :: !(Maybe HostId)
   , manualAssign    :: !Bool
   , createdAt       :: !UTCTime
@@ -355,7 +372,6 @@ data Camera = Camera
 
 data Host = Host
   { id              :: !HostId
-  , displayName     :: !Text
   , gpuModel        :: !(Maybe Text)
   , execProviders   :: !(Vector Text)
   , isLeader        :: !Bool
@@ -363,7 +379,7 @@ data Host = Host
   , healthJson      :: !Value
   , createdAt       :: !UTCTime
   } deriving (Show, Eq, Generic)
--- plus enums CodecKind, RuleKind, EventKind, ExportStatus
+-- plus enums CodecKind, RuleKind, EventKind, PtzSource
 -- plus IHP's CanCreate, CanUpdate, HasField instances
 ```
 
@@ -452,12 +468,12 @@ decryptText :: Key -> ByteString -> ByteString -> IO Text
 | `rules` | ~500 B | static | <10 KB |
 | `segments` | ~180 B | 1/cam/sec | ~95 M rows, ~17 GB |
 | `events` (CV) | ~250 B | ~5/cam/min | ~50 M rows, ~12 GB |
-| `events` (`segment_written`) | ~150 B | 1/cam/sec | ~95 M rows, ~14 GB (or partition out, see below) |
-| `recording_gaps` | ~120 B | rare | negligible |
-| `export_jobs` | ~300 B | per user action | negligible |
+| `event_clips` | ~200 B | per rule fire | small (hours-based retention) |
+| `recording_gaps` | ~120 B | rare | negligible (table not yet built) |
 | `audit_log` | ~400 B | per admin action | negligible |
+| `ptz_audit_log` | ~300 B | per PTZ command | negligible |
 
-**Mitigation**: partition `events` by month, `segments` by month, using `pg_partman`. The `segment_written` event stream doubles as our segment ledger — but it's heavy enough that we may want a separate `segment_writes` table partitioned independently. Re-evaluate at 6 months in production.
+**Mitigation**: partition `events` by month, `segments` by month, using `pg_partman`. Segment rows are inserted from `SegmentWritten` envelopes by the leader's EventWriter — that envelope goes straight to `segments`, never through `events` (the `segment_written` event kind was pruned in 0010).
 
 **SaaS coordination**: ensure the provider's plan accommodates ~50 GB/year growth in our DB. Negligible by modern standards.
 
@@ -473,7 +489,7 @@ SeaweedFS durability is also the provider's concern. We expose usage metrics in 
 
 ## Migration policy
 
-IHP's schema designer handles forward migrations (`Schema.sql` diff → SQL). For destructive changes:
+In practice migrations are hand-written SQL files `hnvr-web/migrations/0001`–`0011`, all wired into `Hnvr.Web.SchemaMigration` and replayed idempotently at leader boot (0005's `ADD VALUE IF NOT EXISTS` replays as a no-op). For destructive changes:
 
 1. Add the new column nullable.
 2. Backfill in app code or one-shot SQL.

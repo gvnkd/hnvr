@@ -7,7 +7,7 @@ Multi-host NixOS deployment. Two hosts. NATS is in our scope; Postgres and Seawe
 | Host | GPU | Default role | Cameras | Services running |
 |------|-----|--------------|---------|------------------|
 | `hnvr-1` | GTX 1070 (Pascal sm_61) | Worker node | ~50% | `hnvr-node.service`, `nats-server.service` (replica) |
-| `hnvr-2` | RTX 4090 (Ada sm_89) | Leader | ~50% | `hnvr-leader.service`, `nats-server.service` (primary), `mediamtx.service`, `nginx.service` |
+| `hnvr-2` | RTX 4090 (Ada sm_89) | Leader | ~50% | `hnvr-leader.service`, `nats-server.service` (primary), `mediamtx.service` (nginx was never deployed — the WAI WHEP middleware substitutes) |
 
 Either host can take over the other's cameras via NATS command bus. Only the leader runs the IHP web node and MediaMTX.
 
@@ -15,31 +15,28 @@ Either host can take over the other's cameras via NATS command bus. Only the lea
 
 ```
 hnvr/
-├── flake.nix                   -- outputs: nixosModules.hnvr, nixosConfigurations.{hnvr-1,hnvr-2}, devShells
+├── flake.nix                   -- outputs: nixosModules.hnvr, nixosConfigurations.{hnvr-1-vm,hnvr-2-vm}, devShells
 ├── flake.lock
 ├── nix/
 │   ├── module.nix              -- common NixOS module (HNVR settings, secrets, hardening)
-│   ├── leader.nix              -- leader-only additions (MediaMTX, IHP, leader logic)
-│   ├── nat-server.nix          -- NATS server config (clustered)
-│   ├── mediamtx.nix            -- MediaMTX derivation (or flake input)
-│   ├── models.nix              -- fetchurl'd ONNX models, pinned by sha256
-│   ├── engines/                -- pre-built TensorRT engines per (model, sm)
-│   │   ├── yolov8n-320.sm_89.engine.nix
-│   │   └── yolov8s-640.sm_89.engine.nix
-│   └── data-key.nix            -- placeholder; real key via sops-nix
-├── secrets/
-│   ├── secrets.yaml            -- sops-encrypted YAML
-│   └── .sops.yaml              -- per-host key definition
-├── hosts/
-│   ├── hnvr-1.nix              -- host-specific config (GPU, networking, role=worker)
-│   ├── hnvr-2.nix              -- host-specific config (GPU, role=leader, nginx)
-│   ├── hnvr-1.hardware.nix     -- disko / hardware-config
-│   └── hnvr-2.hardware.nix
+│   ├── nats-server.nix         -- NATS server config
+│   ├── mediamtx.nix            -- MediaMTX derivation/config
+│   ├── secrets.nix             -- sops-nix wiring
+│   ├── secrets-template.yaml   -- sops secrets template (see below)
+│   └── nats-queue-ipv6-fallback.patch
+│   -- (design intent, NOT in repo: leader.nix, models.nix,
+│   --  engines/ — the offline trtexec engine flow was superseded by
+│   --  ORT TRT's runtime engine cache via HNVR_TRT_CACHE_DIR)
+├── secrets/                    -- sops-encrypted YAML (gitignored)
+├── hosts/                      -- DESIGN INTENT, not in repo: hnvr-{1,2}.nix
+│                               -- + *.hardware.nix (disko) host configs
 ├── hnvr-core/...
 ├── hnvr-nats/...
 ├── hnvr-capture/...
 ├── hnvr-cv/...
+├── hnvr-ptz/...
 ├── hnvr-storage/...
+├── vendored/                   -- nats-queue + minio-hs (in-tree fixes)
 └── hnvr-web/...
 ```
 
@@ -51,7 +48,7 @@ hnvr/
 
   inputs = {
     nixpkgs.url       = "github:NixOS/nixpkgs/nixos-unstable";  # for GHC 9.12 + TensorRT
-    ihp.url           = "github:digitallyinduced/ihp/<commit-with-9.12-support>";
+    ihp.url           = "github:digitallyinduced/ihp/v1.6.0";  # pinned release
     mediamtx.url      = "github:bluenviron/mediamtx/v1.20.0";
     sops-nix.url      = "github:Mic92/sops-nix";
     haskell-flake.url = "github:srid/haskell-flake";
@@ -72,7 +69,7 @@ hnvr/
             ./hosts/${name}.nix
             ./nix/module.nix
             (if role == "leader" then ./nix/leader.nix else {})
-            ./nix/nat-server.nix
+            ./nix/nats-server.nix
             self.nixosModules.hnvrHaskell
           ];
         };
@@ -95,7 +92,7 @@ hnvr/
 
 ## Haskell overlay (`nix/haskell-overlay.nix`)
 
-GHC 9.12 + IHP pinned to a 9.12-capable commit. Jailbreak known-stale upper bounds.
+GHC 9.12 + IHP pinned to release v1.6.0. Jailbreak known-stale upper bounds.
 
 ```nix
 inputs: { pkgs, config, lib, ... }:
@@ -106,19 +103,22 @@ let
       ihp = inputs.ihp.haskellPackages.${super.ghc.version}.ihp
           or (super.callCabal2nix "ihp" inputs.ihp { });
 
-      # Jailbreak upper bounds blocking GHC 9.12
-      amazonka-core = lib.pipe super.amazonka-core [
-        (p: p.overrideAttrs (_: { jailbreak = true; }))
+      # Jailbreak upper bounds blocking GHC 9.12 (amazonka is gone —
+      # storage is vendored minio-hs). Actual jailbreaks: cabal-test-quickcheck,
+      # postgresql-simple-migration.
+      cabal-test-quickcheck = lib.pipe super.cabal-test-quickcheck [
+        lib.haskell.lib.markUnbroken
+        lib.haskell.lib.doJailbreak
+        lib.haskell.lib.dontCheck
       ];
-      amazonka-s3   = lib.pipe super.amazonka-s3 [
-        (p: p.overrideAttrs (_: { jailbreak = true; }))
-      ];
+      postgresql-simple-migration = lib.haskell.lib.doJailbreak super.postgresql-simple-migration;
 
       # Our packages
       hnvr-core    = self.callCabal2nix "hnvr-core"    ../hnvr-core   {};
       hnvr-nats    = self.callCabal2nix "hnvr-nats"    ../hnvr-nats   {};
       hnvr-capture = self.callCabal2nix "hnvr-capture" ../hnvr-capture {};
       hnvr-cv      = self.callCabal2nix "hnvr-cv"      ../hnvr-cv      {};
+      hnvr-ptz     = self.callCabal2nix "hnvr-ptz"     ../hnvr-ptz     {};
       hnvr-storage = self.callCabal2nix "hnvr-storage" ../hnvr-storage {};
       hnvr-web     = self.callCabal2nix "hnvr-web"     ../hnvr-web     {};
     };
@@ -147,7 +147,7 @@ let
   execProviders = lib.concatStringsSep ","
     (cfg.execProviders or (if role == "leader"
                            then ["tensorrt" "cuda" "cpu"]
-                           else ["cuda" "cpu"]));
+                           else ["cpu"]));   # Pascal: cuDNN ≥ 9.12 dropped it, CPU EP only
 
   models = pkgs.callPackage ./nix/models.nix {};
 in {
@@ -181,10 +181,13 @@ in {
     users.groups.hnvr = {};
 
     # ----- secrets (sops-nix) ---------------------------------------------
+    # Reality (see nix/secrets-template.yaml): ONE sops key holds the whole
+    # hnvr.yaml app config (S3 creds incl. the ro browser key pair); the four
+    # hnvr-s3-* fragment keys were removed. HNVR_DATA_KEY and DATABASE_URL
+    # (hnvr-db-url) remain their own keys.
     sops.secrets.hnvr-data-key       = { owner = "hnvr"; mode = "0400"; };
     sops.secrets.hnvr-db-url         = { owner = "hnvr"; mode = "0400"; };
-    sops.secrets.hnvr-s3-access-key  = { owner = "hnvr"; mode = "0400"; };
-    sops.secrets.hnvr-s3-secret-key  = { owner = "hnvr"; mode = "0400"; };
+    sops.secrets.hnvr-config         = { owner = "hnvr"; mode = "0400"; };
     sops.secrets.hnvr-nats-creds     = { owner = "hnvr"; mode = "0400"; };
     sops.secrets.initial-admin-pw    = { owner = "hnvr"; mode = "0400"; };
 
@@ -295,7 +298,7 @@ in {
 }
 ```
 
-## NATS server module (`nix/nat-server.nix`)
+## NATS server module (`nix/nats-server.nix`)
 
 ```nix
 { config, lib, pkgs, name, role, ... }:
@@ -308,9 +311,9 @@ in {
     serverName = name;
     port = 4222;
     jetstream = {
-      enable = true;
-      storage = "/var/lib/nats/jetstream";
-      maxMemory = "1GB";
+      enable = true;               # server-side only; the app uses CORE NATS
+      storage = "/var/lib/nats/jetstream";   # (nats-queue has no JetStream
+      maxMemory = "1GB";           #  client — JetStream usage is deferred)
       maxFile = "10GB";
     };
     settings = {
@@ -336,7 +339,8 @@ In v1, single-node NATS on hnvr-2 is sufficient. The cluster stanza is wired but
 
 ## Leader module (`nix/leader.nix`)
 
-Adds nginx + MediaMTX + standby IHP TLS termination.
+Adds MediaMTX. (Design intent — no separate `leader.nix` exists in the repo;
+the MediaMTX service lives in `nix/mediamtx.nix`.)
 
 ```nix
 { config, lib, pkgs, inputs, ... }:
@@ -357,7 +361,16 @@ in {
     };
   };
 
-  # ----- nginx reverse proxy (TLS termination) --------------------------
+  networking.firewall.allowedTCPPorts = [ 80 443 8889 ];
+}
+```
+
+**nginx was never deployed.** The sketch below was the plan; in reality the
+IHP app's own WAI middleware proxies `/whep/<slug>` to MediaMTX, so no
+separate reverse proxy exists in front of the leader:
+
+```nix
+  # ----- nginx reverse proxy (TLS termination) — NOT DEPLOYED ------------
   services.nginx = {
     enable = true;
     recommendedTlsSettings = true;
@@ -379,12 +392,15 @@ in {
       };
     };
   };
-
-  networking.firewall.allowedTCPPorts = [ 80 443 8889 ];
-}
 ```
 
 ## Per-host files
+
+> **Design intent — `hosts/` does not exist in the repo.** The two files
+> below are what the per-host configs would look like; the flake currently
+> ships only the VM test configurations (`hnvr-1-vm`, `hnvr-2-vm`). hnvr-1's
+> CUDA notes are doubly moot: cuDNN ≥ 9.12 dropped Pascal, so hnvr-1 runs
+> the CPU EP and needs no CUDA libs at all.
 
 ### `hosts/hnvr-1.nix` (worker, GTX 1070)
 
@@ -402,15 +418,13 @@ in {
     package = config.boot.kernelPackages.nvidiaPackages.stable;
   };
 
-  # CUDA for ONNX Runtime CUDA EP
-  systemd.services.hnvr-node.environment.LD_LIBRARY_PATH =
-    lib.makeLibraryPath [ pkgs.cudaPackages.cudatoolkit pkgs.cudaPackages.cudnn ];
+  # hnvr-1 runs the CPU EP (cuDNN ≥ 9.12 dropped Pascal) — no CUDA LD_LIBRARY_PATH needed
 
   services.hnvr = {
     enable = true;
     role = "worker";
     initialAdminEmail = "admin@example.com";
-    # execProviders default = ["cuda" "cpu"] from role
+    # execProviders default = ["cpu"] from role
   };
 }
 ```
@@ -453,11 +467,24 @@ in {
 
 ## Secrets (`secrets/secrets.yaml`, sops-encrypted)
 
+Matches `nix/secrets-template.yaml`. A single `hnvr-config` key holds the
+whole `hnvr.yaml` app config (S3 endpoint/bucket, admin key pair, and the
+read-only `ro_*` browser key pair used for presigned URLs); the four
+`hnvr-s3-*` fragment keys were removed. `DATABASE_URL` arrives via the
+`hnvr-db-url` sops key (an earlier `HNVR_DB_URL` env var was a bug, renamed).
+
 ```yaml
 hnvr-data-key: <base64 32 bytes>
+hnvr-config: |
+  s3:
+    endpoint: "http://192.168.0.254:8333"
+    public_endpoint: "http://192.168.0.254:8333"
+    bucket: "hnvr"
+    access_key: "SERVER_SIDE_KEY"
+    secret_key: "SERVER_SIDE_SECRET"
+    ro_access_key: "BROWSER_RO_KEY"
+    ro_secret_key: "BROWSER_RO_SECRET"
 hnvr-db-url: "postgres://hnvr:XXXX@pg.example.internal:5432/hnvr?sslmode=require"
-hnvr-s3-access-key: "..."
-hnvr-s3-secret-key: "..."
 hnvr-nats-creds: |
   -----BEGIN NATS USER JWT-----
   ...
@@ -471,6 +498,12 @@ The `hnvr-data-key` is the AES-256-GCM key for `password_enc` columns. **Losing 
 
 ## Models (`nix/models.nix`)
 
+> **Design intent** — no `models.nix` in the repo; models are fetched into
+> `HNVR_MODEL_DIR` by the module. The offline `trtexec` engine pre-build
+> sketched below never shipped: TensorRT engines are built by ONNX Runtime
+> itself on first analyzer start and cached under `HNVR_TRT_CACHE_DIR`
+> (keyed by model content + TRT version + GPU arch).
+
 ```nix
 { fetchurl }:
 {
@@ -482,16 +515,8 @@ The `hnvr-data-key` is the AES-256-GCM key for `password_enc` columns. **Losing 
     url    = "https://...";
     sha256 = "...";
   };
-
-  # Pre-built TensorRT engines for Ada (sm_89)
-  yolov8n-320-sm_89 = fetchurl {
-    url    = "https://internal-release/hnvr/yolov8n-320.sm_89.engine";
-    sha256 = "...";
-  };
 }
 ```
-
-Engine files are built offline via `trtexec` in a CI job against the same TensorRT version we ship, then uploaded to an internal release. Per-GPU-arch engines because TensorRT plans are not portable across sm versions.
 
 ## Log locations
 
@@ -503,14 +528,13 @@ Engine files are built offline via `trtexec` in a CI job against the same Tensor
 | `journalctl -u nats`             | NATS server |
 | `/var/log/hnvr/<worker>.log`     | Per-worker `fast-logger` files |
 | External                         | Postgres + SeaweedFS logs (SaaS) |
-| `/var/log/nginx/access.log`      | Frontend HTTP (leader) |
 
 All local logs rotated via logrotate.
 
 ## First-boot bootstrap
 
 1. `nixos-rebuild boot --flake .#hnvr-2 && reboot` (leader first).
-2. systemd starts nats → hnvr-node → hnvr-leader → mediamtx → nginx in order.
+2. systemd starts nats → hnvr-node → hnvr-leader → mediamtx in order.
 3. `hnvr-leader` runs IHP migrations against external Postgres.
 4. Checks `users` table; if empty, reads `INITIAL_ADMIN_EMAIL` + `initial-admin-password`, creates admin user.
 5. Admin logs in at `https://nvr.example.com`, forced password change.
@@ -530,11 +554,11 @@ All local logs rotated via logrotate.
 
 - `GET /healthz` → 200 if Postgres reachable + NATS reachable + at least one capture worker running anywhere.
 - `GET /readyz` → 200 only after IHP migrations complete and leader lease acquired.
-- `GET /metrics`  → Prometheus.
+- `GET /status` → unauthenticated JSON (app/host/startedAt/uptimeSeconds/version).
 
-`hnvr-node` exposes:
-
-- `:9100/metrics` per-host EKG.
+Metrics are NOT an IHP endpoint: both binaries serve Prometheus text on a
+separate warp listener on `HNVR_METRICS_PORT` (default `9100`; devenv uses
+`9102`).
 
 NixOS `systemd.services.hnvr-*.unitConfig.StartLimitIntervalSec` + `RestartSec` keep the services honest.
 
@@ -545,9 +569,9 @@ NixOS `systemd.services.hnvr-*.unitConfig.StartLimitIntervalSec` + `RestartSec` 
 | Component | CPU | RAM | VRAM |
 |-----------|-----|-----|------|
 | Capture (10 × record main + analysis sub ffmpeg) | 1 core | 2 GB | – |
-| ONNX inference (CUDA EP, YOLOv8n) | 2 cores | 2 GB | 0.3 GB |
+| ONNX inference (CPU EP, YOLOv8n — no CUDA on Pascal) | 2 cores | 2 GB | – |
 | NATS + node exporter | <0.5 core | 0.5 GB | – |
-| **Total** | **~4 cores** | **~5 GB** | **0.3 GB** |
+| **Total** | **~4 cores** | **~5 GB** | **–** |
 
 Sub-stream analysis cuts capture CPU roughly in half vs the main-stream-decode design (was ~5 cores → now ~4).
 
@@ -557,8 +581,8 @@ Sub-stream analysis cuts capture CPU roughly in half vs the main-stream-decode d
 |-----------|-----|-----|------|
 | Capture (10 × record main + analysis sub ffmpeg) | 1 core | 2 GB | – |
 | ONNX inference (TRT EP, YOLOv8n) | 1 core | 2 GB | 0.8 GB |
-| IHP web (leader) + MediaMTX + nginx | 2 cores | 1.5 GB | – |
-| NATS + JetStream + node exporter | 0.5 core | 2 GB | – |
+| IHP web (leader) + MediaMTX | 2 cores | 1.5 GB | – |
+| NATS + node exporter | 0.5 core | 2 GB | – |
 | **Total** | **~5 cores** | **~8 GB** | **0.8 GB** |
 
 Both hosts comfortable. Sub-stream use frees enough headroom on hnvr-2 that we could:
@@ -568,7 +592,9 @@ Both hosts comfortable. Sub-stream use frees enough headroom on hnvr-2 that we c
 
 ## Standby web node (post-v1)
 
-Plumbing is in place: JetStream KV lease on `hnvr.leader` subject, standby mode in the binary. To enable:
+Not plumbed yet — the design needs a JetStream KV lease on the `hnvr.leader`
+subject, and JetStream is deferred (nats-queue has no JetStream support).
+The plan:
 
 1. Set `services.hnvr.role = "standby"` on hnvr-1.
 2. Run `hnvr-leader --standby` binary mode: starts IHP webserver but doesn't acquire leader lease; watches `hnvr.leader` KV.

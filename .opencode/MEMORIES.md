@@ -3,6 +3,48 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **Pre-release audit + auth gates + README (Aug 19 2026 — v0.11.0.0)**:
+> full codebase/doc audit (two explore passes) + fixes. **Auth**:
+> /Stats and /Hosts now `beforeAction = ensureIsUser` (were anonymous —
+> every other data controller was already gated). The unauthenticated
+> WAI route /debug-stream/<uuid> is GONE — the multipart analysis
+> stream moved to session-gated `StreamDebugCameraAction`
+> (/StreamDebugCamera?cameraId=) via IHP's `respondAndExit`
+> (`IHP.Controller.Response`, throws ResponseException with a raw
+> `responseStream` — IHP CAN stream from a controller, the old
+> "controllers can't stream" comment was wrong). Shared renderer is
+> `Hnvr.Web.DebugStream.debugStreamResponse :: TVar (Maybe (Frame,
+> [Track])) -> Response`; the middleware keeps only /debug-frame
+> (anonymous dashboard wall depends on it). Note: IHP's
+> CustomMiddleware runs OUTSIDE sessionMiddleware (Server.hs chain:
+> customMiddleware . cors . session …) so session checks are
+> impossible at that layer — that's why the move. TestCryptoCameraAction
+> (M3 diagnostic) removed: constructor, action, view Diagnostics card,
+> decryptPassword import. **Docs**: design_docs 00–10 updated to
+> reality (minio-hs not amazonka, single `hnvr` bucket, retention_hours,
+> real PTZ columns, zone_motion, event_clips/camera_drift tables, CPU EP
+> on hnvr-1, /v3 mediamtx, drawer-not-panel PTZ UI, roadmap boxes
+> ticked); tests/e2e/README.md spec list fixed. .opencode
+> PHASE_AUDIT_REPORT{,_2}.md + PHASE1_COMPLETION_MILESTONES.md deleted
+> (were untracked except _1). **README.md rewritten** end-user-facing:
+> features, ASCII deployment diagram, hnvr.yaml/env/module config
+> examples, Web UI route/auth map, 15 Playwright screenshots in
+> docs/screenshots/ (script: tests/e2e/scripts/screenshots.mjs —
+> LIVE_URL=:18001 for live-frame shots, FRESH_URL=:18002 a roles-disabled
+> leader of the new build; both share the dev DB). **Known open items
+> from the audit (Sergey chose report-only for dead code)**: AutoTrack
+> empty module, restartCamera dead export, Subjects.leader unused,
+> ConfigBroadcaster→ConfigWatcher config channel is a log-only pipeline
+> (superseded by snapshot assigns), hnvr-crypto-test exe redundant,
+> nix/secrets.nix still declares the 4 removed hnvr-s3-* sops keys and
+> never declares hnvr-config (template+module.nix suggest pointing
+> configFile at it → NixOS eval failure), stray firmware zip at repo
+> root is TRACKED (6.9 MB, belongs in ~/hw-backups), untracked ext/ +
+> extro/ S3-probe leftovers, hnvr-leak-probe.prof. Verified: nix build
+> green, pre-commit green, cabal tests all pass, e2e 32+2 against the
+> new build on :18002 (HNVR_DISABLE_* every background role — safe
+> alongside Sergey's live leader on :18001 which was never touched).
+
 > **PTZ panel → sliding side-drawer + auth gate (Aug 19 2026 — v0.10.0.0)**:
 > `ptzPanel` markup is now `<aside class="ptz-drawer" id="ptz-panel">`
 > (fixed, right edge, `translateX(105%)` → `.open`, z 90 above the

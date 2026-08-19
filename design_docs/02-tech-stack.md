@@ -8,14 +8,14 @@ Versions are the latest known-good as of Aug 2026. Pinned in `flake.lock`.
 |---------|---------|-----|
 | `base` | **GHC 9.12** (nixpkgs `haskell.compiler.ghc912`) | Sergey's choice. IHP experimental. Bleeding edge. |
 | `cabal` | 3.14+ | Build system; one cabal.project, multiple sublibs. |
-| **`ihp`** | flake-pinned to commit on `master` with 9.12 support | Schema designer, autorefresh, sessions, CSRF, hsx. The `v1.5` release supports up to 9.8 — must use `master` HEAD for 9.12. |
+| **`ihp`** | pinned to release **v1.6.0** (flake input `github:digitallyinduced/ihp/v1.6.0`) | Schema designer, autorefresh, sessions, CSRF, hsx. |
 | `text`, `bytestring`, `vector`, `containers` | nixpkgs | Baseline. |
 | `async` | 2.2.x | Worker threads. |
 | `stm` | 2.5.x | Bounded `TChan`s, MVar coordination. |
 | `unliftio` / `safe-exceptions` | 0.2.x | Bracketed resource handling. |
 | `resource-t` | 1.3.x | Bracket ffmpeg + NATS connections through worker lifetime. |
 | `monad-logger` / `fast-logger` | 0.8 / 3.2 | Structured logs, one file per worker. |
-| `ekg-core` | 0.1.2 | Metric store only; Prometheus text rendered in-tree (`Hnvr.Core.Metrics`), own warp on `:9100` (`HNVR_METRICS_PORT`). |
+| `ekg-core` | 0.1.2 | Metric store only; Prometheus text rendered in-tree (`Hnvr.Core.Metrics`), own warp on `HNVR_METRICS_PORT` (default 9100; devenv uses 9102). |
 | `aeson`, `aeson-pretty` | 2.2+ | JSON for events, NATS payloads, frontend. |
 | `time` | 1.12+ | ISO8601 timestamps. |
 | `optparse-applicative` | 0.18+ | CLI flags for binaries. |
@@ -27,7 +27,7 @@ Versions are the latest known-good as of Aug 2026. Pinned in `flake.lock`.
 
 | Library | Version | Why |
 |--------|---------|-----|
-| **`nats-queue`** (Haskell) | git HEAD (Hackage unstable) | Pure-Haskell NATS client with JetStream support. Vendored in `flake.nix`; expect some patching. |
+| **`nats-queue`** (Haskell) | vendored at `vendored/nats-queue` | Pure-Haskell NATS client. **Core NATS only — no JetStream support** (JetStream deferred). Vendored with the `sClose`→`close` fix for `network` >= 3.x. |
 | *Alternative:* `hs-nats` | git HEAD | Newer, less battle-tested; consider if `nats-queue` proves brittle. |
 | *Fallback:* `natsonline` Go binary wrapped via subprocess | n/a | Only if both Haskell clients are unworkable — would be ugly. |
 
@@ -69,23 +69,25 @@ Versions are the latest known-good as of Aug 2026. Pinned in `flake.lock`.
 
 ### Driver abstraction
 
-```haskell
-class PtzDriver m where
-  continuousMove :: CameraId -> Velocity -> TimeoutMs -> m ()
-  stop           :: CameraId -> StopAxes -> m ()
-  gotoPreset     :: CameraId -> PresetToken -> m ()
-  setPreset      :: CameraId -> PresetName -> m PresetToken
-  removePreset   :: CameraId -> PresetToken -> m ()
-  getStatus      :: CameraId -> m (Maybe PtzStatus)
+The originally-sketched `PtzDriver` typeclass was **dropped** — it had no
+error channel and didn't match the codebase's seam pattern (records of IO
+actions, cf. Metrics). Shipped instead: `Hnvr.Ptz.Onvif.OnvifPtz` exposes a
+resolved-endpoint record (HTTP manager, camera creds, PTZ XAddr, profile
+token) plus thin `Either`-returning IO ops (continuous_move / stop /
+goto_preset / set_preset / remove_preset / get_status). Adding a vendor-CGI
+driver later is a new record of the same shape, no upstream changes.
 
-data Velocity = Velocity { vPanTilt :: !(V2 Float), vZoom :: !Float }
-```
+**ONVIF endpoint discovery**: done at runtime on the node — when a PTZ-enabled
+camera starts, `resolveOnvifPtz` runs `GetCapabilities`/`GetServices` to find
+the PTZ XAddr and `GetProfiles` for a profile token. There are **no
+`ptz_onvif_url` / PTZ credential columns** on `cameras`; PTZ auth reuses the
+camera's own username/password (same pattern as OnvifSync's media XAddr
+discovery).
 
-Single instance in v1: `OnvifPtzDriver`. Adding a vendor-CGI driver later (e.g. for non-ONVIF cameras) is a new instance, no upstream changes.
-
-**ONVIF endpoint discovery**: when admin saves `ptz_onvif_url` in the UI, leader runs `GetCapabilities` → finds PTZ service URL → caches it in `cameras.ptz_onvif_url` (rewritten to the actual service endpoint). All subsequent PTZ calls hit the cached URL.
-
-**Authentication**: ONVIF uses WS-Security UsernameToken in SOAP header. SHA-1 digest of `base64(nonce) + created_timestamp + plaintext_password`. Reuse camera username/password if `ptz_username` is null.
+**Authentication**: ONVIF uses WS-Security UsernameToken in the SOAP header
+(SHA-1 digest of `base64(nonce) + created_timestamp + plaintext_password`),
+plus a plain HTTP Basic header — Majestic (OpenIPC) challenges Digest/Basic
+at transport level and 401s WSSE-only requests.
 
 ## Computer vision
 
@@ -93,7 +95,7 @@ Single instance in v1: `OnvifPtzDriver`. Adding a vendor-CGI driver later (e.g. 
 |---------|---------|-----|
 | **Internal ONNX Runtime binding** (`Hnvr.Cv.OnnxRuntime`) | ~150 LOC vendored | `hs-onnxruntime-capi` is too stale on Hackage. The ONNX Runtime C API is a single vtable struct, stable across versions — write the binding ourselves. |
 | `onnxruntime` (C lib) | **1.18+** via `nixpkgs.onnxruntime` | The actual `.so`. CUDA EP requires `cudaPackages`; TensorRT EP requires `tensorrt`. |
-| `cudaPackages` (Nix) | 12.x | For GTX 1070 + RTX 4090. |
+| `cudaPackages` (Nix) | 12.x | RTX 4090 only — Pascal (GTX 1070) is dropped by cuDNN ≥ 9.12, so hnvr-1 runs the CPU EP. |
 | `tensorrt` (Nix) | 10.x | RTX 4090 only (Ada support); does NOT work on Pascal. |
 | `JuicyPixels` | 3.3.x | PNG-encode preview thumbnails. |
 | `massiv` | 1.0+ | Frame preprocess. |
@@ -111,10 +113,10 @@ Single instance in v1: `OnvifPtzDriver`. Adding a vendor-CGI driver later (e.g. 
 
 | Host | Model | EP | Approx. fps |
 |------|-------|----|----|
-| hnvr-1 (GTX 1070) | YOLOv8n-320 | CUDA | ~200 |
+| hnvr-1 (GTX 1070) | YOLOv8n-320 | CPU (cuDNN ≥ 9.12 dropped Pascal) | ~30 |
 | hnvr-2 (RTX 4090) | YOLOv8n-320 (default) / YOLOv8s-640 (optional) | TensorRT | ~1000 / ~400 |
 
-For TensorRT, ship a pre-converted `.engine` plan alongside the `.onnx`. ONNX Runtime will load the engine directly if present, otherwise build one on first run (cached under `/var/lib/hnvr/engines/`).
+TensorRT engines are built by ONNX Runtime itself on first run and cached under `HNVR_TRT_CACHE_DIR` (the offline `trtexec` pre-build flow never shipped).
 
 ### Tracker (pure Haskell)
 
@@ -146,7 +148,7 @@ SORT (Bewley et al. 2016) in `Hnvr.Cv.Tracker.Sort`: ~250 LOC. Kalman filter wit
 
 | Library / tool | Version | Why |
 |----------------|---------|-----|
-| **IHP** | pinned `master` commit supporting GHC 9.12 | Schema designer, hsx templates, autorefresh, sessions, CSRF. |
+| **IHP** | pinned release v1.6.0 | Schema designer, hsx templates, autorefresh, sessions, CSRF. |
 | `wai-websockets` | 3.0 | Optional; IHP autorefresh via SSE is preferred for live event feeds. |
 | **MediaMTX** | **v1.20.0** | Single Go binary, packaged via flake input pinned by revision. RTSP → WebRTC WHEP, HLS. **Runs on leader host only.** |
 | `hls.js` (vendored via IHP `static/`) | 1.5+ | Fallback for browsers without HEVC-over-WebRTC. |
@@ -166,36 +168,39 @@ SORT (Bewley et al. 2016) in `Hnvr.Cv.Tracker.Sort`: ~250 LOC. Kalman filter wit
 ### Cabal project layout
 
 ```haskell
--- cabal.project
+-- cabal.project (abridged — see repo root for the real file)
 packages:
   ./hnvr-core
   ./hnvr-nats
+  ./hnvr-storage
   ./hnvr-capture
   ./hnvr-cv
-  ./hnvr-storage
+  ./hnvr-ptz
   ./hnvr-web
+  ./vendored/nats-queue
+  ./vendored/minio-hs
 
 allow-newer:
-  amazonka-s3:base,
-  amazonka-core:base,
-  massiv:base,
-  ihp:*
-  -- ... add as needed for GHC 9.12
+  *:base, *:bytestring, *:containers, *:text, *:time, ...
+  -- stale upper bounds relaxed for GHC 9.12; extend as cabal build
+  -- discovers failures (IHP's nix overlay does the same for nix build)
 
-package hnvr-web
-  flags: +dev  -- IHP live reload in dev only
+constraints:
+  socks >= 0.6.0   -- socks-0.5.6 uses pre-MonadFail APIs
 ```
 
 The flake uses `haskell-flake` to derive per-sublib devShells + a single combined shell that includes ffmpeg, onnxruntime, nats-server, mediamtx (for local testing).
 
-## GHC 9.12 jailbreaks (likely required)
+## GHC 9.12 jailbreaks (actual)
 
-In `flake.nix`, override these haskellPackages with `jailbreakCabal` + `overrideCabal`:
+In `flake.nix`, the haskell overlay jailbreaks the few stale packages that
+need it (amazonka is gone — storage is vendored minio-hs):
 
 ```nix
 hpkgsOverlays = final: prev: {
-  amazonka-core   = lib.pipe prev.amazonka-core   [ lib.haskellPackages.jailbreakCabal ];
-  amazonka-s3     = lib.pipe prev.amazonka-s3     [ lib.haskellPackages.jailbreakCabal ];
+  cabal-test-quickcheck =
+    libHs.dontCheck (libHs.doJailbreak (libHs.markUnbroken prev.cabal-test-quickcheck));
+  postgresql-simple-migration = libHs.doJailbreak prev.postgresql-simple-migration;
   # ... extend as CI discovers upper-bound failures
 };
 ```
@@ -208,7 +213,7 @@ This is the pragmatic cost of running GHC 9.12 in Aug 2026. Track upstream relea
 |---------|-------------|------------------|
 | Compiler | GHC 9.10 (IHP stable) | Sergey explicitly picked 9.12. |
 | IPC | In-process `TChan` only (no NATS) | Can't scale to 2+ hosts; Sergey wants horizontal scale design. |
-| IPC | RabbitMQ | Heavier; JetStream covers durability; NATS is simpler. |
+| IPC | RabbitMQ | Heavier; NATS is simpler (durability via JetStream deferred post-v1). |
 | IPC | Redis Streams | Workable but NATS subject model is a better fit for pub-sub commands. |
 | IPC | ZeroMQ | No broker; would have to invent leader election; lose durability. |
 | CV runtime | Python sidecar (Ultralytics + FastAPI) | Sergey explicitly picked ONNX-via-FFI; second language is unwanted. |
@@ -223,6 +228,6 @@ This is the pragmatic cost of running GHC 9.12 in Aug 2026. Track upstream relea
 ## Pinning policy
 
 - **Hackage deps**: pinned by `cabal.project.freeze` regenerated quarterly; CI verifies `cabal build all`.
-- **External flake inputs**: `nixpkgs` (rolling, locked), `ihp` (`master` commit, locked), `mediamtx` (GitHub release tarball + sha256), `nats-server` (nixpkgs).
+- **External flake inputs**: `nixpkgs` (rolling, locked), `ihp` (release tag `v1.6.0`, locked), `mediamtx` (GitHub release tarball + sha256), `nats-server` (nixpkgs).
 - **Models**: SHA256-pinned in Nix derivation (`fetchurl`).
-- **TensorRT engines**: SHA256-pinned per `(model, gpu_arch, trt_version)` triple; built offline and shipped as Nix artifacts.
+- **TensorRT engines**: built by ONNX Runtime at runtime into `HNVR_TRT_CACHE_DIR` (no offline pre-build artifacts).

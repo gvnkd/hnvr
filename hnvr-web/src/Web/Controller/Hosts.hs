@@ -14,6 +14,7 @@ import Data.Time.Clock (getCurrentTime)
 import Generated.Types
 import Hnvr.Web.View.Hosts.Index
 import IHP.ControllerPrelude
+import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 
 data HostsController
   = HostsAction
@@ -22,6 +23,7 @@ data HostsController
 instance AutoRoute HostsController
 
 instance Controller HostsController where
+  beforeAction = ensureIsUser
   action HostsAction = do
     hosts <-
       query @Host

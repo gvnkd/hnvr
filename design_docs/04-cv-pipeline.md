@@ -7,7 +7,8 @@ This document covers everything between "raw RGB frame from CaptureWorker" and "
 ```
 Frame (sub-stream native res, e.g. 640×480 RGB, 5 fps, wall-clock ts)
   │                                            ┌──── runs on hnvr-1 (GTX 1070) ────┐
-  │                                            │     CUDA EP, ~5 ms/frame           │
+  │                                            │     CPU EP (cuDNN ≥ 9.12 dropped   │
+  │                                            │     Pascal — no CUDA/TRT)          │
   │                                            ├──── runs on hnvr-2 (RTX 4090) ────┤
   │                                            │     TensorRT EP, ~1 ms/frame      │
   │                                            └────────────────────────────────────┘
@@ -28,7 +29,7 @@ Frame (sub-stream native res, e.g. 640×480 RGB, 5 fps, wall-clock ts)
 │ 2. ONNX Runtime inference                                     │
 │    - YOLOv8n model, input 'images', outputs 'output0'         │
 │    - EP chosen by host:                                        │
-│       hnvr-1 → [CUDAExecutionProvider, CPUExecutionProvider]  │
+│       hnvr-1 → [CPUExecutionProvider]                           │
 │       hnvr-2 → [TensorrtExecutionProvider, CUDAExecutionProvider, CPUExecutionProvider] │
 └──────────────────────────────────────────────────────────────┘
   │
@@ -59,7 +60,7 @@ Frame (sub-stream native res, e.g. 640×480 RGB, 5 fps, wall-clock ts)
 └──────────────────────────────────────────────────────────────┘
   │
   ▼ Event
-  to in-process publisher → NATS "hnvr.events" (JetStream, durable)
+  to in-process publisher → NATS "hnvr.events" (core NATS, fire-and-forget)
   → leader's EventWriter → Postgres
 ```
 
@@ -93,16 +94,16 @@ Resolved at startup from env var `HNVR_EXEC_PROVIDERS` (comma-separated; default
 
 | Host | Default `HNVR_EXEC_PROVIDERS` |
 |------|-------------------------------|
-| hnvr-1 | `cuda,cpu` |
+| hnvr-1 | `cpu` |
 | hnvr-2 | `tensorrt,cuda,cpu` |
 
-First EP that initializes successfully wins. TensorRT fails on Pascal cards → CUDA EP falls through. CPU EP is always available as last resort.
+First EP that initializes successfully wins. TensorRT 10 dropped Pascal, and cuDNN ≥ 9.12 dropped Pascal too — so on hnvr-1 (GTX 1070) only the CPU EP is viable. CPU EP is always available as last resort.
 
 ### Session lifecycle
 
 One ONNX session per AnalyzerWorker (one per camera). Sessions are not shared across workers — keeps per-camera isolation, and we never hit session-thread-safety issues. Held in a strict `IORef` in the worker.
 
-Memory: YOLOv8n session ≈ 12 MB on CPU, ≈ 30 MB on CUDA, ≈ 80 MB on TensorRT (engine workspace). 10 cameras × 80 MB = 800 MB GPU memory on RTX 4090 — trivial. On GTX 1070 with 8 GB and CUDA EP only, 10 × 30 MB = 300 MB, also trivial.
+Memory: YOLOv8n session ≈ 12 MB on CPU, ≈ 30 MB on CUDA, ≈ 80 MB on TensorRT (engine workspace). 10 cameras × 80 MB = 800 MB GPU memory on RTX 4090 — trivial. hnvr-1 runs CPU-only, so its GTX 1070 VRAM is unused by inference.
 
 ## TensorRT engine cache (Aug 13 2026 — supersedes "trtexec pre-build")
 
@@ -132,7 +133,7 @@ cuDNN ≥ 9.12 dropped Pascal too, so the CUDA EP is also unavailable
 - Output: `output0` tensor `[1, 84, 2100]` — 2100 anchors × (4 box + 80 COCO classes).
 - Latency targets:
   - RTX 4090 + TensorRT FP16: **~1 ms**
-  - GTX 1070 + CUDA FP32: **~5 ms**
+  - GTX 1070 + CPU EP (no CUDA on Pascal anymore): **~10 ms**
   - i7-12700 + CPU: **~10 ms**
 
 Class filter at decode time keeps the model's 80 classes intact but skips work for discarded classes:
@@ -140,7 +141,7 @@ Class filter at decode time keeps the model's 80 classes intact but skips work f
 ```haskell
 keepClasses :: Word8 -> Bool
 keepClasses c = c `elem` [0, 1, 2, 3, 5, 7]  -- person, bicycle, car, motorcycle, bus, truck
--- configurable per camera via cameras.kept_classes INT[]
+-- configurable per rule via rules.classes INT[]
 ```
 
 For RTX 4090 host with cycles to spare, swap to YOLOv8s-640 per-camera — see `cameras.model_name` config.
@@ -194,7 +195,9 @@ Hungarian via `hungarian-algorithm-1.0.0`. Cost = `1 - IoU` between predicted tr
 
 - Tentative → confirmed on 3 consecutive hits (eligible for events).
 - Killed after 30 missed frames (`max_age`).
-- Killed tracks emit `track_end` event if `cameras.emit_track_lifecycle=true`.
+- Killed tracks emit nothing — the `track_start`/`track_end` lifecycle
+  events were pruned from the `event_kind` enum in migration 0010 (zero
+  emitters ever shipped).
 
 ## Rules engine
 
@@ -217,6 +220,14 @@ data Rule
       , rMode       :: !ZoneMode                   -- Enter, Exit, Inside
       , rClasses    :: !(Set Word8)
       , rCooldownMs :: !Int
+      }
+  | ZoneMotionRule                                -- shipped, migration 0005
+      { rId         :: !RuleId
+      , rCamera     :: !CameraId
+      , rZone       :: ![V2 Double]
+      , rMinDisplacement :: !Double                -- normalized; track must
+      , rClasses    :: !(Set Word8)                -- move at least this far
+      , rCooldownMs :: !Int                        -- inside the zone to fire
       }
 ```
 
@@ -324,7 +335,7 @@ PID constants are per-camera JSONB so they can be tuned per camera model without
 
 - ~1–2 weeks of field tuning per camera model to get acceptable behavior.
 - First implementations usually over-correct (oscillate) or under-correct (lag). The dead-band + rate-limit + windup-guard triad is what makes it tractable.
-- Different camera models have wildly different mechanical latencies and acceleration curves; the `PtzDriver.GetConfiguration` call surfaces their `GetConfigurationOptions` speed ranges, which we map into our `[−0.5, 0.5]` output.
+- Different camera models have wildly different mechanical latencies and acceleration curves; the ONVIF `GetConfiguration`/`GetConfigurationOptions` calls surface their speed ranges, which we map into our `[−0.5, 0.5]` output.
 - **Auto-track is best-effort, not surveillance-grade.** For mission-critical coverage, recommend fixed cameras + zoom-only PTZ rather than pan/tilt tracking.
 
 ## Event publishing
@@ -339,7 +350,7 @@ data Event = Event
   , eTrackId     :: !(Maybe TrackId)
   , eConfidence  :: !(Maybe Float)
   , eBbox        :: !(Maybe NBox)
-  , eThumbnailKey:: !(Maybe Text)      -- 'hnvr-events/cam-196/.../png'
+  , eThumbnailKey:: !(Maybe Text)      -- 'hnvr/cam-196/.../png' (single bucket)
   , eSegmentTs   :: !(Maybe UTCTime)   -- wall-clock second of containing segment
   , eHostId      :: !HostId            -- which host emitted it
   , ePayload     :: !(Maybe Value)
@@ -349,12 +360,12 @@ data Event = Event
 Publish path:
 
 1. Emit `Event` from AnalyzerWorker.
-2. (Optional) Generate thumbnail — take source `Frame`, draw bbox via `JuicyPixels`, PNG-encode, `PutObject` to `hnvr-events` bucket, set `eThumbnailKey`.
+2. (Optional) Generate thumbnail — take source `Frame`, draw bbox via `JuicyPixels`, PNG-encode, `PutObject` to the `hnvr` bucket, set `eThumbnailKey`.
 3. `aeson-encode` the Event → `natsPublish "hnvr.events" bytes`.
-4. JetStream acknowledges with stream seq; worker continues.
+4. Core NATS is fire-and-forget (JetStream deferred) — no ack; worker continues.
 5. On publish failure (NATS down): in-memory bounded buffer (max 1000), drop-oldest with `hnvr_events_dropped_total` counter.
 
-Leader's `EventWriter` (separate process on hnvr-2) consumes from `hnvr.events` JetStream durable consumer `pg-writer`, batches 50 events / 200 ms / whichever first, inserts into Postgres via IHP's query API.
+Leader's `EventWriter` (separate thread on hnvr-2) is a plain core-NATS subscriber on `hnvr.events`; it batches 50 events / 200 ms / whichever first, inserts into Postgres via IHP's query API. It also consumes `SegmentWritten` (→ `segments` rows), `ClipReady` (→ `event_clips` + `event_clip_events`), and the PTZ audit feed (`PtzAuditWriter`).
 
 ## GPU acceleration paths
 
@@ -367,10 +378,10 @@ Leader's `EventWriter` (separate process on hnvr-2) consumes from `hnvr.events` 
 
 ### hnvr-1 (GTX 1070, Pascal sm_61)
 
-- Default EP: **CUDA** (TensorRT 10 dropped Pascal).
-- Fallback chain: CUDA → CPU.
+- Default EP: **CPU** (TensorRT 10 dropped Pascal; cuDNN ≥ 9.12 dropped it too, killing the CUDA EP).
+- Fallback chain: CPU only.
 - One model: YOLOv8n-320 only — Pascal is too slow for YOLOv8s.
-- VRAM: 8 GB; 10 cameras × 30 MB = 300 MB used.
+- VRAM: 8 GB, unused by inference (capture/decode only).
 
 ### Fallback (any host without Nvidia driver)
 
@@ -381,17 +392,17 @@ Leader's `EventWriter` (separate process on hnvr-2) consumes from `hnvr.events` 
 
 50 inferences/sec per host. **Sub-stream decode cost is now ~3–5% CPU per camera, vs ~30–50% for 4K HEVC main-stream decode** — capture host CPU pressure drops substantially.
 
-| Stage | hnvr-1 (CUDA) ms | hnvr-2 (TRT) ms | Notes |
+| Stage | hnvr-1 (CPU) ms | hnvr-2 (TRT) ms | Notes |
 |-------|------------------|-----------------|-------|
 | ffmpeg sub-stream decode | 0.5 | 0.5 | off-CPU, async pipe read |
 | Preprocess | 1.0 | 1.0 | smaller input than before |
-| Inference | 5.0 | 1.0 | the big one |
+| Inference | 10.0 | 1.0 | the big one |
 | Decode + NMS | 0.5 | 0.5 | tight `Vector` loop |
 | Tracker update | 0.3 | 0.3 | small matrices |
 | Rules eval | 0.1 | 0.1 | 1 track × N rules |
 | Thumbnail (amortized) | 0.05 | 0.05 | only on events |
-| **Per-frame** | **~7.5 ms** | **~3.5 ms** | |
-| **Per-host (50 fps)** | **375 ms/s** = 37.5% one core | **175 ms/s** = 17.5% one core | well within budget |
+| **Per-frame** | **~12.5 ms** | **~3.5 ms** | |
+| **Per-host (50 fps)** | **625 ms/s** = 62.5% one core | **175 ms/s** = 17.5% one core | hnvr-1 carries fewer analysis cameras |
 
 CPU savings vs main-stream-decode design: ~25 percentage points per host freed up at 10 cameras each. Useful headroom for adding cameras, upping analysis fps, or running YOLOv8s-640 on RTX 4090.
 

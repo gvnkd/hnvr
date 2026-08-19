@@ -7,7 +7,8 @@ multi-browser support — see `design_docs/09-testing.md` §"Web UI".
 ## Run locally
 
 ```bash
-# 1. devenv services up (postgres :15432, nats :4222, minio :9100, mediamtx :9997)
+# 1. devenv services up (postgres :15432, nats :4222, mediamtx :9997 — NO minio;
+#    S3 is the external SeaweedFS, creds from ./hnvr.yaml via HNVR_CONFIG)
 devenv up
 
 # 2. Build + run the leader (in another terminal)
@@ -57,9 +58,15 @@ tests/e2e/
 ├── playwright.config.ts    # baseURL, single-worker (shared dev DB)
 ├── lib/
 │   └── auth.ts             # login() helper + loggedInPage fixture
-└── tests/
-    ├── login.spec.ts       # /NewSession + /CreateSession + auth gate
-    └── cameras-crud.spec.ts # create → list → edit → delete cycle
+└── tests/                  # 8 specs, 34 tests = 32 passed + 2 conditional skips
+    ├── login.spec.ts            # /NewSession + /CreateSession + auth gate
+    ├── cameras-crud.spec.ts     # create → list → edit → delete cycle
+    ├── archive-browser.spec.ts  # /Archive filters, pagination, purge
+    ├── archive-playback.spec.ts # /PlayerArchive hls.js playback
+    ├── live-view.spec.ts        # /ShowLive WHEP session
+    ├── rules.spec.ts            # rule CRUD + geometry canvas
+    ├── ui-v2.spec.ts            # theming, sidebar, sortable tables
+    └── zoompan.spec.ts          # video zoom/pan + wrapper fullscreen
 ```
 
 ## CI

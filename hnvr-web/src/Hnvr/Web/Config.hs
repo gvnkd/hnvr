@@ -90,7 +90,7 @@ config = do
   -- `buildFrameworkConfig` runs `appConfig >> ihpDefaultConfig` so our
   -- `option`s land before the defaults. Calling `option $ CustomMiddleware`
   -- twice silently drops the second one. Compose all custom WAI
-  -- middlewares here. Order: debug-stream runs first (most-specific path
+  -- middlewares here. Order: debug-frame runs first (most-specific path
   -- prefix), falls through to whep, /status, /healthz, then IHP.
   statusMw <- liftIO mkStatusMiddleware
   option $ CustomMiddleware (debugStreamMiddleware . whepMiddleware . statusMw . healthzMiddleware)

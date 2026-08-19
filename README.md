@@ -1,335 +1,365 @@
 # HNVR — Haskell Network Video Recorder
 
-NVR for 6–20 RTSP cameras. Records 24/7 to SeaweedFS (S3), runs YOLOv8n
-detection via ONNX Runtime on the sub-stream, fires line-crossing /
-zone-intrusion events, exposes an IHP web UI for live view (MediaMTX
-WebRTC), archive playback (fMP4 HLS), events, and config. Two Nvidia
-hosts (leader + worker) communicate over NATS JetStream.
+A self-hosted NVR for 6–20 RTSP/IP cameras, written in Haskell. HNVR
+records every camera 24/7 to S3-compatible object storage, runs YOLOv8
+object detection on the sub-stream, fires line-crossing / zone-intrusion
+/ zone-motion events with video clips, and serves a web UI for live
+view (WebRTC), archive playback, event review, ONVIF config sync, and
+PTZ control. Multi-host: a leader coordinates, workers capture; all
+nodes communicate over NATS.
+
+![Dashboard — live wall](docs/screenshots/dashboard.png)
+
+## Features
+
+**Recording**
+- 24/7 main-stream recording via ffmpeg (`-c:v copy` — no re-encode,
+  negligible CPU) into 1-second fMP4 fragments, uploaded to S3.
+- Local spool with automatic drain when S3 is unreachable — no gaps
+  during storage outages.
+- Per-camera retention (hours), hourly retention sweeper, tombstoned
+  (verified) deletion of user-purged recordings.
+- Optional per-camera audio track recording.
+
+**Live view**
+- Sub-second latency WebRTC (WHEP) via a MediaMTX sidecar; MediaMTX
+  holds a single RTSP session per camera no matter how many viewers
+  or pipelines attach.
+- Dashboard live wall with per-camera status badges (REC / STARTING /
+  RECONNECTING / FAILED / HOST DOWN), refreshed in-page.
+- Fullscreen overlay player, mouse-wheel zoom at cursor, drag-to-pan,
+  double-click fullscreen — on every player in the app.
+- Dashboard and live view are anonymous-readable (optional kiosk /
+  wall-monitor mode); everything else requires login.
+
+**AI / events**
+- YOLOv8 (n-320 or s-640, per-camera selectable) on ONNX Runtime —
+  CPU, CUDA, or TensorRT execution providers with an on-disk TRT
+  engine cache.
+- SORT multi-object tracker (pure Haskell: Kalman filter + Hungarian
+  assignment).
+- Rules drawn directly on the camera frame: line crossing, zone
+  enter/exit/inside, zone motion (moving objects only), with class
+  filters, cooldowns, and per-rule enable.
+- Event clips: pre-roll/post-roll video around each event, stored
+  separately with their own retention; playable from the events table.
+- Event thumbnails (Ken Burns animated, lightbox review), live event
+  feed, full-text/bbox/class filtering.
+- Rule changes propagate to nodes live over NATS — no restarts.
+
+**PTZ (ONVIF Profile PT)**
+- Hold-to-move directional pad, zoom, absolute moves, presets
+  (save/goto/delete), home position, idle timeout with auto-return.
+- Sliding side-drawer UI on both the dashboard overlay and the live
+  page; rendered only for logged-in users.
+- Per-camera command controller with audit log (every command
+  recorded with source, user, and ok/error result) and Prometheus
+  metrics.
+
+**ONVIF config sync**
+- Declare desired encoder settings (resolution/fps/bitrate/GOP/audio)
+  per stream; HNVR clamps them against the camera's advertised
+  options, pushes on save, and continuously reconciles drift
+  (poller + per-camera drift table with badges).
+
+**Operations**
+- Multi-host: leader + any number of workers; automatic camera
+  assignment with host-claim handshake (no duplicate recorders),
+  manual pinning override.
+- Prometheus metrics on every node (frames, inference latency, PTZ
+  commands, S3 errors, process RSS), unauthenticated `/healthz` and
+  `/status` endpoints.
+- Audit log page: logins, camera/rule changes, purges, assignments.
+- Two UI themes (Midnight Ops dark / Daylight light), sortable and
+  filterable tables throughout.
+- Secrets via sops-nix; camera passwords stored AES-256-GCM
+  encrypted; browser-facing S3 URLs are presigned with a separate
+  read-only identity.
+
+## Screenshots
 
 | | |
 |---|---|
-| Language | Haskell, **GHC 9.12.3** (`haskell.packages.ghc912` + IHP overlay) |
-| Web | **IHP v1.6.0** (pinned flake input) |
-| Build | cabal multi-package + Nix flake |
-| IPC | **NATS + JetStream** via vendored `nats-queue` (patched for `network` >= 3.x) |
-| Capture | ffmpeg subprocess (record `-c:v copy` main; analysis decode sub) |
-| CV | ONNX Runtime via internal ~150 LOC FFI binding |
-| Models | YOLOv8n-320 ONNX, optional YOLOv8s-640 on RTX 4090 |
-| Tracker | SORT in pure Haskell (~250 LOC) |
-| Storage | **SeaweedFS** (S3) + **PostgreSQL 18** — SaaS, out of scope |
-| Live view | **MediaMTX v1.20.0** sidecar (RTSP → WebRTC WHEP), leader only |
-| Secrets | sops-nix |
-| Deploy | NixOS flake, 2 hosts (`hnvr-1-vm`, `hnvr-2-vm`) |
+| ![Live overlay (WebRTC)](docs/screenshots/live-overlay.png) | ![PTZ drawer](docs/screenshots/live-ptz-drawer.png) |
+| Live WebRTC overlay | PTZ side-drawer with presets |
+| ![Events](docs/screenshots/events.png) | ![Rule editor](docs/screenshots/rule-editor.png) |
+| Event review with thumbnails | Rule editor (zones drawn on the live frame) |
+| ![Archive browser](docs/screenshots/archive.png) | ![Archive player](docs/screenshots/archive-player.png) |
+| Archive browser (filterable, grouped recordings) | Archive player (fMP4/HLS, deep-linkable) |
+| ![Daylight theme](docs/screenshots/dashboard-daylight.png) | ![Hosts](docs/screenshots/hosts.png) |
+| Daylight theme | Host fleet view |
 
-Authoritative design lives in [`design_docs/`](./design_docs/):
-[`00-overview.md`](./design_docs/00-overview.md) holds the locked
-decisions table; [`08-roadmap.md`](./design_docs/08-roadmap.md) holds
-the phased plan.
+Also: [login](docs/screenshots/login.png) ·
+[cameras](docs/screenshots/cameras.png) ·
+[camera detail](docs/screenshots/camera-detail.png) ·
+[rules](docs/screenshots/rules.png) ·
+[stats](docs/screenshots/stats.png) ·
+[audit log](docs/screenshots/audit.png)
+
+## Architecture
+
+```
+                        browsers
+                       │        │
+                  HTTP │        │ WebRTC (WHEP)
+                       ▼        ▼
+        ┌────────────────────────────────────────────┐
+        │ LEADER HOST (e.g. hnvr-2)                  │
+        │                                            │
+        │  hnvr-leader (one binary, two roles):      │
+        │    IHP web UI :8000                        │
+        │    coordinator: assigns cameras to hosts   │
+        │    writers: events / PTZ audit / health    │
+        │    sweepers: retention, pending purges     │
+        │    ONVIF config syncer (drift reconcile)   │
+        │    embedded node roles (capture + CV + PTZ)│
+        │    Prometheus /metrics :9100               │
+        │                                            │
+        │  mediamtx  RTSP→WebRTC  (:8889, API :9997) │
+        │  nats-server            (:4222)            │
+        └──┬───────────┬──────────────┬──────────────┘
+           │           │ NATS         │
+           │           ▼              │
+           │  ┌──────────────────┐    │
+           │  │ WORKER HOST(s)   │    │
+           │  │ hnvr-node        │    │
+           │  │  capture workers │    │
+           │  │  CV analyzers    │    │
+           │  │  PTZ controllers │    │
+           │  │  health reporter │    │
+           │  │  /metrics :9100  │    │
+           │  └───────┬──────────┘    │
+           ▼          ▼               ▼
+      ┌─────────────────────────────────────┐      ┌──────────┐
+      │ cameras (RTSP / ONVIF)              │      │ external │
+      │  Hik-OEM, XM/OpenIPC, Majestic, ... │      │ services │
+      └─────────────────────────────────────┘      │          │
+                                                   │ PostgreSQL (config, events,│
+      S3 object storage (SeaweedFS, MinIO, ...)    │ segments index, audit)     │
+      ◄── all nodes put fMP4 fragments + clips ──► │ SeaweedFS S3 (video store) │
+                                                   └──────────┘
+```
+
+Data flow, per camera:
+
+1. MediaMTX pulls one RTSP session from the camera; HNVR configures
+   and owns the MediaMTX paths via its REST API.
+2. The assigned host's capture worker runs ffmpeg against the local
+   MediaMTX relay, splits the stream into 1 s fMP4 fragments, and
+   uploads them to S3 (`<slug>/<YYYY-MM-DD>/<HH-MM-SS.mmm>.mp4` +
+   `init.mp4`). A ring buffer keeps the last N seconds for event clips.
+3. In parallel, the analyzer decodes the sub-stream at
+   `analysis_fps`, runs YOLO + SORT, and evaluates rules; rule hits
+   become `CvEvent`s published on NATS.
+4. The leader's writers persist events, clip metadata, health, and
+   PTZ audit records to PostgreSQL.
+5. The web UI serves live WebRTC, archive playlists (windowed fMP4
+   over presigned URLs), event clips, and configuration.
+
+Leader failover / HA leases are post-v1; today the leader is a single
+point of coordination (capture continues on workers if the leader's
+web tier is down, but reassignment stops).
+
+## Tech stack
+
+| | |
+|---|---|
+| Language | Haskell, GHC 9.12.3 |
+| Web | IHP v1.6.0 (WAI + HSX), vanilla JS (`app.js`, `ptz.js`), Tailwind CLI |
+| IPC | NATS (core; JetStream deferred) via vendored `nats-queue` |
+| Capture | ffmpeg 7 subprocesses, fMP4 fragmentation in-process |
+| CV | ONNX Runtime via internal FFI binding; YOLOv8n-320 / YOLOv8s-640; pure-Haskell SORT |
+| PTZ | ONVIF SOAP client (WSSE + Basic), per-camera command loops |
+| Storage | S3 via minio-hs (vendored, patched); PostgreSQL 18 |
+| Live | MediaMTX v1.20.0 sidecar |
+| Deploy | NixOS flake + modules, sops-nix secrets |
+
+## Requirements
+
+- **NixOS** (or Nix + systemd) on x86_64 Linux for the supported
+  deployment path.
+- One host designated leader; any number of workers. GPU optional:
+  CPU inference works everywhere; TensorRT needs a recent NVIDIA GPU
+  (cuDNN ≥ 9.12 requires compute capability ≥ 7.5 — Pascal and older
+  fall back to the CPU EP).
+- External services (operated by you): PostgreSQL 18, an
+  S3-compatible store (SeaweedFS is the reference), one NATS server
+  (or the bundled NixOS module on the leader).
+
+## Configuration
+
+### App config file (`hnvr.yaml`)
+
+The single required config file; path from `$HNVR_CONFIG`
+(default `./hnvr.yaml`). Template: [`hnvr.example.yaml`](./hnvr.example.yaml).
+
+```yaml
+s3:
+  endpoint: "http://192.168.0.254:8333"        # server-side S3 API
+  public_endpoint: "https://s3.example.com"    # browser-reachable (presign host)
+  bucket: "hnvr"
+  access_key: "ADMIN_KEY"        # server identity: Read/Write/List
+  secret_key: "ADMIN_SECRET"
+  ro_access_key: "RO_KEY"        # optional read-only identity used to
+  ro_secret_key: "RO_SECRET"     # sign URLs handed to browsers
+```
+
+`HNVR_S3_*` env vars override the file per section. Unknown keys are
+ignored, so the file can grow new sections ahead of the binaries.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `HNVR_CONFIG` | `./hnvr.yaml` | App config file path |
+| `DATABASE_URL` | local socket | PostgreSQL DSN |
+| `HNVR_NATS_URI` | — | NATS URI (**must** include `user:pass@`, even dummy) |
+| `HNVR_HOST` | `hnvr-2` | This host's identity (assignment, health, claims) |
+| `PORT` | `8000` | Web UI port (leader) |
+| `HNVR_DATA_KEY` | — | base64 32-byte key encrypting camera passwords at rest |
+| `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` | — | Bootstrap admin (upserted at every boot) |
+| `HNVR_METRICS_PORT` | `9100` | Prometheus endpoint (leader + node) |
+| `HNVR_MODEL_PATH` / `HNVR_MODEL_DIR` | — | ONNX model file / per-camera model directory |
+| `HNVR_EXEC_PROVIDERS` | `cpu` | EP priority, e.g. `tensorrt,cuda,cpu` |
+| `HNVR_ONNXRUNTIME_LIB` | — | `libonnxruntime.so` to dlopen |
+| `HNVR_TRT_CACHE_DIR` | — | TensorRT engine cache directory |
+| `HNVR_MEDIAMTX_API` / `HNVR_MEDIAMTX_WEBRTC` / `HNVR_MEDIAMTX_CONFIG_PATH` | localhost defaults | MediaMTX sidecar wiring (leader) |
+| `HNVR_SPOOL_DIR` | `/var/lib/hnvr/spool` | S3-outage fragment spool |
+| `HNVR_S3_ENDPOINT` … `HNVR_S3_RO_SECRET_KEY` | — | Env-only S3 config (override the file) |
+| `HNVR_DISABLE_*` | — | Per-component kill switches (`NODEROLES`, `COORDINATOR`, `EVENTWRITER`, `RETENTION`, `METRICS`, …) for bisecting problems |
+
+### NixOS module (production)
+
+```nix
+{
+  imports = [ hnvr.nixosModules.default ];
+
+  services.hnvr.leader = {
+    enable = true;
+    hostName = "hnvr-2";               # this host's identity
+    port = 8000;
+    databaseUrl = "postgresql:///hnvr?host=/run/postgresql";
+    natsUri = "nats://nats:nats@localhost:4222";
+    configFile = config.sops.secrets.hnvr-config.path;  # hnvr.yaml content
+    execProviders = "tensorrt,cuda,cpu"; # RTX 4090 leader
+    modelDir = "/var/lib/hnvr/models";
+    metricsPort = 9100;
+    environment = {
+      HNVR_DATA_KEY = "…";             # or via sops EnvironmentFile
+      INITIAL_ADMIN_EMAIL = "admin@example.com";
+      INITIAL_ADMIN_PASSWORD = "change-me";
+    };
+  };
+
+  # Companion modules (leader host):
+  services.hnvr.nats.enable = true;      # bundled broker
+  services.hnvr.mediamtx.enable = true;  # RTSP→WebRTC sidecar
+}
+```
+
+Worker hosts run the `hnvr-node` binary with `HNVR_HOST`,
+`HNVR_NATS_URI` pointing at the leader, and the same `HNVR_CONFIG` /
+model env vars — no database access needed on workers. **Never run
+`hnvr-node` on the leader host** — the leader binary already embeds
+the node role; a host-claim handshake refuses the duplicate.
+
+Secrets: [`nix/secrets-template.yaml`](./nix/secrets-template.yaml) —
+one sops key (`hnvr-config`) holds the whole YAML; `HNVR_DATA_KEY` and
+`DATABASE_URL` are separate keys.
+
+## Deployment
+
+The flake ships two reference VMs (`hnvr-1-vm` worker, `hnvr-2-vm`
+leader) that double as integration rigs:
+
+```bash
+nix build .#nixosConfigurations.hnvr-2-vm.config.system.build.vm
+NIX_DISK_IMAGE=/tmp/leader.qcow2 \
+QEMU_NET_OPTS="hostfwd=tcp:127.0.0.1:18000-:8000,hostfwd=tcp:127.0.0.1:18889-:8889,hostfwd=tcp:127.0.0.1:19997-:9997" \
+  ./result/bin/run-nixos-vm
+curl http://localhost:18000/healthz    # → 200 OK
+```
+
+For real hosts, import the modules and set options as above;
+`nix/module.nix` manages the systemd unit (user, data dir, static
+assets, `LimitNOFILE`, restart policy).
+
+## Web UI map
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `/` (`/Dashboard`) | anonymous | Live wall + host fleet summary |
+| `/ShowLive?cameraId=…` | anonymous | Full-page WebRTC live view |
+| `/Events` | login | Event table: filters, thumbnails, clip replay |
+| `/Archive` | login | Recording browser: camera/time/duration filters, purge |
+| `/PlayerArchive?cameraId=…&from&to&t` | login | fMP4/HLS player, deep-linkable |
+| `/PlayerEventClip?clipId=…` | login | Event clip player |
+| `/Cameras`, `/NewCamera`, `/EditCamera`, `/ShowCamera` | login | Camera CRUD, probe, assignment, ONVIF drift |
+| `/Rules`, `/NewRule`, `/EditRule` | login | Rule editor with on-frame geometry canvas |
+| `/PtzPresets` | login | Preset management |
+| `/Stats` | login | Storage + event statistics |
+| `/Hosts` | login | Fleet status, GPU, liveness |
+| `/AuditLog` | admin | Full audit trail |
+| `/DebugCamera?cameraId=…` | login | Live analysis overlay (bbox + track IDs) |
+| `/healthz`, `/status` | anonymous | Liveness probe / version JSON |
+| `/whep/<slug>` | anonymous | WebRTC signaling proxy to MediaMTX |
+| `/metrics` (port 9100) | scrape | Prometheus text format |
+
+## Development
+
+```bash
+nix develop --no-pure-eval   # devenv-integrated shell (direnv works too)
+devenv up                    # postgres :15432, nats :4222, mediamtx :9997
+nix build .#hnvr-web         # the app (IHP needs the nix overlay)
+./result/bin/hnvr-leader     # http://localhost:18001 (env pre-wired)
+
+cabal build hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz
+cabal test hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz
+HNVR_TEST_INTEGRATION=1 HNVR_CONFIG=$PWD/hnvr.yaml cabal test hnvr-nats hnvr-storage
+
+cd tests/e2e && npm install && npx playwright install chromium   # one-time
+npm test                                                        # 8 specs
+
+nix build .#checks.x86_64-linux.pre-commit                      # ormolu/hlint/etc
+nix build .#checks.x86_64-linux.hnvr-leader-smoke               # NixOS VM smoke test
+```
+
+`cabal build hnvr-web` is unsupported — IHP's transitive pins only
+exist in the nix overlay; always `nix build .#hnvr-web`.
 
 ## Repository layout
 
 ```
-hnvr/
-├── design_docs/         9 files, authoritative design (00-overview … 08-roadmap)
-├── cabal.project        packages + allow-newer + vendored/nats-queue
-├── flake.nix            ihp overlay + hnvrHaskellOverlay + nixosConfigurations
-├── flake.lock           pinned nixpkgs + flake-utils + pre-commit-hooks + ihp
-├── nix/
-│   ├── module.nix       NixOS module: hnvr-leader service
-│   ├── nats-server.nix  NixOS module: NATS + JetStream
-│   ├── mediamtx.nix     NixOS module: MediaMTX sidecar (leader only)
-│   └── secrets-template.yaml   sops-nix template (HNVR_DATA_KEY + S3 + DB)
-├── vendored/nats-queue/ 2017 lib + sClose → close patch baked in
-├── hnvr-core/           Id, Geometry, Logging, Prelude, Time, Segment, Crypto
-├── hnvr-nats/           Bus (nats-queue wrapper) + Subjects
-├── hnvr-storage/        S3 wrapper (minio-hs) + hnvr-s3-upload binary
-├── hnvr-capture/        Fmp4, Ffmpeg, Worker state machine;
-│                        exes: hnvr-record-frames, hnvr-s3-upload, hnvr-capture-loop
-├── hnvr-cv/             OnnxRuntime, Preprocess, Decode, Rules, AutoTrack,
-│                        Tracker/Sort (stubs)
-├── hnvr-ptz/            Driver typeclass, Onvif + Controller (stubs)
-└── hnvr-web/            Library + 2 executables (hnvr-leader, hnvr-node)
-                         ├── Application/Schema.sql   IHP schema source of truth
-                         ├── regen.sh                 regen+patch IHP codegen
-                         ├── gen/Generated/...        IHP-generated types
-                         └── src/Hnvr/Web/...         controllers + views
+├── hnvr-core/      shared types + pure logic (segments, rules, crypto, assignment)
+├── hnvr-nats/      NATS bus wrapper + subject taxonomy
+├── hnvr-storage/   S3 wrapper (minio-hs) + hnvr-s3-upload tool
+├── hnvr-capture/   ffmpeg/fMP4 pipeline, worker state machine, ring buffer, spool
+├── hnvr-cv/        ONNX Runtime FFI, preprocess/decode, SORT tracker, rules engine
+├── hnvr-ptz/       ONVIF + DVRIP clients, per-camera PTZ controller
+├── hnvr-web/       IHP app: controllers, views, node/leader roles, migrations
+├── nix/            NixOS modules (leader, NATS, MediaMTX, secrets template)
+├── tests/e2e/      Playwright suite + scripts/screenshots.mjs
+├── design_docs/    authoritative design (00-overview … 11)
+├── vendored/       nats-queue + minio-hs (patched)
+└── docs/screenshots/  README images
 ```
-
-## Prerequisites
-
-- **Nix 2.34+** with flakes + pipe-operators enabled:
-  ```
-  # ~/.config/nix/nix.conf
-  experimental-features = nix-command flakes pipe-operators
-  ```
-- **Linux x86_64** (the only system the flake exposes).
-- Optional but recommended: `direnv` + `nix-direnv` for automatic shell
-  loading (`.envrc` is `use flake`).
-- For `cabal build` of packages that transitively need `libpq`:
-  `nix profile install nixpkgs#postgresql_18.pg_config` (user profile).
-
-## Development environment
-
-The devShell is **flake-integrated [devenv](https://devenv.sh)** — `nix develop` lands in a devenv-aware shell, and `devenv up` launches the four services the leader VM normally provides (PostgreSQL, MinIO, NATS, MediaMTX). All `HNVR_*` env vars consumed by HNVR binaries are pre-wired.
-
-### Enter the dev shell
-
-```bash
-# --no-pure-eval is required: devenv needs to resolve $PWD at runtime
-# to locate state (.devenv/state/). direnv (via .envrc) passes it
-# automatically.
-nix develop --no-pure-eval
-```
-
-Provides GHC 9.12, cabal, ghcid, hlint, ormolu, cabal-fmt, nixpkgs-fmt,
-ffmpeg_7-full, onnxruntime, curl, jq, direnv, devenv CLI. Pre-commit
-hooks (ormolu, hlint, nixpkgs-fmt, end-of-file-fixer,
-trim-trailing-whitespace) are wired via `pre-commit-hooks.nix`.
-
-With direnv installed, the shell loads automatically on `cd` (`.envrc`
-contains `use flake . --no-pure-eval`).
-
-### Start dev services
-
-In a separate terminal inside the shell:
-
-```bash
-devenv up     # process-compose TUI; Ctrl-C or 'q' to stop
-```
-
-Brings up three services with readiness probes:
-
-| Service | Port(s) | Health check |
-|---------|---------|--------------|
-| PostgreSQL 18 | 15432 | (devenv `pg_isready`) |
-| NATS + JetStream | 4222, monitor 8222 | `GET /healthz` |
-| MediaMTX | 9997 (REST), 8889 (WebRTC) | `GET /v3/info` |
-
-S3 is the external SeaweedFS (`http://192.168.0.254:8333`, bucket
-`hnvr`) — no local MinIO. Credentials live in the gitignored
-`hnvr.yaml` at the repo root (copy `hnvr.example.yaml` and fill in the
-keys); `HNVR_CONFIG` points the binaries at it. The `ro_*` key pair in
-that file signs the presigned GET URLs handed to end-user browsers, so
-browser-facing URLs carry a read-only identity. `HNVR_S3_*` env vars
-(incl. `HNVR_S3_PUBLIC_ENDPOINT`, `HNVR_S3_RO_ACCESS_KEY`,
-`HNVR_S3_RO_SECRET_KEY`) override the file when set.
-
-> **Port 15432, not 5432** — Sergey's dev box runs a system postgres on
-> :5432 (langfuse). The devenv PG uses :15432; `DATABASE_URL` is
-> pre-wired accordingly.
-
-Env vars consumed by HNVR binaries (`HNVR_NATS_URI`, `HNVR_CONFIG`,
-`DATABASE_URL`, `HNVR_MEDIAMTX_*`, `PORT=18001`) are exported inside
-the shell — `./result/bin/hnvr-leader` and cabal-built integration
-binaries drop straight in without manual `export`.
-
-### Stop a hung devenv
-
-If the process-compose TUI freezes (rare; usually a stuck child), from
-another console:
-
-```bash
-~/bin/devenv-kill              # SIGKILL supervisor + scoped children
-~/bin/devenv-kill --reset-pg   # also wipe .devenv/state/postgres
-```
-
-The script targets `/nix/store/.../bin/{nats-server,mediamtx,minio,postgres}`
-patterns — it will not touch Sergey's system services.
-
-### Build
-
-```bash
-# Canonical IHP build (applies the IHP nix overlay; first build ~30 min):
-nix build .#hnvr-web
-
-# Fast iteration on the 6 non-IHP packages (cabal works here):
-cabal build hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz
-
-# Phase 1 integration binaries:
-cabal build hnvr-record-frames hnvr-s3-upload hnvr-capture-loop
-
-# Locate a cabal binary:
-BIN=$(find dist-newstyle -name 'hnvr-record-frames' -type f -executable | head -1)
-```
-
-> `cabal build hnvr-web` is **unsupported** — IHP's transitive deps
-> (mime-mail-ses → memory/crypton) need version pins that only the nix
-> overlay applies. Always use `nix build .#hnvr-web` for the web app.
-
-### Lint and format
-
-```bash
-nix fmt                                  # nixpkgs-fmt on .nix files
-nix build .#checks.x86_64-linux.pre-commit
-```
-
-`hnvr-web/gen/` and `vendored/` are excluded from all formatters and
-pre-commit hooks (generated / vendored).
-
-### Run unit binaries against Sergey's cameras
-
-```bash
-# Capture → local disk (fMP4 init.mp4 + fragments).
-$BIN cam-197 tcp \
-  'rtsp://admin:123456@192.168.0.197:554/h264PreviewCh01' /tmp/hnvr-out
-
-# Capture → MinIO/SeaweedFS (start MinIO first; see "Local S3" below).
-$S3BIN http://localhost:9100 minioadmin minioadmin hnvr-recordings \
-  /tmp/hnvr-out/cam-197/init.mp4 cam-197/init.mp4
-
-# Full vertical slice (ffmpeg → fMP4 → S3 → NATS publish, with backoff).
-$LOOPBIN floor_2_5 tcp \
-  'rtsp://192.168.0.197:554/user=admin&password=123456&channel=0&stream=MainStream' \
-  --nats 'nats://n:n@localhost:4222' \
-  --s3 http://localhost:9100 minioadmin minioadmin hnvr-recordings \
-  --spool-dir /tmp/hnvr-spool \
-  --host hnvr-2
-```
-
-Output layout: `/tmp/hnvr-out/<slug>/init.mp4` +
-`/tmp/hnvr-out/<slug>/<YYYY-MM-DD>/<HH-MM-SS.MMM>.mp4` (millisecond
-precision is required — HEVC cameras keyframe more than once per
-second).
-
-## Development VMs
-
-Two NixOS VMs are defined in `flake.nix`:
-
-| VM | Role | Modules |
-|----|------|---------|
-| `hnvr-2-vm` | Leader: IHP + NATS + MediaMTX + local Postgres | hnvr-nats, hnvr-mediamtx, hnvr (leader) |
-| `hnvr-1-vm` | Worker: hnvr-node + local NATS (for Phase 0 demo) | hnvr-nats + systemd `hnvr-node` |
-
-### Boot the leader VM
-
-```bash
-nix build .#nixosConfigurations.hnvr-2-vm.config.system.build.vm
-
-NIX_DISK_IMAGE=/tmp/leader.qcow2 \
-QEMU_NET_OPTS="hostfwd=tcp:127.0.0.1:18000-:8000,hostfwd=tcp:127.0.0.1:18222-:8222,hostfwd=tcp:127.0.0.1:18889-:8889,hostfwd=tcp:127.0.0.1:19997-:9997" \
-  ./result/bin/run-nixos-vm
-```
-
-> QEMU `hostfwd` uses **comma** separator for multiple ports —
-> space-separated is silently dropped.
-
-### Boot the worker VM
-
-```bash
-nix build .#nixosConfigurations.hnvr-1-vm.config.system.build.vm
-NIX_DISK_IMAGE=/tmp/worker.qcow2 ./result/bin/run-nixos-vm
-```
-
-## Accessing services
-
-Default ports (host-side forwards via QEMU `hostfwd`, or direct when
-running outside a VM):
-
-| Service | In-VM port | Host-side (leader VM) | URL / path |
-|---------|-----------|------------------------------------|
-| IHP web (leader) | 8000 | 18000 | http://localhost:18000/ |
-| IHP healthz | 8000 | 18000 | http://localhost:18000/healthz |
-| Dashboard | 8000 | 18000 | http://localhost:18000/ |
-| Hosts panel | 8000 | 18000 | http://localhost:18000/hosts |
-| Live view | 8000 | 18000 | http://localhost:18000/live/<slug> |
-| Archive player | 8000 | 18000 | http://localhost:18000/archive/... |
-| WHEP proxy (WebRTC SDP) | 8000 | 18000 | http://localhost:18000/whep/<slug> |
-| NATS monitor | 8222 | 18222 | http://localhost:18222/varz |
-| MediaMTX WebRTC | 8889 | 18889 | (consumed by WHEP proxy) |
-| MediaMTX REST config | 9997 | 19997 | http://localhost:19997/v3/info |
-| Postgres (leader VM) | 5432 | — | `postgresql:///hnvr?host=/run/postgresql` (trust auth, in-VM only) |
-
-Smoke tests once the leader VM is up:
-
-```bash
-curl http://localhost:18000/healthz                 # → ok, HTTP 200
-curl http://localhost:18000/                        # → dashboard (camera grid + hosts)
-curl http://localhost:18000/hosts                   # → per-host status
-curl http://localhost:19997/v3/info                 # → mediamtx version + start time
-curl -s http://localhost:18222/varz | jq '.in_msgs' # → increments ~1/s/camera
-```
-
-When running `hnvr-leader` outside a VM (e.g. on Sergey's dev box),
-override `PORT` — 8000 is taken by Taiga:
-
-```bash
-HNVR_NATS_URI="nats://nats:nats@localhost:4222" PORT=8002 \
-  ./result/bin/hnvr-leader
-```
-
-## Local S3 (MinIO) for testing
-
-**Now managed by devenv** — `devenv up` starts MinIO on `127.0.0.1:9100`
-with credentials `minioadmin/minioadmin` and auto-creates the
-`hnvr-recordings` bucket. The manual recipe below is only needed if you
-want MinIO outside devenv.
-
-MinIO is `marked insecure` in nixpkgs; build it impurely:
-
-```bash
-nix build --impure --expr \
-  '(import <nixpkgs> { config.permittedInsecurePackages = [ "minio-..." ]; }).minio'
-
-MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
-  minio server /tmp/minio-data --address :9100 &
-
-mc alias set local http://localhost:9100 minioadmin minioadmin
-mc mb local/hnvr-recordings
-```
-
-Production uses SeaweedFS (SaaS), not MinIO.
-
-## Local NATS for testing
-
-**Now managed by devenv** — `devenv up` starts NATS+JetStream on
-`127.0.0.1:4222` (monitor `:8222`) with auth `nats:nats`. The manual
-recipe below is only needed outside devenv.
-
-```bash
-printf 'port: 4222\nhttp_port: 8222\nauthorization {\n  user: n\n  password: n\n}\n' \
-  > /tmp/nats.conf
-nats-server -c /tmp/nats.conf -m 8222 &
-```
-
-> `Hnvr.Nats.Bus.hostFromUri` requires `user:pass@host:port`. Bare
-> `nats://localhost:4222` crashes — always include dummy creds.
-
-## NixOS module options (`services.hnvr.leader`)
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enable` | `false` | Enable the leader service. |
-| `package` | `pkgs.hnvr-web` | Derivation containing `bin/hnvr-leader`. |
-| `port` | `8000` | IHP web port (also published as `PORT`). |
-| `dataDir` | `/var/lib/hnvr` | IHP working dir (`static/`, session key). |
-| `databaseUrl` | `postgresql:///hnvr?host=/run/postgresql` | Postgres DSN (sops-nix in real deploys). |
-| `natsUri` | `nats://nats:nats@localhost:4222` | NATS URI. |
-| `hostName` | `hnvr-2` | Published as `hnvr.health.<hostName>`. |
-| `environment` | `{}` | Extra env vars (sops-nix secrets land here). |
-
-Modules `services.hnvr.nats` and `services.hnvr.mediamtx` are leader-only
-companions.
-
-## CI
-
-[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) runs
-`nix flake check` and `nix build .#hnvr-web .#hnvr-nats`. There is no
-cabal-based CI — IHP's transitive version pins only exist in the nix
-overlay.
 
 ## Status
 
-Phases 0–2 are code-complete (live VM tests pending). See
-[`design_docs/08-roadmap.md`](./design_docs/08-roadmap.md) for the full
-plan. Phases 3–8 (CV, events, PTZ, hardening, auto-track, polish) are
-unstarted.
+Current version **0.10.0.0** (pre-release). Phases 0–5 shipped:
+recording, live view, multi-host, CV pipeline, events + clips, ONVIF
+config sync, PTZ. Post-v1 roadmap: leader HA lease, auto-track
+(closed-loop PID), clip export jobs, viewer role. See
+[`design_docs/08-roadmap.md`](./design_docs/08-roadmap.md).
+
+Tests: ~305 Haskell unit/property tests, 34 Playwright specs
+(32 + 2 conditional skips), 1 NixOS VM smoke test. CI: flake check +
+builds on every push, nightly Playwright.
 
 ## Conventions
 
 - No comments unless requested.
-- `Ormolu` for Haskell, `nixpkgs-fmt` for Nix. Both enforced via
-  pre-commit.
-- `IHP.Prelude` is ClassyPrelude-like — modules using it need
-  `NoImplicitPrelude` to avoid double-import warnings.
-- Secrets never committed; sops-nix template in
-  [`nix/secrets-template.yaml`](./nix/secrets-template.yaml).
+- Ormolu (Haskell) + nixpkgs-fmt (Nix), enforced via pre-commit.
+- Secrets never committed — sops-nix; `hnvr.yaml` is gitignored.
+- Design docs are authoritative: start at
+  [`design_docs/00-overview.md`](./design_docs/00-overview.md).

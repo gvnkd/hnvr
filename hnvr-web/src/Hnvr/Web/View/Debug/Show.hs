@@ -53,7 +53,7 @@ instance View ShowView where
       </table>
     |]
     where
-      streamUrl = "/debug-stream/" <> uuidText
+      streamUrl = "/StreamDebugCamera?cameraId=" <> uuidText
       uuidText = case camera |> get #id of Id uuid -> UUID.toText uuid
 
       renderTrack t =

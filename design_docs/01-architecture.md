@@ -5,11 +5,11 @@
 ```
 hnvr/                                  one cabal project, multiple sublibs
 ├── hnvr-core         ── shared types, logging, telemetry, NATS bus, async-supervision
-├── hnvr-nats         ── NATS connection pool, subject codecs, JetStream helpers
+├── hnvr-nats         ── NATS connection pool, subject codecs (core NATS only — nats-queue has no JetStream)
 ├── hnvr-capture      ── RTSP supervision, ffmpeg subprocess mgmt, fMP4 segmenter, S3 put
 ├── hnvr-cv           ── ONNX runtime FFI, frame pre/post, tracker, line-crossing
 ├── hnvr-ptz          ── ONVIF PTZ client, driver abstraction, state machine
-├── hnvr-storage      ── SeaweedFS client (amazonka-s3), event publisher
+├── hnvr-storage      ── SeaweedFS client (vendored minio-hs), event publisher
 └── hnvr-web          ── IHP app (live, archive, events, config UI, PTZ UI, leader logic)
 ```
 
@@ -18,10 +18,11 @@ Three executable targets:
 | Binary | Where it runs | What it does |
 |--------|---------------|--------------|
 | `hnvr-node`  | Every host | CaptureWorker + AnalyzerWorker supervisor (one per assigned camera); pure worker, no HTTP |
-| `hnvr-leader` | RTX 4090 host (one leader, standby possible) | All of `hnvr-node` + IHP web + MediaMTX config sync + EventWriter (drains NATS → Postgres) + PtzCoordinator (relays PTZ commands to host owning each camera) |
-| `hnvr-web`   | RTX 4090 host | Alternative name for `hnvr-leader` if you want web-only (post-v1 standby scenario) |
+| `hnvr-leader` | RTX 4090 host (one leader, standby possible) | All of `hnvr-node` + IHP web + MediaMTX config sync + EventWriter (drains NATS → Postgres); web publishes PTZ commands to `hnvr.commands.ptz.<slug>` directly (no separate coordinator component) |
 
-In v1, `hnvr-leader` is the only binary we ship on hnvr-2; `hnvr-node` runs on hnvr-1. Both are produced from the same cabal project, different `main` modules.
+Both binaries are executables of the `hnvr-web` cabal package (different `main` modules).
+
+In v1, `hnvr-leader` is the only binary we ship on hnvr-2; `hnvr-node` runs on hnvr-1.
 
 ## Process model per host
 
@@ -36,19 +37,20 @@ Per host (systemd unit "hnvr-node.service" or "hnvr-leader.service"):
       │   ├── CaptureWorker "cam-197"
       │   ├── AnalyzerWorker "cam-197"
       │   └── ...
-      ├── PtzSupervisor
-      │   └── PtzController "cam-196"   ── one per PTZ-enabled camera; subscribes hnvr.commands.ptz.<cam>
+      │   └── (csPtz) PtzController "cam-196" ── PTZ handles live inside CaptureSupervisor;
+      │                                          one per PTZ-enabled camera; subscribes hnvr.commands.ptz.<cam>
       ├── HealthReporter              ── publishes hnvr.health.<host> every 5s
       └── ConfigWatcher               ── subscribes hnvr.config.> ; updates IORef (Map CameraId Camera)
 
 Leader-only (in hnvr-leader.service):
       ├── WebServer (IHP / Warp)
-      ├── EventWriter                 ── JetStream subscriber on hnvr.events → Postgres
-      ├── MediaMTXConfigSyncer        ── watches cameras table → rewrites mediamtx.yml → SIGHUP
+      ├── EventWriter                 ── plain core-NATS subscriber on hnvr.events → Postgres
+      ├── MediaMTXConfigSyncer        ── LISTENs on cameras_events (pg-simple) → pushes path config via MediaMTX /v3 REST API
       ├── RetentionSweeper            ── hourly, deletes old S3 segments + rows
       ├── AssignmentCoordinator       ── decides camera→host; publishes hnvr.commands.assign
-      ├── PtzCommandRelay             ── IHP web → hnvr.commands.ptz.<cam> (no SOAP from leader)
-      └── LeaderLease                 ── JetStream KV with TTL; standby promotes if lease expires
+      ├── PtzAuditWriter              ── consumes hnvr.ptz.audit → ptz_audit_log rows
+      ├── PtzStatusCache              ── subscribes hnvr.ptz.status.<slug>, serves /PtzStatusCamera
+      └── LeaderLease                 ── (post-v1, needs JetStream KV) standby promotes if lease expires
 ```
 
 ## Why frames stay in-process
@@ -63,14 +65,16 @@ So: **each host runs CaptureWorker + AnalyzerWorker as a co-located pair**, fram
 
 | Subject | Stream | Direction | Payload | Notes |
 |---------|--------|-----------|---------|-------|
-| `hnvr.events` | JetStream, file storage | AnalyzerWorker (any host) → EventWriter (leader) | `Event` JSON, ~500 B | Durable; survives leader restart |
+| `hnvr.events` | Core | AnalyzerWorker (any host) → EventWriter (leader) | `Event` JSON, ~500 B | Not durable — JetStream deferred; leader restart loses in-flight events |
 | `hnvr.commands.assign.<cam>` | Core (ephemeral) | Leader → all nodes | `{camera_id, host}` | Reassign a camera to a host |
 | `hnvr.commands.control.<host>.<cam>.<action>` | Core | Leader → host | `start\|stop\|restart` | Per-camera control |
 | `hnvr.commands.ptz.<cam>` | Core (ephemeral) | Web UI (leader) → host owning camera | `{command, args, source}` | PTZ op: continuous_move / stop / goto_preset / set_preset / remove_preset |
 | `hnvr.health.<host>` | Core (max-age 15s) | Node → all | `{host, cameras:[{slug,state}], cpu_pct, gpu_model, exec_providers, gpu_mem_bytes, ram_bytes}` | Leader uses for status page; standby uses for failover |
 | `hnvr.config.cameras.<slug>` | Core | Leader → all | full `Camera` JSON | Broadcast on row change |
 | `hnvr.ptz.status.<cam>` | Core (max-age 2s) | Host owning cam → all | `{state, position, last_command_at}` | Live UI reads for PTZ indicator |
-| `hnvr.leader` | JetStream KV, TTL 10s | Leader → all | `leader_id, since` | Lease; standby promotes on expiry |
+| `hnvr.leader` | (post-v1) JetStream KV, TTL 10s | Leader → all | `leader_id, since` | Lease; standby promotes on expiry — needs JetStream, deferred |
+
+Also on the bus: `hnvr.ptz.audit` (node → leader `PtzAuditWriter`; one record per executed PTZ command, with ok/error) and `ClipReady` messages on `hnvr.events` (event clips, v0.4.0.0).
 
 ## Per-camera data flow (co-located capture + analyze)
 
@@ -128,11 +132,11 @@ Two **independent** RTSP pulls per camera — one to the main stream (recording,
 
 The recording path uses `-c:v copy` (zero CPU). The analysis path pulls the small sub-stream (cheap decode). Three ffmpeg processes per camera max (record + analyze + optional audio), but each is small.
 
-**Segment-row insert path**: the CaptureWorker doesn't write `segments` rows directly to Postgres. It publishes a `SegmentWritten` event on `hnvr.events` subject (same JetStream as CV events, but a different `kind`). The leader's `EventWriter` consumes and inserts. This keeps all Postgres writes on the leader, simplifying the SaaS PG topology. Workers need only NATS + S3 credentials.
+**Segment-row insert path**: the CaptureWorker doesn't write `segments` rows directly to Postgres. It publishes a `SegmentWritten` event on the `hnvr.events` subject (same core-NATS subject as CV events, but a different `kind`). The leader's `EventWriter` consumes and inserts. This keeps all Postgres writes on the leader, simplifying the SaaS PG topology. Workers need only NATS + S3 credentials.
 
 ## Leader election
 
-Single leader in v1 (the RTX 4090 host). Standby promotion is supported mechanically but not deployed:
+Single leader in v1 (the RTX 4090 host). Standby promotion is a post-v1 item — it needs JetStream KV, which is deferred (nats-queue has no JetStream):
 
 1. Leader writes `hnvr.leader` KV bucket entry every 5 s with TTL 10 s.
 2. Standby (if running) watches the bucket. If entry expires, standby writes its own entry, becomes leader, starts `EventWriter`, `MediaMTXConfigSyncer`, `WebServer`.
@@ -156,20 +160,25 @@ Each host that owns PTZ-enabled cameras runs one `PtzController` (async thread) 
 
 ```
 browser (PTZ joystick / preset button)
-   │ POST /cameras/:id/ptz { command, args }
+   │ POST /PtzCamera?ptzCameraId=<uuid> { command, args }   (fire-and-forget)
    ▼
 IHP action (leader)
    │ auth check (admin OR cameras.ptz_viewer_control=true)
-   │ publish hnvr.commands.ptz.<cam> { command, args, source: 'web_ui', user_id }
+   │ publish hnvr.commands.ptz.<slug> { command, args, source: 'web_ui', user_id }
    ▼
-PtzController on host owning <cam>
-   │ PtzDriver dispatch (OnvifPtzDriver in v1)
-   │ SOAP request to camera's ONVIF PTZ endpoint
-   │ insert row in ptz_audit_log
-   │ publish hnvr.ptz.status.<cam> { state, last_command_at }
+PtzController on host owning <cam> (a CaptureSupervisor csPtz handle)
+   │ resolved-endpoint record of Either-returning IO ops
+   │ (Hnvr.Ptz.Onvif.OnvifPtz — the design's PtzDriver typeclass was dropped)
+   │ SOAP request to camera's ONVIF PTZ endpoint (runtime discovery)
+   │ publish audit record on hnvr.ptz.audit (ok/error)
+   │ publish hnvr.ptz.status.<slug> { state, last_command_at }
    ▼
 Camera mechanical response
 ```
+
+Nodes have no database access, so audit rows are not inserted node-side: the
+leader's `PtzAuditWriter` subscribes `hnvr.ptz.audit` and persists each record
+to `ptz_audit_log` (with `ok`/`error` columns — execution, not publish intent).
 
 **State machine per PTZ-enabled camera** (lives in `PtzController`'s `MVar`, broadcast on `hnvr.ptz.status.<cam>` at every transition):
 
@@ -220,8 +229,8 @@ browser <video>
    ▼
 MediaMTX ─── pulls RTSP from camera on demand ───▶ camera
    ▲
-   │ mediamtx.yml regenerated from Postgres by MediaMTXConfigSyncer
-   │ whenever a camera row changes
+   │ path config pushed via the MediaMTX /v3 REST API by MediaMTXConfigSyncer
+   │ (pg-simple LISTEN on cameras_events) whenever a camera row changes
 ```
 
 MediaMTX runs **on the leader host only** (RTX 4090 box). It connects to cameras directly over the LAN — the fact that the camera's recorder pipeline runs on a different host is irrelevant; MediaMTX just needs the RTSP URL.
@@ -256,14 +265,14 @@ No transcoding. The fMP4 fragments are already HLS-compatible. The `m3u8` is gen
 | **hnvr-2 (leader) dies** | Standby (if running) takes over in 10 s; otherwise v1 = manual restart | Single point of failure in v1 — accepted, fix in post-v1 |
 | NATS node dies | No events flow; capture continues writing to S3; analyzer events buffer in worker memory (max 1000) then drop | Counter `hnvr_events_dropped_total`; deploy NATS with replication post-v1 |
 | SeaweedFS brief unreachability | 60 s spool buffer to local disk, then drop-newest | Metric `hnvr_segments_dropped_total` |
-| Postgres brief unreachability | JetStream backs the events stream — analyzer workers don't notice; EventWriter buffers | JetStream max age 1 h, max msgs 1 M |
+| Postgres brief unreachability | EventWriter buffers in memory; analyzer workers don't notice (events are fire-and-forget on core NATS) | Worker-side buffer (max 1000), then drop with counter |
 | ONNX model throws | Analyzer worker dies, restarted, recorder unaffected | Supervisor restart with 5/60s budget |
 | Disk full (spool) | Capture worker pauses writing, retries | Alerts; manual intervention |
 | Whole host reboot | systemd brings up hnvr-node (or hnvr-leader) + mediamtx (leader) + nats in order | `Requires=` + `After=` in unit |
 
 ## Telemetry
 
-EKG server on `:9100` per host, scraped by Prometheus. Metrics (per-camera + per-host labels):
+Prometheus metrics are served by a separate warp listener on `HNVR_METRICS_PORT` (default `9100`; devenv uses `9102`) per host — NOT an IHP endpoint. Metrics (per-camera + per-host labels):
 
 - `hnvr_frames_decoded_total{host,cam}`
 - `hnvr_frames_dropped_total{host,cam}`

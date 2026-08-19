@@ -19,6 +19,7 @@ import qualified Database.PostgreSQL.Simple as PG
 import Generated.Types
 import Hnvr.Web.View.Stats.Index
 import IHP.ControllerPrelude
+import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 import qualified System.Environment as Env
 
 data StatsController
@@ -28,6 +29,7 @@ data StatsController
 instance AutoRoute StatsController
 
 instance Controller StatsController where
+  beforeAction = ensureIsUser
   action StatsAction = do
     stats <- liftIO fetchStats
     render IndexView {..}

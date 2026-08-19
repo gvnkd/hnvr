@@ -29,7 +29,7 @@ schedule with priorities lives in `10-test-plan.md`.
                      │  NixOS VM tests (Phase 2 failover demo)           ← T5
                      │  devenv end-to-end scenarios                      ← T4
                      ├────────────────────────────────────
-                     │  Integration (NATS, S3 MinIO, PG, ffmpeg)         ← T2
+                      │  Integration (NATS, S3 SeaweedFS, PG, ffmpeg)     ← T2
                      │  WAI in-process controller tests                  ← T3
                      ├────────────────────────────────────
                      │  Property tests (Fmp4, Crypto, Geometry, Time,
@@ -55,7 +55,7 @@ should never reach CI — it should break in `cabal test` locally.
 | HTTP-in-process | **`wai-extra` (`Network.Wai.Test`)** | Drive IHP's `Application` without a TCP socket — fast, deterministic controller tests. |
 | HTTP-over-wire | **`wreq`** or `http-client` | For tests that must hit a real port (devenv E2E). |
 | PG ephemeral | **`tmp-postgres`** (or devenv PG at `:15432`) | `tmp-postgres` for hermetic per-test DBs; devenv PG for E2E. |
-| S3 ephemeral | **MinIO** via devenv service or `testcontainers-hs` if it builds | MinIO is already wired in devenv; CI just needs to start it. |
+| S3 external | **External SeaweedFS** (`http://192.168.0.254:8333`, bucket `hnvr`) | MinIO is gone from devenv. Integration tests run `HNVR_TEST_INTEGRATION=1 HNVR_CONFIG=...` against the real bucket (real put + presigned-ro GET round-trip). |
 | NATS ephemeral | **`nats-server`** via devenv service or `process` spawn | Single binary, ~5 MB, starts in <100 ms; no testcontainer needed. |
 | Testcontainers | **`testcontainers-hs`** *if it builds on GHC 9.12* | Preferred for hermetic per-suite services; fallback is devenv-managed ports. |
 | Coverage | **`hpc`** + `tasty-hunit`'s `--coverage`-friendly output | Built into GHC; no `hpc-coveralls` unless we want a badge. |
@@ -71,7 +71,7 @@ Several test libs may need `allow-newer` or jailbreaks under 9.12.3 (same as
 the production deps). The plan: pin via `flake.nix` `hnvrHaskellOverlay`
 just like the runtime libs, and mirror the bounds in `cabal.project`. If
 `testcontainers-hs` doesn't build, we fall back to devenv-managed services
-(PG, MinIO, NATS already wired — see MEMORIES.md §55).
+(PG, NATS already wired — MinIO was removed; S3 is the external SeaweedFS).
 
 ### Web UI
 
@@ -156,9 +156,9 @@ Tasty tree. Keep it flat — don't nest test groups deeper than two levels.
 |-----|---------|---------|
 | `cabal-test-non-web` | `ubuntu-24.04`, `nix develop` | `cabal test hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz` — pure + property tests. **Fast lane: every push.** |
 | `cabal-test-web` | `ubuntu-24.04`, `nix develop` + PG service | `cabal test hnvr-web` — WAI controller tests + Auth + Schema migration tests against an ephemeral PG. **Fast lane: every push.** |
-| `devenv-integration` | `ubuntu-24.04`, `devenv up` background | Spin devenv services (PG, MinIO, NATS, mediamtx); run `tests/integration/` Tasty suite via `cabal test` or `nix run .#hnvr-integration-tests`. **Slow lane: nightly + on `master`.** |
+| `devenv-integration` | `ubuntu-24.04`, `devenv up` background | Spin devenv services (PG, NATS, mediamtx); S3 integration runs against the external SeaweedFS via `HNVR_TEST_INTEGRATION=1 HNVR_CONFIG=...`; run `tests/integration/` Tasty suite via `cabal test` or `nix run .#hnvr-integration-tests`. **Slow lane: nightly + on `master`.** |
 | `playwright-e2e` | `ubuntu-24.04`, `nix develop` + devenv + Playwright | Boot leader + node against devenv services; run `cd tests/e2e && npx playwright test`. **Nightly + on master.** |
-| `nixos-vm-test` | `ubuntu-24.04` | `nix build .#nixosTests.hnvr-failover` — the AssignmentCoordinator under host-down. **Nightly.** Tracks the open Phase 2 demo item. |
+| `nixos-vm-test` | `ubuntu-24.04` | `nix build .#checks.x86_64-linux.hnvr-leader-smoke` — boots a VM, curls /healthz + /NewSession. **Nightly.** (The AssignmentCoordinator host-down failover test was never built — it remains the open Phase 2 demo item.) |
 
 Every test job uploads its Tasty XML / JUnit report (`-- tasty-trpc-fd` or
 `tasty-ant-xml`) as a GitHub Actions artifact for 14 days.
@@ -216,9 +216,12 @@ tests/
     ├── tests/
     │   ├── login.spec.ts
     │   ├── cameras-crud.spec.ts
+    │   ├── archive-browser.spec.ts
     │   ├── archive-playback.spec.ts
     │   ├── live-view.spec.ts
-    │   └── failover.spec.ts
+    │   ├── rules.spec.ts
+    │   ├── ui-v2.spec.ts
+    │   └── zoompan.spec.ts          # 34 tests = 32 passed + 2 conditional skips
     └── fixtures/
         └── ...
 ```
@@ -239,10 +242,10 @@ tests/
 | Dependency | In unit tests | In integration tests | In E2E / NixOS tests |
 |------------|---------------|----------------------|----------------------|
 | PostgreSQL | Mocked / avoided (use pure funcs) | `tmp-postgres` per-suite OR devenv PG at `:15432` | devenv PG / NixOS VM PG |
-| MinIO / S3 | Avoided | MinIO via devenv (port `:9100`) | devenv MinIO / SaaS SeaweedFS in staging |
+| MinIO / S3 | Avoided | External SeaweedFS via `HNVR_TEST_INTEGRATION=1 HNVR_CONFIG=...` (bucket `hnvr`) | Same external SeaweedFS |
 | NATS | Avoided (test pure subject construction) | `nats-server -c /tmp/test.conf` spawned per-suite, port randomised | devenv NATS `:4222` |
 | ffmpeg / ffprobe | Use sample files instead of shelling | Real ffmpeg against sample MP4 | Real RTSP pull (only in Sergey's manual E2E) |
-| MediaMTX | Avoided | Skipped — mediamtx config is generated; test the YAML, not the binary | devenv mediamtx `:9997` |
+| MediaMTX | Avoided | Skipped — config is pushed via the /v3 REST API; test the push payloads, not the binary | devenv mediamtx `:9997` |
 | WebRTC | n/a | n/a | Playwright against leader's WHEP endpoint |
 
 **Rule of thumb:** if a test would need to spawn an external process, it
@@ -256,8 +259,9 @@ belongs in the integration layer or above — never in the unit layer.
   the produced argument list, and it changes with ffmpeg versions. A golden
   test against `ffmpeg -version 7.x` is acceptable; deeper testing is the
   job of the integration suite.
-- Pure stubs (`Hnvr.Cv.OnnxRuntime`, `Hnvr.Ptz.Onvif`, etc.) — no behavior
-  to test until Phase 3+ fills them in.
+- ~~Pure stubs (`Hnvr.Cv.OnnxRuntime`, `Hnvr.Ptz.Onvif`, etc.)~~ — both are
+  now implemented and tested (ONNX Runtime FFI binding; ONVIF client with
+  fixture-tested pure parsers, 7 fixtures from the live cameras).
 
 ## Coverage target
 

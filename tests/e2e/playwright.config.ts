@@ -6,7 +6,7 @@ import {defineConfig, devices } from '@playwright/test';
  * Run locally:
  *   cd tests/e2e && npm install && npx playwright install chromium
  *   # Start devenv services + leader in another terminal:
- *   devenv up                 # postgres :15432, nats :4222, minio :9100, mediamtx :9997
+ *   devenv up                 # postgres :15432, nats :4222, mediamtx :9997
  *   nix build .#hnvr-web && ./result/bin/hnvr-leader
  *   # Run tests:
  *   npm test

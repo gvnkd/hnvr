@@ -563,7 +563,7 @@ latestAnalysis sup camId = do
     Just h -> readTVarIO h.ahLatest
 
 -- | The raw 'TVar' behind 'latestAnalysis' — streaming consumers
--- (the /debug-stream middleware) block on it via STM instead of
+-- (StreamDebugCameraAction) block on it via STM instead of
 -- polling.
 analysisTVar :: CaptureSupervisor -> CameraId -> IO (Maybe (TVar (Maybe (Frame, [Track]))))
 analysisTVar sup camId =
