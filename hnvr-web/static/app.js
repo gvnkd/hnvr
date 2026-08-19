@@ -432,6 +432,11 @@
     var slug = card.getAttribute("data-slug");
     var camId = card.getAttribute("data-cam-id");
     var video = overlay.querySelector("video");
+    // Opening the overlay is a deliberate click (user gesture), so the
+    // autoplay policy lets us unmute: sound is the point of the
+    // fullscreen-ish live view. `muted` attribute stays in markup so
+    // nothing autoplays with sound on page load.
+    video.muted = false;
     var statusEl = overlay.querySelector(".live-overlay-status-text");
     var ledEl = overlay.querySelector(".led");
     var slugEl = overlay.querySelector(".live-overlay-head .slug");

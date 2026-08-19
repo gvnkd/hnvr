@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | The 'Segment' type and its lightweight JSON envelope 'SegmentWritten'.
 --
@@ -17,7 +18,7 @@ module Hnvr.Core.Segment
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..))
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.!=), (.:), (.:?))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Text (Text)
@@ -35,6 +36,10 @@ data Segment = Segment
     sBytes :: !ByteString,
     sSha :: !Sha256,
     sKind :: !SegmentKind,
+    -- | The fragment's moof carries 2+ tracks (muxed audio). Per-fragment
+    -- truth from the capture-side fMP4 parser; lands in
+    -- @segments.has_audio@ via 'SegmentWritten'.
+    sHasAudio :: !Bool,
     sHostId :: !HostId
   }
   deriving stock (Eq, Show, Generic)
@@ -53,11 +58,31 @@ data SegmentWritten = SegmentWritten
     swBytes :: !Word64,
     swSha :: !Sha256,
     swKind :: !SegmentKind,
+    -- | See 'sHasAudio'.
+    swHasAudio :: !Bool,
     swHostId :: !HostId,
     swObjectKey :: !Text
   }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (ToJSON, FromJSON)
+  deriving anyclass (ToJSON)
+
+-- | Hand-written decoder (not derived): @swHasAudio@ defaults to False
+-- so a new leader tolerates a pre-audio-mux node's publishes (deploy
+-- order independence — old nodes never had audio in their fragments,
+-- so False is the true value for them anyway).
+instance FromJSON SegmentWritten where
+  parseJSON = withObject "SegmentWritten" $ \o ->
+    SegmentWritten
+      <$> o .: "swCamera"
+      <*> o .: "swSlug"
+      <*> o .: "swStart"
+      <*> o .: "swEnd"
+      <*> o .: "swBytes"
+      <*> o .: "swSha"
+      <*> o .: "swKind"
+      <*> o .:? "swHasAudio" .!= False
+      <*> o .: "swHostId"
+      <*> o .: "swObjectKey"
 
 -- | Project a 'Segment' into its 'SegmentWritten' envelope. The object
 -- key is supplied by the caller: the capture worker computes it with
@@ -75,6 +100,7 @@ toSegmentWritten objectKey s =
       swBytes = fromIntegral (B.length (sBytes s)),
       swSha = sSha s,
       swKind = sKind s,
+      swHasAudio = sHasAudio s,
       swHostId = sHostId s,
       swObjectKey = objectKey
     }

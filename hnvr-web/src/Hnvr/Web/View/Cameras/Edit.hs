@@ -93,7 +93,7 @@ instance View EditView where
             <div class="field">
               <label>Capture &amp; analysis</label>
               <label><input type="checkbox" name="enabled" checked={camera.enabled} /> enabled (record + analyze)</label>
-              <label><input type="checkbox" name="recordAudio" checked={camera.recordAudio} /> record audio track (.m4a alongside video)</label>
+              <label><input type="checkbox" name="recordAudio" checked={camera.recordAudio} /> record audio track (band-passed 60 Hz–14 kHz, AAC, muxed into video segments)</label>
               <label><input type="checkbox" name="useSubstreamForAnalysis" checked={camera.useSubstreamForAnalysis} /> use sub-stream for CV analysis</label>
             </div>
             {intFieldFor "analysisFps" "Analysis FPS" (Just camera.analysisFps) "Frames per second through the detector (1–15)"}

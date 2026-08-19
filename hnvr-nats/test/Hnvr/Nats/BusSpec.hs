@@ -95,6 +95,7 @@ sampleWritten =
       swBytes = 1234,
       swSha = Sha256 (B.replicate 32 0xAB),
       swKind = Video,
+      swHasAudio = True,
       swHostId = "hnvr-2",
       swObjectKey = "cam-197/2026-08-07/12-00-00.mp4"
     }

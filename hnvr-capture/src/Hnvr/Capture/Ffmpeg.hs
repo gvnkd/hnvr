@@ -3,16 +3,19 @@
 
 -- | ffmpeg subprocess construction for the capture pipelines.
 --
--- Three invocations per camera exist in the full design (record +
--- analyze + optional audio); this module builds the argv lists for
--- all three.
+-- Two invocations per camera exist in the full design (record +
+-- analyze); this module builds the argv lists for both.
 --
--- The recording ffmpeg performs @-c:v copy@ (zero decode, zero encode)
--- and emits HLS-ready fMP4 fragments on stdout. We read those bytes,
--- slice them at @moof@\/@mdat@ boundaries via "Hnvr.Capture.Fmp4",
--- and upload each fragment to SeaweedFS. The analysis ffmpeg decodes
--- to RGB24 for the CV pipeline; "Hnvr.Capture.FrameSource" slices its
--- stdout into frames.
+-- The recording ffmpeg performs @-c:v copy@ (zero video decode, zero
+-- video encode) and emits HLS-ready fMP4 fragments on stdout. When the
+-- camera's @record_audio@ flag is set, the SAME ffmpeg also decodes the
+-- camera's G.711 track, band-passes it (60 Hz – 14 kHz), re-encodes to
+-- AAC, and muxes it into the same fragments — so archive playback gets
+-- audio through the existing single-rendition HLS playlist with no
+-- @EXT-X-MEDIA@ machinery. We read those bytes, slice them at
+-- @moof@\/@mdat@ boundaries via "Hnvr.Capture.Fmp4", and upload each
+-- fragment to SeaweedFS. The analysis ffmpeg decodes to RGB24 for the
+-- CV pipeline; "Hnvr.Capture.FrameSource" slices its stdout into frames.
 --
 -- All flags are documented in @design_docs/03-capture-and-storage.md@
 -- (\"Per-camera capture pipeline\"). The flag set MUST stay in sync
@@ -26,7 +29,6 @@ module Hnvr.Capture.Ffmpeg
 
     -- * Args
     recordingArgs,
-    audioArgs,
     analysisArgs,
 
     -- * Process (typed-process)
@@ -49,7 +51,13 @@ data RecordingConfig = RecordingConfig
   { -- | Full RTSP URL with embedded credentials.
     rcUrl :: !Text,
     -- | Transport. Mismatched transport fails fast at RTSP SETUP.
-    rcTransport :: !Transport
+    rcTransport :: !Transport,
+    -- | When True, the camera's audio track is decoded, band-passed
+    -- (60 Hz – 14 kHz), re-encoded to AAC and muxed into the same fMP4
+    -- fragments as the video. When False the audio track is dropped
+    -- (@-an@). Cameras without an audio track produce video-only
+    -- fragments either way (default stream mapping finds no audio).
+    rcRecordAudio :: !Bool
   }
   deriving stock (Eq, Show)
 
@@ -96,72 +104,44 @@ recordingArgs cfg =
     "-reconnect_streamed",
     "1",
     "-reconnect_delay_max",
-    "5",
-    "-an",
-    "-c:v",
-    "copy",
-    "-f",
-    "mp4",
-    "-movflags",
-    "+frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset+faststart",
-    "-frag_duration",
-    "1000000",
-    "-reset_timestamps",
-    "1",
-    "pipe:1"
+    "5"
   ]
+    <> audioOpts
+    <> [ "-c:v",
+         "copy",
+         "-f",
+         "mp4",
+         "-movflags",
+         "+frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset+faststart",
+         "-frag_duration",
+         "1000000",
+         "-reset_timestamps",
+         "1",
+         "pipe:1"
+       ]
+  where
+    -- Audio band-pass: resample to 48 kHz FIRST (the cameras send
+    -- G.711 at 8 kHz — a 14 kHz lowpass at 8 kHz Nyquist would produce
+    -- garbage biquad coefficients), then a cascaded (4th-order) 60 Hz
+    -- highpass + 14 kHz lowpass, then AAC. Filter order matters:
+    -- aresample must precede highpass/lowpass. Measured: -24 dB @
+    -- 30 Hz, -52 dB @ 20 kHz, 0 dB @ 1 kHz.
+    audioOpts
+      | rcRecordAudio cfg =
+          [ "-af",
+            "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "64k"
+          ]
+      | otherwise = ["-an"]
 
 -- | Build the recording ffmpeg process spec via @typed-process@. Stdin and
 -- stderr are inherited; stdout is left as 'Inherited' so the caller can
 -- redirect or pipe it (typically @setStdout createSource@).
 recordingProc :: RecordingConfig -> ProcessConfig () () ()
 recordingProc cfg = proc "ffmpeg" (recordingArgs cfg)
-
--- | Raw argv list for the audio recording ffmpeg. Same source URL and
--- transport as the video ffmpeg; the difference is @-vn -c:a copy@
--- (drop video, copy audio codec verbatim — zero CPU). Output is fMP4
--- fragments muxed as .m4a (MPEG-4 audio-only).
---
--- Per @03-capture-and-storage.md@ §3 this is the third optional ffmpeg
--- spawned when the camera's @record_audio@ flag is true. It runs in
--- parallel with the video ffmpeg in 'Hnvr.Capture.Worker.runOnce'
--- (each owns its own RTSP session through mediamtx's relay, so the
--- 1-session camera limit doesn't apply — both ffmpegs connect to
--- rtsp://localhost:8554/<slug>, mediamtx holds the single camera pull).
-audioArgs :: RecordingConfig -> [String]
-audioArgs cfg =
-  [ "-hide_banner",
-    "-loglevel",
-    "error",
-    "-fflags",
-    "+genpts+igndts+discardcorrupt",
-    "-rtsp_transport",
-    transportArg (rcTransport cfg),
-    "-timeout",
-    "5000000",
-    "-i",
-    T.unpack (rcUrl cfg),
-    "-user_agent",
-    "HNVR/0.1",
-    "-reconnect",
-    "1",
-    "-reconnect_streamed",
-    "1",
-    "-reconnect_delay_max",
-    "5",
-    "-vn",
-    "-c:a",
-    "copy",
-    "-f",
-    "mp4",
-    "-movflags",
-    "+frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset+faststart",
-    "-frag_duration",
-    "1000000",
-    "-reset_timestamps",
-    "1",
-    "pipe:1"
-  ]
 
 -- | Configuration for the analysis ffmpeg (Phase 3 CV pipeline).
 --

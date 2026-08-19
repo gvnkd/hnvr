@@ -61,7 +61,13 @@ tests =
             let s = renderStream (SyntheticStream [] [(42, "hello")])
             assertEqual
               "frags"
-              [MediaFragment 42 (moofBox 42 <> mdatBox "hello")]
+              [MediaFragment 42 False (moofBox 42 <> mdatBox "hello")]
+              (feedAll s),
+          testCase "two-traf moof → hasAudio=True" $ do
+            let s = box "moof" (trafBox 7 <> trafBox 8) <> mdatBox "x"
+            assertEqual
+              "frags"
+              [MediaFragment 7 True s]
               (feedAll s),
           testCase "init + two frags → InitFragment then two MediaFragments" $ do
             let initBs = box "ftyp" "abcd"
@@ -69,8 +75,8 @@ tests =
             assertEqual
               "frags"
               [ InitFragment initBs,
-                MediaFragment 1 (moofBox 1 <> mdatBox "a"),
-                MediaFragment 2 (moofBox 2 <> mdatBox "bb")
+                MediaFragment 1 False (moofBox 1 <> mdatBox "a"),
+                MediaFragment 2 False (moofBox 2 <> mdatBox "bb")
               ]
               (feedAll s),
           testCase "truncated box header → no fragment until complete" $ do
@@ -104,7 +110,7 @@ prop_tfdtExtraction :: Word64 -> Property
 prop_tfdtExtraction ts =
   let s = renderStream (SyntheticStream [] [(ts, "p")])
    in case feedAll s of
-        [MediaFragment gotTfdt _] -> gotTfdt === ts
+        [MediaFragment gotTfdt _ _] -> gotTfdt === ts
         other ->
           counterexample ("unexpected frags: " <> show other) False
 
@@ -141,7 +147,11 @@ renderStream (SyntheticStream initBs frags) =
     renderFrag (tfdt, payload) = moofBox tfdt <> mdatBox payload
 
 moofBox :: Word64 -> ByteString
-moofBox tfdt = box "moof" (box "traf" (tfhdBox <> tfdtBox tfdt))
+moofBox tfdt = box "moof" (trafBox tfdt)
+
+-- | One traf child (tfhd + tfdt) as it appears inside a moof.
+trafBox :: Word64 -> ByteString
+trafBox tfdt = box "traf" (tfhdBox <> tfdtBox tfdt)
 
 tfhdBox :: ByteString
 tfhdBox = box "tfhd" (B.replicate 4 0x00)

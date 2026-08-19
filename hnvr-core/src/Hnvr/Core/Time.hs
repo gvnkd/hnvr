@@ -37,9 +37,8 @@ formatSegmentObjectKeyMs :: Text -> UTCTime -> Text
 formatSegmentObjectKeyMs slug ts =
   formatSegmentObjectKeyMsExt slug ts "mp4"
 
--- | Generalised version: caller picks the extension. Used by the audio
--- recording path (M5) which produces @.m4a@ objects instead of @.mp4@.
--- Extension does NOT include the dot — pass @"m4a"@, not @".m4a"@.
+-- | Generalised version: caller picks the extension.
+-- Extension does NOT include the dot — pass @"mp4"@, not @".mp4"@.
 formatSegmentObjectKeyMsExt :: Text -> UTCTime -> Text -> Text
 formatSegmentObjectKeyMsExt slug ts ext =
   slug <> "/" <> formatYmdHmsMs ts <> "." <> ext

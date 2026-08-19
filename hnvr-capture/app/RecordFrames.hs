@@ -81,7 +81,7 @@ run slugS transport url outDir = do
       ++ url
       ++ " out="
       ++ slugDir
-  let args = recordingArgs RecordingConfig {rcUrl = T.pack url, rcTransport = transport}
+  let args = recordingArgs RecordingConfig {rcUrl = T.pack url, rcTransport = transport, rcRecordAudio = False}
   (_, mOut, _, ph) <-
     createProcess
       (proc "ffmpeg" args)
@@ -123,7 +123,7 @@ writeFragment slug outDir frag = do
       let p = outDir </> T.unpack slug </> "init.mp4"
       B.writeFile p bs
       logInfo $ "init -> " ++ p ++ " (" ++ show (B.length bs) ++ " bytes)"
-    MediaFragment _tfdt bs -> do
+    MediaFragment _tfdt _hasAudio bs -> do
       let sha = sha256Bytes bs
           key = T.unpack (formatSegmentObjectKeyMs slug ts)
           p = outDir </> key

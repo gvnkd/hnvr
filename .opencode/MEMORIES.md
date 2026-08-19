@@ -3,49 +3,44 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
-> **PTZ investigation, low_ent (Aug 17 2026) — MOTORS EXIST (corrected);
-> driven by a separate BSD board, SoC-side interface unknown**. Sergey
-> disassembled: product **GX-PM2X20I-M6S-B** (20X optical zoom dome),
-> head module label **550XM-AI 20X TF POE**, control board
-> **bsd_8g18x_lh_ipc_ahd_v2**. Motors (pan+tilt+zoom) all home at
-> power-on. Earlier "not motorized" verdict was WRONG (was: digital
-> PTZ) — the G6S mainboard (GK7205V300+imx335) is real, but motors
-> live behind the BSD board. Remote status: EVERYTHING negative —
-> decoded product jsons say PtzParams{bUsePtz:0, UartIndex:1,
-> Rs485DeReCtrlGpio:[3,0]=GPIO24, bCreateAfThread:0, bUseMotor:0}
-> (85K50T sibling identical); no XmMotor.ko anywhere; i2cdetect empty;
-> GPIO stepper bruteforce (48 combos) negative; DC H-bridge pair test
-> on boilerplate pins {69,70,59,58,57,56,53,52} (20 drives, 450ms
-> differential) negative — these pins are NOT this unit's motor wiring;
-> UART hunt: AMA1/AMA2 × mux {72/73 func1, 12/13 func2, 4/29 func2}
-> × bauds 2400-115200 × XM(0xc5/a5-init)+Pelco-D × RS485 DE/RE GPIO24
-> both polarities — zero reply, zero motion (PSNR oracle; today's
-> noise floor ~35-41dB, control interleaved). KEY LOSS: stock read
-> per-device motor pinout/params from **/mnt/mtd/Log/motorset**
-> (fun_get_motor_params precedence 1) — coupler flash + firstboot
-> ERASED it. Subreption article = same module family (GK7205V300+
-> imx335+MX6208 DC motor driver; motor_open/motor_move/motor_scan
-> ioctls in Sofia App via /dev/xm_gpio; XmDemux.ko = pinmux+gpio ABI).
-> Open questions for Sergey: (1) do motors still home at power-on
-> UNDER OpenIPC? YES=BSD autonomous (UART cmd link, hunt pads/protocol)
-> / NO=SoC-driven homing (motor GPIOs via BSD as dumb driver; pinout
-> lost — would need temporary 699Q3_recovery.img reflash + logic
-> analyzer on the BSD connector during stock boot to recover it).
-> (2) photos of bsd_8g18x both sides (chip markings — MCU? RS485
-> xcvr? stepper drivers) for qwen-vision; (3) harness wire count
-> main↔BSD: 2=RS485, 3-4=UART+DE, 8+=direct coil drive.
-> **Phase 5 — PTZ manual control + presets (Aug 16 2026 — v0.6.0.0)**:
-> full phase landed + verified live end-to-end against cam-196.
-> **Fleet verdict: NO camera has working PTZ hardware** — 196 (backyard)
-> advertises a full PTZ service and ACCEPTS every op (ContinuousMove,
-> AbsoluteMove, Stop all return proper responses) but the position
-> register never leaves (0,0), UtcTime is frozen at epoch, and an
-> ffmpeg frame-diff during a full-speed move shows scene noise only
-> (PSNR 29.9 vs no-command baseline 33.0 — same band; a real pan would
-> be ≪20): firmware stub, no motors. 197 (floor_2_5) answers GetStatus
-> with `PTZStatus xsi:nil="true"` (the fixed-camera tell). 198
-> (low_ent/Majestic) advertises no PTZ service at all. DoD #10 is
-> hardware-blocked; everything software-side works.
+> **Audio: muxed into recording + frequency filter (Aug 19 2026 — v0.7.0.0)**:
+> Sergey reported archive audio never plays + live sound reachable only in
+> browser-fullscreen. Three root causes, three fixes:
+> (1) **Archive had no audio path at all** — the recording ffmpeg ran `-an`
+> and a separate parallel ffmpeg dumped audio to unindexed `.m4a` objects
+> (no DB rows, no HLS audio group). Replaced with in-band muxing: the
+> single recording ffmpeg now does `-af
+> "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000"
+> -c:a aac -b:a 64k` when `record_audio=true` (`audioArgs` + the
+> `concurrently` dual-ffmpeg + `.m4a` path are GONE from
+> `Hnvr.Capture.{Ffmpeg,Worker}`). Verified: ffmpeg 7.1 writes ONE moof
+> with 2 trafs per fragment (no per-track moof+mdat split), so the Fmp4
+> slicer is untouched. **Filter order is load-bearing**: aresample to
+> 48 kHz BEFORE the lowpass — at the G.711 native 8 kHz a 14 kHz lowpass
+> is above Nyquist and computes garbage biquad coefficients. Cascaded
+> biquads (4th order) measured: -24 dB @ 30 Hz, -52 dB @ 20 kHz, flat @
+> 1 kHz. Live (WHEP) audio is NOT filtered — mediamtx has no DSP.
+> (2) `MediaFragment` carries per-fragment `hasAudio` (moof traf count
+> > 1) → `Segment.sHasAudio`/`SegmentWritten.swHasAudio` → real
+> `segments.has_audio` (EventWriter hardcoded FALSE before).
+> `SegmentWritten` FromJSON is now hand-written with `.:?`+`.!= False`
+> (old nodes' payloads still decode; false is true for them anyway).
+> (3) **Dashboard overlay + /ShowLive `<video>` had no `controls`
+> attribute at all** (and `muted`) — the only sound UI was the browser's
+> own fullscreen chrome (Firefox shows native controls in fullscreen
+> even without the attribute — that's the "only in fullscreen" report).
+> Both videos now have `controls`; app.js `openLive` sets
+> `video.muted=false` on open (a click is a user gesture, so the
+> autoplay policy allows it). /ShowLive stays muted-by-default (page
+> load, no gesture). Backyard was the only camera audible live simply
+> because others were never unmuted — mediamtx shows G711 tracks on all
+> dev paths; low_ent (OpenIPC/Majestic) may have no audio track at all
+> (check `GET /v3/paths/list` `tracks2`). Old `.m4a` objects in S3 are
+> now permanent orphans (retention is row-tracked) — one-off `mc rm`
+> cleanup if any exist (dev had none). Deploy: restart leader with
+> ./result-web (v0.7.0.0). Dev-verified live: new segments probe as
+> h264+aac/48k/mono, `has_audio=t` rows flowing, playlist serves the
+> audio-bearing init.mp4.
 >
 > Architecture (follows design 01/05/06 with noted deviations):
 >   * `Hnvr.Core.Ptz` — pure wire types: PtzCommand (sum, strict

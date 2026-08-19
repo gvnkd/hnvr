@@ -78,7 +78,8 @@ instance FromJSON Transport where
 -- that lands, the leader renders the URL at snapshot time and the node
 -- gets a ready-to-use string.
 --
--- @csRecordAudio@ gates the parallel audio ffmpeg (M5). Per
+-- @csRecordAudio@ muxes the camera's audio track (band-passed
+-- 60 Hz – 14 kHz, AAC) into the recording fragments. Per
 -- @03-capture-and-storage.md@ §3.
 --
 -- Analysis fields (Phase 3): @csRtspSubUrl@/@csSubWidth@/@csSubHeight@

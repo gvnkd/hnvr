@@ -48,7 +48,7 @@ instance View ShowView where
       </div>
 
       <div class="video-frame">
-        <video id="hnvr-live" autoplay muted></video>
+        <video id="hnvr-live" autoplay muted controls></video>
       </div>
       <div class="video-status">
         <span id="hnvr-live-led" class="led led-warn"></span>

@@ -46,7 +46,12 @@ data Fragment
     -- inside the moof (0 if not found). Track-timescale units; useful
     -- for media-time alignment in Phase 3 CV; the worker currently uses
     -- wall-clock hold-back for @sEnd@, so this field is informational.
-    MediaFragment !Word64 !ByteString
+    -- The 'Bool' is True when the moof contains 2+ @traf@ boxes, i.e.
+    -- the fragment carries a muxed audio track alongside the video
+    -- (ffmpeg 7.x writes one moof with one traf per track). It drives
+    -- the @segments.has_audio@ column; a video-only camera's moofs have
+    -- exactly one traf.
+    MediaFragment !Word64 !Bool !ByteString
   deriving stock (Eq, Show)
 
 -- | Internal state of the streaming parser.
@@ -57,8 +62,9 @@ data Fmp4State = Fmp4State
     -- moof currently open). The 'Word64' is the @baseMediaDecodeTime@
     -- scraped from the first @tfdt@ in the moof at the time the moof
     -- opened — captured here so we don't have to re-parse the moof
-    -- payload when the matching mdat arrives.
-    fsFragAcc :: !(Maybe (Word64, ByteString)),
+    -- payload when the matching mdat arrives. The 'Bool' is the moof's
+    -- @traf@-count > 1 (audio track present), captured the same way.
+    fsFragAcc :: !(Maybe (Word64, Bool, ByteString)),
     -- Bytes received but not yet parseable as a complete box.
     fsUnparsed :: !ByteString
   }
@@ -93,7 +99,7 @@ feed st0 chunk = go (st0 {fsUnparsed = fsUnparsed st0 <> chunk}) []
 finish :: Fmp4State -> Maybe Fragment
 finish st = case fsFragAcc st of
   Nothing -> Nothing
-  Just (tfdt, bs) -> Just (MediaFragment tfdt bs)
+  Just (tfdt, hasAudio, bs) -> Just (MediaFragment tfdt hasAudio bs)
 
 -- | Dispatch a single complete box: append to whichever accumulator is
 -- active, and emit fragments at moof→mdat completion boundaries.
@@ -104,21 +110,22 @@ handleBox typ bytes st
       let initFrags =
             [InitFragment (fsInitAcc st) | not (B.null (fsInitAcc st))]
           tfdt = findTfdt bytes
-       in (initFrags, st {fsInitAcc = B.empty, fsFragAcc = Just (tfdt, bytes)})
+          hasAudio = countChildren "traf" (boxPayload bytes) > 1
+       in (initFrags, st {fsInitAcc = B.empty, fsFragAcc = Just (tfdt, hasAudio, bytes)})
   | typ == "mdat" =
       case fsFragAcc st of
         Nothing ->
           -- Stray mdat without a moof (shouldn't happen with our movflags).
           -- Be defensive: treat as init.
           ([], st {fsInitAcc = fsInitAcc st <> bytes})
-        Just (tfdt, fragBytes) ->
+        Just (tfdt, hasAudio, fragBytes) ->
           -- Complete fragment: moof + mdat.
-          ([MediaFragment tfdt (fragBytes <> bytes)], st {fsFragAcc = Nothing})
+          ([MediaFragment tfdt hasAudio (fragBytes <> bytes)], st {fsFragAcc = Nothing})
   | otherwise =
       -- styp / sidx / free / skip / uuid / etc. Append to whichever
       -- accumulator is active (init before first moof, fragment after).
       case fsFragAcc st of
-        Just (tfdt, fb) -> ([], st {fsFragAcc = Just (tfdt, fb <> bytes)})
+        Just (tfdt, hasAudio, fb) -> ([], st {fsFragAcc = Just (tfdt, hasAudio, fb <> bytes)})
         Nothing -> ([], st {fsInitAcc = fsInitAcc st <> bytes})
 
 -- | Try to parse one complete ISO-BMFF box off the front of the buffer.
@@ -218,6 +225,32 @@ findChild want = go
                    in if B.length buf < n
                         then Nothing
                         else if typ == want then Just buf else go (B.drop n buf)
+
+-- | Count the children of a parent box payload whose 4-byte type
+-- matches. Same box-walking rules as 'findChild'.
+countChildren :: ByteString -> ByteString -> Int
+countChildren want = go 0
+  where
+    go !n buf
+      | B.length buf < 8 = n
+      | otherwise =
+          let size = readBE32 (B.take 4 buf)
+              typ = B.take 4 (B.drop 4 buf)
+           in case size of
+                0 -> if typ == want then n + 1 else n
+                1 ->
+                  if B.length buf < 16
+                    then n
+                    else
+                      let extSize = fromIntegral (readBE64 (B.take 8 (B.drop 8 buf))) :: Int
+                       in if B.length buf < extSize
+                            then n
+                            else go (if typ == want then n + 1 else n) (B.drop extSize buf)
+                _ ->
+                  let bsize = fromIntegral size :: Int
+                   in if B.length buf < bsize
+                        then n
+                        else go (if typ == want then n + 1 else n) (B.drop bsize buf)
 
 -- | Parse the body of a tfdt box (after the 8-byte box header). The body
 -- is a FullBox: 1-byte version, 3-byte flags, then the timestamp.

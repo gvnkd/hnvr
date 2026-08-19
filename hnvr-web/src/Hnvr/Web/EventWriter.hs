@@ -211,7 +211,7 @@ insertSegment sw =
       "INSERT INTO segments \
       \  (camera_id, start_ts, end_ts, host_id, object_key, bytes, sha256, \
       \   has_audio, created_at) \
-      \ VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, NOW()) \
+      \ VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW()) \
       \ ON CONFLICT (camera_id, start_ts) DO NOTHING"
       ( unCameraId (swCamera sw) :: UUID,
         swStart sw,
@@ -219,7 +219,8 @@ insertSegment sw =
         unHostId (swHostId sw) :: Text,
         swObjectKey sw,
         fromIntegral (swBytes sw) :: Integer,
-        sha256ToHex (swSha sw)
+        sha256ToHex (swSha sw),
+        swHasAudio sw
       )
 
 decodeStrict :: (FromJSON a) => BS.ByteString -> Maybe a

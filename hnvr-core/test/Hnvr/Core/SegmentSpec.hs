@@ -5,6 +5,8 @@
 module Hnvr.Core.SegmentSpec (tests) where
 
 import Data.Aeson (FromJSON, ToJSON, decode, encode)
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import Data.Text (Text)
@@ -36,6 +38,7 @@ tests =
         assertEqual "swEnd" (sEnd seg) (swEnd sw)
         assertEqual "swSha" (sSha seg) (swSha sw)
         assertEqual "swKind" (sKind seg) (swKind sw)
+        assertEqual "swHasAudio" (sHasAudio seg) (swHasAudio sw)
         assertEqual "swHostId" (sHostId seg) (swHostId sw)
         assertEqual "swBytes" (fromIntegral (B.length (sBytes seg)) :: Word) (fromIntegral (swBytes sw) :: Word),
       testCase "toSegmentWritten uses the caller-supplied object key verbatim" $ do
@@ -45,7 +48,15 @@ tests =
         let sw = toSegmentWritten sampleKey sampleSegment
             enc = encode sw
             dec = decode enc :: Maybe SegmentWritten
-        assertEqual "roundtrip" (Just sw) dec
+        assertEqual "roundtrip" (Just sw) dec,
+      testCase "old payloads without swHasAudio decode as False" $ do
+        -- Pre-audio-mux nodes publish no swHasAudio field; the leader
+        -- must still decode (deploy order independence).
+        let sw = toSegmentWritten sampleKey sampleSegment
+            Just obj = decode (encode sw) :: Maybe Aeson.Object
+            legacy = encode (KM.delete "swHasAudio" obj)
+            decLegacy = decode legacy :: Maybe SegmentWritten
+        assertEqual "legacy decode" (Just sw {swHasAudio = False}) decLegacy
     ]
 
 -- ---- fixtures ------------------------------------------------------
@@ -66,6 +77,7 @@ sampleSegment =
       sBytes = "fake fragment bytes",
       sSha = Sha256 (B.replicate 32 0xAB),
       sKind = Video,
+      sHasAudio = True,
       sHostId = "hnvr-2"
     }
   where

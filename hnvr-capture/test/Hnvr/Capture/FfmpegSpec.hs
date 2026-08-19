@@ -37,8 +37,33 @@ tests =
         let args = recordingArgs tcpCfg
         case dropWhile (/= "-i") args of
           _flag : url : _rest -> assertEqual "url" rtspUrlStr url
-          _ -> fail "expected -i <url> in argv"
+          _ -> fail "expected -i <url> in argv",
+      testCase "recordAudio=True swaps -an for the filtered AAC chain" $ do
+        let args = recordingArgs tcpCfg {rcRecordAudio = True}
+        assertEqual "no -an" Nothing (elemIndex "-an" args)
+        assertEqual
+          "audio args"
+          (Just audioArgsExpected)
+          ( case dropWhile (/= "-af") args of
+              [] -> Nothing
+              xs -> Just (take 6 xs)
+          )
     ]
+
+-- | The exact audio argv slice (from @-af@ through the bitrate) that
+-- must appear when @rcRecordAudio@ is set. Band-pass order is
+-- load-bearing: aresample to 48 kHz BEFORE the high/lowpass (the G.711
+-- input is 8 kHz — a 14 kHz lowpass at that rate is above Nyquist and
+-- would compute garbage biquad coefficients).
+audioArgsExpected :: [String]
+audioArgsExpected =
+  [ "-af",
+    "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "64k"
+  ]
 
 -- ---- fixtures ------------------------------------------------------
 
@@ -49,10 +74,10 @@ rtspUrlStr :: String
 rtspUrlStr = T.unpack rtspUrl
 
 tcpCfg :: RecordingConfig
-tcpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = TcpTransport}
+tcpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = TcpTransport, rcRecordAudio = False}
 
 udpCfg :: RecordingConfig
-udpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = UdpTransport}
+udpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = UdpTransport, rcRecordAudio = False}
 
 -- The flags documented in design_docs/03-capture-and-storage.md plus
 -- the Sergey-camera-noise suppressors added Aug 11 2026
