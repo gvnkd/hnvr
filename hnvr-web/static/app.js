@@ -409,7 +409,11 @@
         z = z2;
         apply();
       },
-      { passive: false }
+      // CAPTURE phase is load-bearing: in fullscreen Chrome's native
+      // media controls consume wheel events (volume scroll) inside the
+      // shadow root and stop propagation — a bubble-phase listener on
+      // the host never fires.
+      { passive: false, capture: true }
     );
 
     video.addEventListener("mousedown", function (e) {
@@ -435,9 +439,30 @@
       if (!drag) return;
       drag = null;
       video.classList.remove("is-panning");
-      if (moved > 4) suppressClick = true;
+      // Expire the flag: if the release happened outside the browser
+      // window no click follows, and without a timeout the user's next
+      // genuine click would be swallowed instead.
+      if (moved > 4) {
+        suppressClick = true;
+        setTimeout(function () {
+          suppressClick = false;
+        }, 300);
+      }
     });
-    video.addEventListener(
+    // Pointer left the document mid-drag: end the pan (no trailing
+    // click exists in that case, so no suppression needed).
+    document.addEventListener("mouseleave", function () {
+      if (!drag) return;
+      drag = null;
+      video.classList.remove("is-panning");
+    });
+    // Swallow the click that trails a pan drag. Must be on window in
+    // capture phase: when the drag ends OUTSIDE the video (e.g. on the
+    // dashboard overlay backdrop), the browser dispatches the click on
+    // the nearest common ancestor of the press/release targets — the
+    // overlay itself — and its backdrop-click handler would close the
+    // player mid-pan.
+    window.addEventListener(
       "click",
       function (e) {
         if (suppressClick) {

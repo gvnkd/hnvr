@@ -3,6 +3,24 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **Zoom/pan fullscreen + overlay-close fixes (Aug 19 2026 — v0.8.0.1)**:
+> (1) Wheel zoom dead in fullscreen: Chrome's native fullscreen media
+> controls consume wheel events (volume scroll) INSIDE the video's
+> shadow root with stopPropagation — bubble-phase host listeners never
+> fire. The zoompan wheel listener now runs in CAPTURE phase. (Headless
+> Chromium doesn't reproduce the consumption — the e2e fullscreen spec
+> passes pre-fix too; desktop verification only.) (2) Pan drag ending
+> on the dashboard overlay backdrop closed the player: Chrome dispatches
+> the trailing click on the NEAREST COMMON ANCESTOR of press/release
+> targets (= the overlay → its click-to-close). Click suppression after
+> a >4px drag moved from the video element to window-level capture, with
+> a 300 ms expiry (release outside the browser window produces no click
+> — without expiry the next genuine click would be swallowed); drag also
+> ends on document mouseleave. Test pitfall: `expect(overlay).toBeVisible()`
+> races closeLive's 260 ms hide timeout (it passes while the element is
+> still pre-close visible) — wait 500 ms before asserting. The backdrop
+> regression spec was verified vacuous-then-real via git-stash of app.js.
+>
 > **Video zoom/pan + stale-CRUD-spec fix (Aug 19 2026 — v0.8.0.0)**:
 > `HNVR.zoompan(video)` in app.js — wheel = zoom at cursor (1.25x
 > notches, clamp [1,8], transform-origin 0 0, `translate(tx,ty) scale(z)`,
