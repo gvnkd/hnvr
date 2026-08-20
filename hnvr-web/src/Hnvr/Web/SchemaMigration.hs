@@ -111,6 +111,11 @@ cleanupSql = $(embedFile "migrations/0010-cleanup.sql")
 ptzSql :: ByteString
 ptzSql = $(embedFile "migrations/0011-ptz.sql")
 
+-- | Per-user IANA timezone for web UI time display. See the file
+-- header.
+userTimezoneSql :: ByteString
+userTimezoneSql = $(embedFile "migrations/0012-user-timezone.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -174,6 +179,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0011-ptz" ptzSql) True conn
     handleResult "0011-ptz" ptzRes
+    tzRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0012-user-timezone" userTimezoneSql) True conn
+    handleResult "0012-user-timezone" tzRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

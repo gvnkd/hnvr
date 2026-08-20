@@ -12,6 +12,7 @@ import Hnvr.Web.Auth ()
 import Hnvr.Web.CameraStatus (cameraStatusFor, hostDisplayLive)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.PtzPanel (ptzPanel)
+import Hnvr.Web.View.Time (tzTime)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
@@ -108,7 +109,7 @@ instance View IndexView where
             <td>{healthLedFor h.lastHealthAt}</td>
             <td class="mono t-strong">{hostIdText}</td>
             <td>{roleBadgeFor h.isLeader}</td>
-            <td class="mono">{fromMaybe "—" (fmap tshow h.lastHealthAt)}</td>
+            <td class="mono">{lastHealthHtml h.lastHealthAt}</td>
             <td class="mono">{fromMaybe "—" h.gpuModel}</td>
           </tr>
         |]
@@ -119,6 +120,8 @@ instance View IndexView where
         | otherwise = [hsx|<span class="led led-off" title="disconnected — last health >5 min ago"></span>|]
       roleBadgeFor True = [hsx|<span class="badge badge-info">LEADER</span>|]
       roleBadgeFor False = [hsx|<span class="badge badge-mute">WORKER</span>|]
+      lastHealthHtml Nothing = [hsx|—|]
+      lastHealthHtml (Just t) = tzTime t
 
       renderCameras [] = [hsx|<div class="empty"><span class="empty-icon">⌖</span>No cameras yet. Add some via the Cameras page.</div>|]
       renderCameras cs =

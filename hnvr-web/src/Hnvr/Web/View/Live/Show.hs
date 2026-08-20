@@ -128,7 +128,7 @@ feedJs cam =
     <> "async function refreshFeed() {"
     <> "  try {"
     <> "    const r = await fetch(feedUrl);"
-    <> "    if (r.ok) feedEl.innerHTML = await r.text();"
+    <> "    if (r.ok) { feedEl.innerHTML = await r.text(); if (window.HNVR && HNVR.applyTz) HNVR.applyTz(feedEl); }"
     <> "  } catch (e) { /* keep last good fragment */ }"
     <> "}"
     <> "refreshFeed(); setInterval(refreshFeed, 5000);"

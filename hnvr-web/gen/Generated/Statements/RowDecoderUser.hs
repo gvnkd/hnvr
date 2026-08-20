@@ -42,5 +42,6 @@ rowDecoder = do
     lockedAt <- Decoders.column (Decoders.nullable Decoders.timestamptz)
     failedLoginAttempts <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int4))
     lastLoginAt <- Decoders.column (Decoders.nullable Decoders.timestamptz)
+    timezone <- Decoders.column (Decoders.nullable Decoders.text)
     createdAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
-    pure (let theRecord = Generated.ActualTypes.User id email passwordHash isAdmin lockedAt failedLoginAttempts lastLoginAt createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)
+    pure (let theRecord = Generated.ActualTypes.User id email passwordHash isAdmin lockedAt failedLoginAttempts lastLoginAt timezone createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)

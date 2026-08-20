@@ -10,9 +10,9 @@
 module Hnvr.Web.View.EventClips.Player (ClipPlayerView (..)) where
 
 import qualified Data.Text as T
-import Data.Time.Format (defaultTimeLocale, formatTime)
 import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
+import Hnvr.Web.View.Time (tzTime)
 import IHP.ViewPrelude
 
 data ClipPlayerView = ClipPlayerView
@@ -30,7 +30,7 @@ instance View ClipPlayerView where
             <span class="led led-on"></span>
             Event clip · <span class="font-mono">{camera.slug}</span>
           </h1>
-          <div class="subtitle">{clipLabel}</div>
+          <div class="subtitle">{tzTime clip.startedAt} · {tshow clip.durationSec}s · retention {tshow clip.retentionHours}h</div>
         </div>
         <div class="actions">
           <a class="btn btn-ghost" href="/Events">Events</a>
@@ -50,13 +50,6 @@ instance View ClipPlayerView where
     |]
     where
       playlistUrl = "/PlaylistEventClip?playlistClipId=" <> tshow (clip |> get #id)
-      clipLabel =
-        T.pack (formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S" clip.startedAt)
-          <> " UTC · "
-          <> tshow clip.durationSec
-          <> "s · retention "
-          <> tshow clip.retentionHours
-          <> "h"
       liveUrl = "/ShowLive?cameraId=" <> tshow (camera |> get #id)
       -- IHP HSX doesn't splice {…} inside <script> tags (pitfall #63):
       -- build the whole element in Haskell, splice at body level.

@@ -11,6 +11,7 @@ import Data.Time.Clock (UTCTime)
 import Generated.Types
 import Hnvr.Web.CameraStatus (hostDisplayLive)
 import Hnvr.Web.View.Layout (renderLayout)
+import Hnvr.Web.View.Time (tzTime)
 import IHP.ViewPrelude
 
 data IndexView = IndexView
@@ -45,13 +46,13 @@ instance View IndexView where
                 {roleBadge h.isLeader}
                 {connBadge h.lastHealthAt}
               </span>
-              <span class="muted">{fromMaybe "—" (fmap tshow h.lastHealthAt)}</span>
+              <span class="muted">{lastHealthHtml h.lastHealthAt}</span>
             </div>
             <table class="table">
               <tbody>
                 {kvRow "GPU" (fromMaybe "—" h.gpuModel)}
                 {kvRow "Exec providers" (T.intercalate ", " h.execProviders)}
-                {kvRow "Last health" (fromMaybe "—" (fmap tshow h.lastHealthAt))}
+                <tr class="kv"><th>Last health</th><td>{lastHealthHtml h.lastHealthAt}</td></tr>
               </tbody>
             </table>
             <div class="card-body">
@@ -69,6 +70,8 @@ instance View IndexView where
             | otherwise = [hsx|<span class="badge badge-danger">DISCONNECTED</span>|]
           roleBadge True = [hsx|<span class="badge badge-info">LEADER</span>|]
           roleBadge False = [hsx|<span class="badge badge-mute">WORKER</span>|]
+          lastHealthHtml Nothing = [hsx|—|]
+          lastHealthHtml (Just t) = tzTime t
           kvRow k v =
             [hsx|
               <tr class="kv">

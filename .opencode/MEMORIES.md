@@ -3,6 +3,41 @@
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 
+> **User profile timezones (Aug 20 2026 — v0.12.0.0)**: web UI times
+> are now shown in the viewer's timezone, client-side. `users.timezone
+> TEXT` (IANA name, NULL = browser-local; migration 0012 wired into
+> SchemaMigration + Schema.sql + regen). New `/ShowProfile` +
+> `/UpdateProfile` (Web.Controller.Profile, ensureIsUser; charset-only
+> server validation — the canonical zone list is the browser's
+> `Intl.supportedValuesOf("timeZone")`, no tz db server-side); profile
+> view's dropdown is JS-populated with a "use browser timezone" button;
+> sidebar user pill links there. Rendering strategy (Sergey's pick):
+> NO `tz` Haskell dep — views emit UTC inside
+> `Hnvr.Web.View.Time.tzTime/tzTimeOfDay` spans (`data-utc-ts` =
+> iso8601Show), app.js rewrites textContent via
+> `Intl.DateTimeFormat("sv-SE", {timeZone})` (ISO-ordered output).
+> Zone resolution: `HNVR.viewerTz()` = `<body data-user-tz>` (Layout,
+> from currentUser) || browser tz. Topbar clock localized with a
+> short-name label — headless chromium ICU returns "GMT+2" for
+> timeZoneName:short, so tzLabel rejects /^GMT/ and falls back to the
+> IANA name. datetime-local filter inputs (Events/Archive, server
+> parses UTC via parseWhen) are converted local↔UTC in JS
+> (`input[data-tz-dt]`, DST-safe double-probe offset). /ShowLive feed
+> poller calls `HNVR.applyTz(feedEl)` after each innerHTML refresh.
+> Views converted: Events/Index, Archive/Index, AuditLog/Index,
+> Events/Feed, EventClips/Player, Cameras/Show drift table,
+> Dashboard/Index + Hosts/Index last-health. Gotchas: IHP `Html`
+> signatures in a plain module need RankNTypes (implicit ?context/
+> ?request params); new files MUST be `git add`ed before nix build —
+> flakes exclude untracked files ("can't find source for …"); a
+> tool-call-backgrounded leader dies with the call — use
+> `setsid nohup … &`; `lsof` absent, use `ss -tlnp`/`fuser -k PORT/tcp`.
+> e2e: new profile.spec.ts (3 tests; resets the admin row to browser
+> default at the end — shared dev DB). Full suite 35 passed + 2 skips
+> on :18002, pre-commit green, migration verified applied to dev DB.
+> Deploy pending: live leader on :18001 runs v0.11.0.0 — needs restart
+> for the 0012 migration + new UI.
+>
 > **Pre-release audit + auth gates + README (Aug 19 2026 — v0.11.0.0)**:
 > full codebase/doc audit (two explore passes) + fixes. **Auth**:
 > /Stats and /Hosts now `beforeAction = ensureIsUser` (were anonymous —

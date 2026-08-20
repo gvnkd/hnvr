@@ -14,6 +14,7 @@ import qualified Data.Text.Lazy.Encoding as TLE
 import qualified Data.UUID as UUID
 import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
+import Hnvr.Web.View.Time (tzTime)
 import IHP.ViewPrelude
 
 data IndexView = IndexView
@@ -36,7 +37,7 @@ instance View IndexView where
         <table class="table" data-sortable="1">
           <thead>
             <tr>
-              <th>Time (UTC)</th>
+              <th>Time</th>
               <th>User</th>
               <th>Action</th>
               <th>Target</th>
@@ -56,7 +57,7 @@ instance View IndexView where
       renderEntry entry =
         [hsx|
           <tr>
-            <td class="mono">{tshow entry.ts}</td>
+            <td class="mono">{tzTime entry.ts}</td>
             <td class="mono">{emailFor entry}</td>
             <td class="mono t-strong">{entry.action}</td>
             <td class="mono">{targetText entry}</td>

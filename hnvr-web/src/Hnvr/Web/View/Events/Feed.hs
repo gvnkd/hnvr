@@ -10,11 +10,9 @@ module Hnvr.Web.View.Events.Feed
   )
 where
 
-import Data.Maybe (fromMaybe)
-import qualified Data.Text as T
-import Data.Time.Format (defaultTimeLocale, formatTime)
 import Hnvr.Cv.Decode (cocoClassName)
 import Hnvr.Web.View.Events.Index (EventRow (..))
+import Hnvr.Web.View.Time (tzTimeOfDay)
 import IHP.ViewPrelude
 
 newtype FeedView = FeedView
@@ -37,7 +35,7 @@ instance View FeedView where
       renderEvent ev =
         [hsx|
         <div class="event-feed-row">
-          <span class="mono text-sm">{fmt ev.erTs}</span>
+          <span class="mono text-sm">{tzTimeOfDay ev.erTs}</span>
           {badge ev.erKind}
           <span class="text-sm">{cls}</span>
           <span class="text-sm muted">{conf}</span>
@@ -46,7 +44,6 @@ instance View FeedView where
         where
           cls = maybe "—" cocoClassName ev.erClassId
           conf = maybe "" (\c -> tshow (round (c * 100) :: Int) <> "%") ev.erConfidence
-      fmt = T.pack . formatTime defaultTimeLocale "%H:%M:%S"
       badge k
         | k == "line_crossed" = [hsx|<span class="badge badge-warn">line</span>|]
         | k == "zone_enter" = [hsx|<span class="badge badge-info">enter</span>|]

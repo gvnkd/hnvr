@@ -43,7 +43,7 @@ import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
 import Generated.ActualTypes.PrimaryKeys
-data User' = User {id :: (Id' "users"), email :: Text, passwordHash :: Text, isAdmin :: Bool, lockedAt :: (Maybe UTCTime), failedLoginAttempts :: Int, lastLoginAt :: (Maybe UTCTime), createdAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+data User' = User {id :: (Id' "users"), email :: Text, passwordHash :: Text, isAdmin :: Bool, lockedAt :: (Maybe UTCTime), failedLoginAttempts :: Int, lastLoginAt :: (Maybe UTCTime), timezone :: (Maybe Text), createdAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
 
 type User = User'
 
@@ -53,7 +53,7 @@ type instance GetModelByTableName "users" = User
 
 instance IHP.ModelSupport.Table (User') where
     tableName = "users"
-    columnNames = ["id","email","password_hash","is_admin","locked_at","failed_login_attempts","last_login_at","created_at"]
+    columnNames = ["id","email","password_hash","is_admin","locked_at","failed_login_attempts","last_login_at","timezone","created_at"]
     primaryKeyColumnNames = ["id"]
 
 

@@ -17,6 +17,8 @@
  *  - fullscreen live overlay: FLIP-animated expand from the clicked
  *    card, WHEP WebRTC playback via HNVR.whep()
  *  - event thumbnail lightbox
+ *  - viewer timezone: [data-utc-ts] timestamps, topbar clock and
+ *    datetime-local filters shown in the profile/browser zone
  */
 (function () {
   "use strict";
@@ -768,12 +770,199 @@
     });
   }
 
-  /* ── Topbar UTC clock ───────────────────────────────────────── */
+  /* ── Timezones ────────────────────────────────────────────────
+   * Times render server-side in UTC inside [data-utc-ts] spans; we
+   * rewrite them to the viewer's zone: the logged-in user's profile
+   * timezone (body[data-user-tz]) or the browser's zone when unset.
+   */
+  function browserTz() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    } catch (e) {
+      return "UTC";
+    }
+  }
+  HNVR.viewerTz = function () {
+    var t = document.body && document.body.getAttribute("data-user-tz");
+    return t || browserTz();
+  };
+  function tzLabel() {
+    var tz = HNVR.viewerTz();
+    if (tz === "UTC") return "UTC";
+    try {
+      // Short zone abbreviation (e.g. "MSK", "CEST") when the ICU
+      // data has one; otherwise the IANA name.
+      var parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        timeZoneName: "short",
+      }).formatToParts(new Date());
+      var named = parts.filter(function (p) {
+        return p.type === "timeZoneName";
+      })[0];
+      // Some ICU builds (e.g. headless chromium) have no named
+      // abbreviations and return "GMT+2" — prefer the IANA name then.
+      if (named && !/^[+-]/.test(named.value) && !/^GMT/.test(named.value))
+        return named.value;
+    } catch (e) {}
+    return tz;
+  }
+  HNVR.formatTs = function (iso, mode) {
+    var d = new Date(iso);
+    if (isNaN(d)) return iso;
+    var opts = {
+      timeZone: HNVR.viewerTz(),
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    };
+    if (mode !== "time") {
+      opts.year = "numeric";
+      opts.month = "2-digit";
+      opts.day = "2-digit";
+    }
+    try {
+      // sv-SE renders ISO-ordered "YYYY-MM-DD HH:mm:ss".
+      return new Intl.DateTimeFormat("sv-SE", opts).format(d);
+    } catch (e) {
+      return d.toISOString().replace("T", " ").slice(0, 19);
+    }
+  };
+  HNVR.applyTz = function (root) {
+    (root || document)
+      .querySelectorAll("[data-utc-ts]")
+      .forEach(function (el) {
+        el.textContent = HNVR.formatTs(
+          el.getAttribute("data-utc-ts"),
+          el.getAttribute("data-utc-ts-fmt")
+        );
+        el.setAttribute("title", HNVR.viewerTz());
+      });
+  };
+
+  /* datetime-local filter inputs: server parses the submitted value as
+   * UTC; display/edit in the viewer's zone instead. On load we convert
+   * the server-rendered UTC value to local; on submit we convert back. */
+  function initTzDateInputs() {
+    var inputs = Array.prototype.slice.call(
+      document.querySelectorAll("input[data-tz-dt]")
+    );
+    if (!inputs.length) return;
+    function pad(n) {
+      return (n < 10 ? "0" : "") + n;
+    }
+    function utcToLocal(v) {
+      var d = new Date(v + (v.length === 16 ? ":00Z" : "Z"));
+      if (isNaN(d)) return v;
+      var p = new Intl.DateTimeFormat("sv-SE", {
+        timeZone: HNVR.viewerTz(),
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(d);
+      return p.replace(" ", "T");
+    }
+    function localToUtc(v) {
+      var m = v.match(/^(\d+)-(\d+)-(\d+)T(\d+):(\d+)/);
+      if (!m) return v;
+      // Interpret the wall-clock fields in the viewer's zone by probing
+      // the offset for that instant.
+      var guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+      function offsetAt(ms) {
+        var s = new Intl.DateTimeFormat("sv-SE", {
+          timeZone: HNVR.viewerTz(),
+          hour12: false,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }).format(new Date(ms));
+        var p = s.match(/(\d+)-(\d+)-(\d+) (\d+):(\d+)/);
+        return Date.UTC(+p[1], +p[2] - 1, +p[3], +p[4], +p[5]) - ms;
+      }
+      var off = offsetAt(guess);
+      var utc = guess - off;
+      // One correction pass for DST-boundary probes.
+      var off2 = offsetAt(utc);
+      if (off2 !== off) utc = guess - off2;
+      var d = new Date(utc);
+      return (
+        d.getUTCFullYear() +
+        "-" +
+        pad(d.getUTCMonth() + 1) +
+        "-" +
+        pad(d.getUTCDate()) +
+        "T" +
+        pad(d.getUTCHours()) +
+        ":" +
+        pad(d.getUTCMinutes())
+      );
+    }
+    inputs.forEach(function (inp) {
+      if (inp.value) inp.value = utcToLocal(inp.value);
+    });
+    inputs.forEach(function (inp) {
+      var form = inp.closest("form");
+      if (!form || form.__tzDtWired) return;
+      form.__tzDtWired = true;
+      form.addEventListener("submit", function () {
+        form.querySelectorAll("input[data-tz-dt]").forEach(function (i) {
+          if (i.value) i.value = localToUtc(i.value);
+        });
+      });
+    });
+  }
+
+  /* ── Profile page: timezone dropdown ────────────────────────── */
+  function initProfileTz() {
+    var sel = document.querySelector("select[data-tz-select]");
+    document.querySelectorAll("[data-tz-browser]").forEach(function (el) {
+      el.textContent = browserTz();
+    });
+    if (!sel) return;
+    var current = sel.value;
+    var zones = [];
+    try {
+      zones = Intl.supportedValuesOf("timeZone");
+    } catch (e) {}
+    zones.forEach(function (z) {
+      if (z === current) return;
+      var opt = document.createElement("option");
+      opt.value = z;
+      opt.textContent = z;
+      if (z === browserTz()) opt.textContent = z + " (browser)";
+      sel.appendChild(opt);
+    });
+    document.querySelectorAll("[data-tz-use-browser]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var tz = browserTz();
+        var found = Array.prototype.slice.call(sel.options).some(function (o) {
+          if (o.value === tz) {
+            o.selected = true;
+            return true;
+          }
+          return false;
+        });
+        if (!found) {
+          var opt = document.createElement("option");
+          opt.value = tz;
+          opt.textContent = tz;
+          opt.selected = true;
+          sel.appendChild(opt);
+        }
+      });
+    });
+  }
+  /* ── Topbar clock (viewer's timezone) ───────────────────────── */
   function initClock() {
     var el = document.querySelector(".topbar .clock");
     if (!el) return;
     function tick() {
-      el.textContent = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";
+      el.textContent = HNVR.formatTs(new Date().toISOString()) + " " + tzLabel();
     }
     tick();
     setInterval(tick, 1000);
@@ -812,6 +1001,9 @@
     initLiveOverlay();
     initLightbox();
     initClock();
+    initTzDateInputs();
+    initProfileTz();
+    HNVR.applyTz(document);
     HNVR.setTheme(
       document.documentElement.getAttribute("data-theme") || "midnight"
     );

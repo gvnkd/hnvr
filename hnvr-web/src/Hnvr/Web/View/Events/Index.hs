@@ -24,6 +24,7 @@ import Data.UUID (UUID)
 import Generated.Types
 import Hnvr.Cv.Decode (cocoClassName)
 import Hnvr.Web.View.Layout (renderLayout)
+import Hnvr.Web.View.Time (tzTime)
 import IHP.ViewPrelude
 import Numeric (showFFloat)
 
@@ -97,11 +98,11 @@ instance View IndexView where
             </div>
             <div class="field">
               <label for="from">From</label>
-              <input class="input" id="from" name="from" type="datetime-local" value={fromMaybe "" fltFrom} />
+              <input class="input" id="from" name="from" type="datetime-local" data-tz-dt="1" value={fromMaybe "" fltFrom} />
             </div>
             <div class="field">
               <label for="to">To</label>
-              <input class="input" id="to" name="to" type="datetime-local" value={fromMaybe "" fltTo} />
+              <input class="input" id="to" name="to" type="datetime-local" data-tz-dt="1" value={fromMaybe "" fltTo} />
             </div>
             <button class="btn btn-primary" type="submit">Filter</button>
           </form>
@@ -117,7 +118,7 @@ instance View IndexView where
           <thead>
             <tr>
               <th data-no-sort="1"></th>
-              <th>Time (UTC)</th>
+              <th>Time</th>
               <th>Camera</th>
               <th>Kind</th>
               <th>Class</th>
@@ -168,7 +169,7 @@ instance View IndexView where
         [hsx|
         <tr data-href={playUrl ev}>
           <td>{thumb ev mThumbUrl}</td>
-          <td class="mono">{fmtTs ev.erTs}</td>
+          <td class="mono">{tzTime ev.erTs}</td>
           <td class="mono">{ev.erCameraSlug}</td>
           <td>{kindBadge ev.erKind}</td>
           <td>{className}</td>

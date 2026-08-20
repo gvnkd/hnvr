@@ -14,11 +14,11 @@ where
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime, diffUTCTime)
-import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Data.Word (Word64)
 import Generated.Types
 import Hnvr.Web.View.Layout (renderLayout)
+import Hnvr.Web.View.Time (tzTime)
 import IHP.ViewPrelude
 
 -- | One row of the recordings table, pre-aggregated by the controller
@@ -82,12 +82,12 @@ instance View IndexView where
             </select>
           </div>
           <div class="field">
-            <label>From (UTC)</label>
-            <input type="datetime-local" name="from" value={fromMaybe "" fltFrom} />
+            <label>From</label>
+            <input type="datetime-local" name="from" data-tz-dt="1" value={fromMaybe "" fltFrom} />
           </div>
           <div class="field">
-            <label>To (UTC)</label>
-            <input type="datetime-local" name="to" value={fromMaybe "" fltTo} />
+            <label>To</label>
+            <input type="datetime-local" name="to" data-tz-dt="1" value={fromMaybe "" fltTo} />
           </div>
           <div class="field">
             <label>Min duration (s)</label>
@@ -141,7 +141,7 @@ instance View IndexView where
               <thead>
                 <tr>
                   <th>Camera</th>
-                  <th>Start (UTC)</th>
+                  <th>Start</th>
                   <th>Duration</th>
                   <th>Host</th>
                   <th class="text-right">Size</th>
@@ -159,7 +159,7 @@ instance View IndexView where
         [hsx|
           <tr data-href={playUrl}>
             <td class="mono t-strong">{r.rrCameraSlug}</td>
-            <td class="mono">{fmtTs (r.rrStart)}</td>
+            <td class="mono">{tzTime (r.rrStart)}</td>
             <td class="mono">{fmtDur (r.rrStart) (r.rrEnd)}</td>
             <td>{hostBadges}</td>
             <td class="mono text-right">{fmtBytes (r.rrBytes)}</td>
@@ -246,7 +246,6 @@ instance View IndexView where
           prevUrl = "/Archive?page=" <> tshow (page - 1) <> queryString
           nextUrl = "/Archive?page=" <> tshow (page + 1) <> queryString
 
-      fmtTs = formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S"
       iso = T.pack . iso8601Show
       fmtDur a b =
         let total = floor (diffUTCTime b a) :: Int

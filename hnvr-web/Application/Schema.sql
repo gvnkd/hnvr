@@ -126,6 +126,8 @@ CREATE INDEX segments_pending_delete_idx ON segments (pending_delete_at)
 -- Phase 1 audit-fix: admin gate. IHP AuthSupport requires these exact column
 -- names: id, email, password_hash, locked_at, failed_login_attempts.
 -- is_admin is HNVR-specific (single admin user for v1; viewer role Phase 6).
+-- timezone: IANA name (e.g. Europe/Berlin) for web UI time display;
+-- NULL = browser-local client-side fallback (migration 0012).
 CREATE TABLE users (
     id                      UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     email                   TEXT NOT NULL UNIQUE,
@@ -134,6 +136,7 @@ CREATE TABLE users (
     locked_at               TIMESTAMP WITH TIME ZONE,
     failed_login_attempts   INT NOT NULL DEFAULT 0,
     last_login_at           TIMESTAMP WITH TIME ZONE,
+    timezone                TEXT,
     created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 

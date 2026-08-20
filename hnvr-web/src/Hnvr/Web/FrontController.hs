@@ -19,6 +19,7 @@ import Web.Controller.EventClips (EventClipsController (..))
 import Web.Controller.Events (EventsController (..))
 import Web.Controller.Hosts (HostsController (..))
 import Web.Controller.Live (LiveController (..))
+import Web.Controller.Profile (ProfileController (..))
 import Web.Controller.Ptz (PtzController (..))
 import Web.Controller.PtzPresets (PtzPresetsController (..))
 import Web.Controller.Rules (RulesController (..))
@@ -30,6 +31,7 @@ instance FrontController RootApplication where
     [ -- / → DashboardAction (also reachable at /Dashboard via AutoRoute)
       startPage DashboardAction,
       parseRoute @SessionsController,
+      parseRoute @ProfileController,
       parseRoute @DashboardController,
       parseRoute @CamerasController,
       parseRoute @HostsController,

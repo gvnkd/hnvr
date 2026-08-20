@@ -5,6 +5,7 @@
 
 module Hnvr.Web.View.Layout (renderLayout) where
 
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Generated.Types
@@ -32,7 +33,7 @@ renderLayout inner =
     <script src="/static/app.js"></script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2309090b'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%2338bdf8'/%3E%3C/svg%3E" />
   </head>
-  <body>
+  <body data-user-tz={userTzAttr}>
     <div class="shell">
       <aside class="sidenav">
         <button class="icon-btn nav-toggle" data-nav-toggle="1" aria-label="Toggle navigation" title="Toggle navigation">☰</button>
@@ -78,6 +79,11 @@ renderLayout inner =
     currentPath = cs (rawPathInfo ?request) :: Text
     isPrefix p = p `T.isPrefixOf` currentPath
 
+    -- Logged-in user's profile timezone (IANA name), empty when unset —
+    -- app.js falls back to the browser's zone. Consumed by the topbar
+    -- clock and the [data-utc-ts] timestamp rewriting.
+    userTzAttr = fromMaybe "" ((currentUserOrNothing :: Maybe User) >>= (.timezone))
+
     navItem href glyph label active =
       [hsx|
         <a href={href} class={navClass}>
@@ -107,7 +113,7 @@ renderLayout inner =
         [hsx|
           <span class="user-block">
             <span class="led led-on"></span>
-            <span class="sidenav-foot-label">{u.email}</span>
+            <a href="/ShowProfile" class="sidenav-foot-label" title="Profile settings">{u.email}</a>
             <span class="sidenav-foot-label">·</span>
             <a href="/DeleteSession">logout</a>
           </span>

@@ -10,6 +10,7 @@ import Generated.Types
 import Hnvr.Core.CameraStatus (CameraStatus (..))
 import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
+import Hnvr.Web.View.Time (tzTime)
 import IHP.ViewPrelude
 
 data ShowView = ShowView
@@ -131,8 +132,8 @@ instance View ShowView where
             <td class="mono">{d.fieldName}</td>
             <td class="mono">{d.desired}</td>
             <td class="mono">{d.observed}</td>
-            <td class="mono">{tshow d.firstSeenAt}</td>
-            <td class="mono">{tshow d.lastSeenAt}</td>
+            <td class="mono">{tzTime d.firstSeenAt}</td>
+            <td class="mono">{tzTime d.lastSeenAt}</td>
           </tr>
         |]
 
