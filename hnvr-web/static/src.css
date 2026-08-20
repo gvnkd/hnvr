@@ -269,6 +269,17 @@
   .user-block a:hover {
     color: var(--text-strong);
   }
+  .user-block .link-button {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+    color: var(--text-dim);
+  }
+  .user-block .link-button:hover {
+    color: var(--text-strong);
+  }
   .version-tag {
     @apply px-2 pt-1.5;
     font-family: theme("fontFamily.mono");

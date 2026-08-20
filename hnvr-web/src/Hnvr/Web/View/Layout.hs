@@ -115,7 +115,10 @@ renderLayout inner =
             <span class="led led-on"></span>
             <a href="/ShowProfile" class="sidenav-foot-label" title="Profile settings">{u.email}</a>
             <span class="sidenav-foot-label">·</span>
-            <a href="/DeleteSession">logout</a>
+            <form method="POST" action="/DeleteSession" style="display:inline">
+              <input type="hidden" name="_method" value="DELETE" />
+              <button type="submit" class="link-button">logout</button>
+            </form>
           </span>
         |]
       Nothing ->
