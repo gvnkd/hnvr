@@ -12,6 +12,7 @@
 module Hnvr.Core.Event
   ( CvEvent (..),
     ClipReady (..),
+    SnapshotWritten (..),
   )
 where
 
@@ -64,6 +65,25 @@ data ClipReady = ClipReady
     -- later rule edits must not retro-change existing clips.
     crRetentionHours :: !Int,
     crHost :: !HostId
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | Published by the snapshot writer (node-side) each time a periodic
+-- camera snapshot JPEG has been uploaded to S3 (archive-timeline
+-- thumbnail store, design_docs/12-timeline-archive.md). The leader's
+-- EventWriter turns it into a @camera_snapshots@ row. Field names are
+-- @sn@-prefixed so the envelope can never decode as 'CvEvent',
+-- 'ClipReady', or 'Hnvr.Core.Segment.SegmentWritten' (EventWriter tries
+-- those first).
+data SnapshotWritten = SnapshotWritten
+  { snCamera :: !CameraId,
+    snTs :: !UTCTime,
+    -- | S3 key of the uploaded JPEG
+    -- (@<slug>/snapshots/<YYYY-MM-DD>/<HH-MM-SS.mmm>.jpg@).
+    snObjectKey :: !Text,
+    snBytes :: !Int,
+    snHost :: !HostId
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

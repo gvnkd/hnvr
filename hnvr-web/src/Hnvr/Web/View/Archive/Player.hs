@@ -59,7 +59,7 @@ instance View PlayerView where
         (Just f, Just t) -> "Window " <> f <> " → " <> t
         _ -> "Most recent 1-hour window"
       cid = tshow (camera |> get #id)
-      archiveUrl = "/Archive"
+      archiveUrl = "/Timeline"
       liveUrl = "/ShowLive?cameraId=" <> cid
       editUrl = "/ShowCamera?cameraId=" <> cid
       -- IHP HSX doesn't splice {…} inside <script> tags (treats script

@@ -132,7 +132,7 @@ fetchAssignedCameras host = do
     rows <-
       PG.query
         conn
-        "SELECT c.id, c.slug, c.rtsp_url, c.rtsp_transport, c.record_audio, c.rtsp_sub_url, c.use_substream_for_analysis, c.substream_width, c.substream_height, c.analysis_fps, c.model_name, c.ptz_enabled, c.mgmt_proto, c.host, c.onvif_port, c.username, c.password_enc, c.password_nonce, c.ptz_profile_token, c.ptz_idle_timeout_s, hp.onvif_token FROM cameras c LEFT JOIN ptz_presets hp ON hp.id = c.ptz_home_preset_id WHERE c.assigned_host = ? AND c.enabled = TRUE"
+        "SELECT c.id, c.slug, c.rtsp_url, c.rtsp_transport, c.record_audio, c.rtsp_sub_url, c.use_substream_for_analysis, c.substream_width, c.substream_height, c.analysis_fps, c.model_name, c.ptz_enabled, c.mgmt_proto, c.host, c.onvif_port, c.username, c.password_enc, c.password_nonce, c.ptz_profile_token, c.ptz_idle_timeout_s, hp.onvif_token, c.snapshot_interval_sec FROM cameras c LEFT JOIN ptz_presets hp ON hp.id = c.ptz_home_preset_id WHERE c.assigned_host = ? AND c.enabled = TRUE"
         (Only host)
     ruleRows <-
       PG.query_
@@ -168,6 +168,7 @@ fetchAssignedCameras host = do
                   csSubWidth = fromIntegral <$> row.crSubW,
                   csSubHeight = fromIntegral <$> row.crSubH,
                   csAnalysisFps = fromIntegral row.crFps,
+                  csSnapshotIntervalSec = fromIntegral row.crSnapshotIntervalSec,
                   csModelName = row.crModelName,
                   csRules = M.findWithDefault [] row.crId rulesByCam,
                   csPtz = ptz
@@ -175,7 +176,7 @@ fetchAssignedCameras host = do
             ]
         Nothing -> pure []
 
--- | 21 columns exceeds pg-simple's tuple 'FromRow' instances
+-- | 22 columns exceeds pg-simple's tuple 'FromRow' instances
 -- (pitfall #122 class), so the row lands in a record via explicit
 -- 'field' reads.
 data CamRow = CamRow
@@ -199,13 +200,15 @@ data CamRow = CamRow
     crPasswordNonce :: !(Maybe (Binary ByteString)),
     crPtzProfileToken :: !(Maybe Text),
     crPtzIdleTimeoutS :: !Int,
-    crHomePresetToken :: !(Maybe Text)
+    crHomePresetToken :: !(Maybe Text),
+    crSnapshotIntervalSec :: !Int
   }
 
 instance FromRow CamRow where
   fromRow =
     CamRow
       <$> field
+      <*> field
       <*> field
       <*> field
       <*> field

@@ -20,6 +20,7 @@ import qualified Hnvr.Core.PtzSpec as PtzSpec
 import qualified Hnvr.Core.RecordingSpec as RecordingSpec
 import qualified Hnvr.Core.SegmentSpec as SegmentSpec
 import qualified Hnvr.Core.TimeSpec as TimeSpec
+import qualified Hnvr.Core.TimelineSpec as TimelineSpec
 import qualified Hnvr.Core.WhepSpec as WhepSpec
 import Test.Tasty (defaultMain, testGroup)
 
@@ -48,5 +49,6 @@ main =
         RecordingSpec.tests,
         SegmentSpec.tests,
         TimeSpec.tests,
+        TimelineSpec.tests,
         WhepSpec.tests
       ]

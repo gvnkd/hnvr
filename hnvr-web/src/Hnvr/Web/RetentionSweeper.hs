@@ -24,6 +24,7 @@ module Hnvr.Web.RetentionSweeper
   ( startRetentionSweeper,
     sweepOnce,
     sweepEventClips,
+    sweepCameraSnapshots,
     purgeClipObjects,
   )
 where
@@ -85,6 +86,7 @@ sweepOnce = do
           logInfo ("RetentionSweeper: sweeping " <> T.pack (show (length cams)) <> " camera(s)")
         forM_ cams (sweepCamera s3cfg conn)
         sweepEventClips s3cfg conn
+        sweepCameraSnapshots s3cfg conn
 
 -- | Sweep expired event clips (separated event video store) and resume
 -- stale UI-tombstoned clips (90 s grace, same pattern as PendingPurge).
@@ -129,6 +131,46 @@ purgeClipObjects s3cfg prefix = do
         logWarn ("RetentionSweeper: clip object delete failed for " <> key <> ": " <> T.pack (show e))
         pure 1
   pure (sum fails)
+
+-- | Sweep expired periodic camera snapshots (archive-timeline
+-- thumbnail store, design_docs/12-timeline-archive.md). Same
+-- trust-the-DB pattern as 'sweepCamera': rows past their camera's
+-- @retention_hours@ cutoff give up their S3 keys, then the rows.
+-- Snapshots have no tombstone flow (they're not user-deletable), so
+-- unlike event_clips there is no pending_delete grace case.
+sweepCameraSnapshots :: S3.S3Config -> PG.Connection -> IO ()
+sweepCameraSnapshots s3cfg conn = do
+  let ci = S3.connectInfo s3cfg
+      bucket = S3.s3cBucket s3cfg
+  keys <-
+    PG.query_
+      conn
+      "SELECT cs.object_key FROM camera_snapshots cs \
+      \ JOIN cameras c ON c.id = cs.camera_id \
+      \ WHERE cs.ts < NOW() - (c.retention_hours * INTERVAL '1 hour')"
+  forM_ keys $ \(Only key) ->
+    S3.deleteObject ci bucket key
+      `catch` \(e :: SomeException) ->
+        logWarn
+          ( "RetentionSweeper: S3 delete failed for "
+              <> key
+              <> ": "
+              <> T.pack (show e)
+          )
+  n <-
+    PG.execute_
+      conn
+      "DELETE FROM camera_snapshots cs USING cameras c \
+      \ WHERE cs.camera_id = c.id \
+      \   AND cs.ts < NOW() - (c.retention_hours * INTERVAL '1 hour')"
+  when (n > 0) $
+    logInfo
+      ( "RetentionSweeper: deleted "
+          <> T.pack (show n)
+          <> " camera snapshot(s) + "
+          <> T.pack (show (length keys))
+          <> " S3 object(s)"
+      )
 
 -- | Sweep one camera. Both queries use the same cutoff expression
 -- (@NOW() - retention_hours * INTERVAL '1 hour'@) so the S3 keys

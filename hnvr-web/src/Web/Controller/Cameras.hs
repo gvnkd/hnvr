@@ -35,6 +35,7 @@ import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (publishAssignTo, republishAssignAlways)
 import Hnvr.Web.OnvifSync (FormOptions, checkCameraDrift, fetchFormOptions, probePtz, pushCameraConfig, targetForCamera)
 import Hnvr.Web.OnvifSyncer (persistDrift)
+import Hnvr.Web.PendingPurge (forkCameraFullPurge)
 import Hnvr.Web.View.Cameras.Edit
 import Hnvr.Web.View.Cameras.Index
 import Hnvr.Web.View.Cameras.New
@@ -121,8 +122,10 @@ instance Controller CamerasController where
   action NewCameraAction = do
     -- newRecord defaults analysisFps to 0, which violates the form's
     -- min="1" and makes HTML5 validation silently block every submit.
-    -- Default to the documented 5 fps (design 03 §2b).
-    let camera = newRecord @Camera |> set #analysisFps 5
+    -- Default to the documented 5 fps (design 03 §2b). Same story for
+    -- snapshotIntervalSec: codegen 0 would disable snapshots outright —
+    -- default to 60 (design_docs/12-timeline-archive.md).
+    let camera = newRecord @Camera |> set #analysisFps 5 |> set #snapshotIntervalSec 60
     render NewView {..}
   action EditCameraAction {cameraId} = do
     camera <- fetch cameraId
@@ -131,7 +134,7 @@ instance Controller CamerasController where
   action CreateCameraAction = do
     let camera0 =
           newRecord @Camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours", "snapshotIntervalSec"]
         plaintext = paramOrDefault ("" :: Text) "password"
     (enc, nonce) <- liftIO (encryptPassword plaintext)
     let camera =
@@ -154,7 +157,7 @@ instance Controller CamerasController where
     camera <- fetch cameraId
     let camera' =
           camera
-            |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours", "onvifPort", "mgmtProto", "mainVideoEncoding", "mainVideoWidth", "mainVideoHeight", "mainVideoFps", "mainVideoBitrateKbps", "mainVideoGovLength", "subVideoEncoding", "subVideoWidth", "subVideoHeight", "subVideoFps", "subVideoBitrateKbps", "subVideoGovLength", "audioEncoding", "audioBitrateKbps", "audioSampleRateKhz", "ptzProfileToken", "ptzIdleTimeoutS"]
+            |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours", "onvifPort", "mgmtProto", "mainVideoEncoding", "mainVideoWidth", "mainVideoHeight", "mainVideoFps", "mainVideoBitrateKbps", "mainVideoGovLength", "subVideoEncoding", "subVideoWidth", "subVideoHeight", "subVideoFps", "subVideoBitrateKbps", "subVideoGovLength", "audioEncoding", "audioBitrateKbps", "audioSampleRateKhz", "ptzProfileToken", "ptzIdleTimeoutS", "snapshotIntervalSec"]
         plaintext = paramOrNothing "password" :: Maybe Text
     now <- liftIO getCurrentTime
     camera'' <- case plaintext of
@@ -205,8 +208,13 @@ instance Controller CamerasController where
       forM_ camera.assignedHost $ \host ->
         publishAssignTo bus camera host Nothing
     deleteRecord camera
+    -- The row delete FK-cascades segments/events/snapshots/clips; purge
+    -- the camera's whole S3 prefix (<slug>/) asynchronously so storage
+    -- doesn't fill with orphans (forkCameraFullPurge snapshots the key
+    -- set first — a same-slug recreation mid-purge is safe).
+    liftIO (forkCameraFullPurge camera.slug)
     audit currentUserUuid "camera.delete" "camera" (Just (camUuid camera)) (Just (object ["slug" .= camera.slug]))
-    setSuccessMessage "Camera deleted"
+    setSuccessMessage "Camera deleted — recordings purge from storage in the background"
     redirectTo CamerasAction
 
   -- \| POST /ToggleCameraEnabled?cameraId=… — one-click enable/disable

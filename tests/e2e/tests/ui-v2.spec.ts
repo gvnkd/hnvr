@@ -78,27 +78,22 @@ test.describe('UI v2', () => {
     await expect(page.locator('#live-overlay')).toBeHidden();
   });
 
-  test('archive table is sortable + rows clickable', async ({loggedInPage: page}) => {
-    await page.goto('/Archive');
-    const rows = page.locator('#archive-table tbody tr');
-    if ((await rows.count()) === 0) {
-      await expect(page.locator('.empty')).toContainText('No recordings');
-      return;
-    }
-    const href = await rows.first().getAttribute('data-href');
-    expect(href).toMatch(/\/PlayerArchive\?cameraId=/);
-    // Sort header click decorates th with aria-sort.
-    await page.locator('#archive-table thead th', {hasText: 'Start'}).click();
-    await expect(
-      page.locator('#archive-table thead th', {hasText: 'Start'})
-    ).toHaveAttribute('aria-sort', 'ascending');
+  test('archive timeline shell renders tiles + canvas', async ({loggedInPage: page}) => {
+    await page.goto('/Timeline');
+    await expect(page.locator('.section-h').first()).toContainText('Archive timeline');
+    await expect(page.locator('[data-timeline]')).toBeVisible();
+    await expect(page.locator('[data-tl-canvas]')).toBeVisible();
+    // One tile per camera; toggles default on.
+    const tiles = page.locator('[data-tl-tile]');
+    expect(await tiles.count()).toBeGreaterThan(0);
+    await expect(tiles.first().locator('[data-tl-toggle]')).toBeChecked();
   });
 
-  test('events table: sortable + rows deep-link to player', async ({loggedInPage: page}) => {
+  test('events table: sortable + rows deep-link to timeline', async ({loggedInPage: page}) => {
     await page.goto('/Events');
     const rows = page.locator('#events-table tbody tr');
     test.skip((await rows.count()) === 0, 'no events in DB');
     const href = await rows.first().getAttribute('data-href');
-    expect(href).toMatch(/\/PlayerArchive\?cameraId=.*&t=/);
+    expect(href).toMatch(/\/Timeline\?from=.*&t=/);
   });
 });

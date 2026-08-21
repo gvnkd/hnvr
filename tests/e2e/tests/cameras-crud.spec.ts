@@ -102,4 +102,23 @@ test.describe('Cameras CRUD', () => {
     await page.goto('/Cameras');
     await expect(page.locator('tbody')).not.toContainText(slug);
   });
+
+  test('edit page Delete Camera button removes the camera (with confirm)', async ({loggedInPage: page}) => {
+    const slug = uniqueSlug();
+    await createCamera(page, slug, `E2E delete-ui ${slug}`);
+
+    await page.goto('/Cameras');
+    await page.locator('tr', {hasText: slug}).getByRole('link', {name: 'Edit'}).click();
+    await page.waitForURL(/\/EditCamera\?cameraId=/);
+
+    // Danger-zone form: _method=DELETE override + data-confirm gate.
+    const form = page.locator('form[action^="/DeleteCamera"]');
+    await expect(form.locator('input[name="_method"]')).toHaveValue('DELETE');
+    page.once('dialog', (d) => d.accept());
+    await form.getByRole('button', {name: /delete camera/i}).click();
+
+    // 302 → /Cameras, row gone.
+    await page.waitForURL(/\/Cameras$/);
+    await expect(page.locator('tbody')).not.toContainText(slug);
+  });
 });

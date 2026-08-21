@@ -45,6 +45,11 @@ module Generated.Statements (
     module Generated.Statements.UpdateEventClipEvent,
     module Generated.Statements.FetchEventClipEvent,
     module Generated.Statements.CreateManyEventClipEvent,
+    module Generated.Statements.RowDecoderCameraSnapshot,
+    module Generated.Statements.CreateCameraSnapshot,
+    module Generated.Statements.UpdateCameraSnapshot,
+    module Generated.Statements.FetchCameraSnapshot,
+    module Generated.Statements.CreateManyCameraSnapshot,
     module Generated.Statements.RowDecoderAuditLog,
     module Generated.Statements.CreateAuditLog,
     module Generated.Statements.UpdateAuditLog,
@@ -106,6 +111,11 @@ import qualified Generated.Statements.CreateEventClipEvent
 import qualified Generated.Statements.UpdateEventClipEvent
 import qualified Generated.Statements.FetchEventClipEvent
 import qualified Generated.Statements.CreateManyEventClipEvent
+import qualified Generated.Statements.RowDecoderCameraSnapshot
+import qualified Generated.Statements.CreateCameraSnapshot
+import qualified Generated.Statements.UpdateCameraSnapshot
+import qualified Generated.Statements.FetchCameraSnapshot
+import qualified Generated.Statements.CreateManyCameraSnapshot
 import qualified Generated.Statements.RowDecoderAuditLog
 import qualified Generated.Statements.CreateAuditLog
 import qualified Generated.Statements.UpdateAuditLog

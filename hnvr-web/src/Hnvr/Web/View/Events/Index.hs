@@ -238,19 +238,21 @@ instance View IndexView where
         | k == "zone_motion" = [hsx|<span class="badge badge-warn">zone motion</span>|]
         | otherwise = [hsx|<span class="badge badge-mute">{k}</span>|]
 
-      -- Deep-link into the archive player: 30 s window either side of
-      -- the event, seek target = the event ts (parseWhen-compatible).
+      -- Deep-link into the archive timeline: 1 h window either side of
+      -- the event, cursor (and auto-play) at the event ts, event camera
+      -- as the active (streaming) tile (parseWhen-compatible;
+      -- design_docs/12-timeline-archive.md).
       playUrl ev =
-        let (from, to, t) = (addUTCTime (-30) ev.erTs, addUTCTime 30 ev.erTs, ev.erTs)
+        let (from, to, t) = (addUTCTime (-3600) ev.erTs, addUTCTime 3600 ev.erTs, ev.erTs)
             fmt = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S"
-         in "/PlayerArchive?cameraId="
-              <> tshow ev.erCameraUuid
-              <> "&from="
+         in "/Timeline?from="
               <> fmt from
               <> "&to="
               <> fmt to
               <> "&t="
               <> fmt t
+              <> "&active="
+              <> tshow ev.erCameraUuid
 
       fmtTs = T.pack . formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S"
 

@@ -7,9 +7,10 @@
 -- Draws track boxes onto the frame's RGB pixels and PNG-encodes via
 -- JuicyPixels. Roadmap says "MJPEG over WebSocket" — we deviate
 -- deliberately: multipart/x-mixed-replace with PNG parts works with a
--- plain @<img>@ tag (no JS), and JuicyPixels has no JPEG *encoder*
--- (decode-only), so PNG keeps the pipeline pure-Haskell. Dev-only
--- view; bandwidth is irrelevant on LAN.
+-- plain @<img>@ tag (no JS). JuicyPixels gained a JPEG encoder in
+-- 3.2.4 ('encodeJpegAtQuality'), which the periodic snapshot store
+-- (design_docs/12-timeline-archive.md) uses — PNG remains for the
+-- debug view and event thumbnails.
 --
 -- Track IDs are color-coded (deterministic palette by id) rather than
 -- text-rendered — no font dependency. The HTML page lists the same
@@ -18,10 +19,12 @@ module Hnvr.Cv.DebugRender
   ( trackColor,
     trackColorCss,
     renderDebugPng,
+    renderJpeg,
   )
 where
 
-import Codec.Picture (Image (..), PixelRGB8 (..), encodePng)
+import Codec.Picture (Image (..), PixelRGB8 (..), PixelYCbCr8, encodeJpegAtQuality, encodePng)
+import Codec.Picture.Types (convertImage)
 import Control.Monad (forM_)
 import Control.Monad.ST (ST, runST)
 import qualified Data.ByteString.Lazy as BL
@@ -67,6 +70,18 @@ renderDebugPng Frame {frameWidth = w, frameHeight = h, frameRgb = rgb} tracks = 
   let img :: Image PixelRGB8
       img = Image {imageWidth = w, imageHeight = h, imageData = frozen}
   pure $ encodePng img
+
+-- | Bare frame (no overlay), JPEG-encoded at the given quality
+-- (0-100). Used by the periodic snapshot store — ~10x smaller than
+-- PNG at analysis resolution, and snapshots are written once per
+-- 'Hnvr.Core.CameraSnapshot.csSnapshotIntervalSec', not per event.
+renderJpeg :: Int -> Frame -> BL.ByteString
+renderJpeg quality Frame {frameWidth = w, frameHeight = h, frameRgb = rgb} =
+  let img :: Image PixelRGB8
+      img = Image {imageWidth = w, imageHeight = h, imageData = rgb}
+      ycbcr :: Image PixelYCbCr8
+      ycbcr = convertImage img
+   in encodeJpegAtQuality (fromIntegral (max 0 (min 100 quality))) ycbcr
 
 -- | 2 px rectangle outline, edges clamped inside the frame.
 drawBox :: MV.MVector s Word8 -> Int -> Int -> PixelRGB8 -> Box Float -> ST s ()

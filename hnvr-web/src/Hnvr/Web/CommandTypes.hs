@@ -32,7 +32,10 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
-import Generated.Types
+-- Generated.Types gained a CameraSnapshot row type (camera_snapshots
+-- table, migration 0013) which collides with the wire type below —
+-- the row type is unused here.
+import Generated.Types hiding (CameraSnapshot)
 import Hnvr.Core.CameraSnapshot
   ( CameraSnapshot (..),
     PtzSnapshot (..),
@@ -162,6 +165,7 @@ projectCameraWithRules rules cam =
                 csSubWidth = fromIntegral <$> cam.substreamWidth,
                 csSubHeight = fromIntegral <$> cam.substreamHeight,
                 csAnalysisFps = fromIntegral cam.analysisFps,
+                csSnapshotIntervalSec = fromIntegral cam.snapshotIntervalSec,
                 csModelName = cam.modelName,
                 csRules = rules,
                 csPtz = ptz

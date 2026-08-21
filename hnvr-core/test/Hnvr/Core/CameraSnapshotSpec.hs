@@ -9,7 +9,7 @@
 -- for byte.
 module Hnvr.Core.CameraSnapshotSpec (tests) where
 
-import Data.Aeson (Value (..), decode, encode, object, (.=))
+import Data.Aeson (Value (..), decode, encode, object, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KM
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
@@ -72,6 +72,12 @@ tests =
         decode (encode rs) @?= Just rs,
       testCase "CameraSnapshot JSON roundtrip" $
         decode (encode sampleSnapshot) @?= Just sampleSnapshot,
+      testCase "missing csSnapshotIntervalSec decodes as 0 (old leader)" $
+        case toJSON sampleSnapshot of
+          Object o ->
+            decode (encode (Object (KM.delete "csSnapshotIntervalSec" o)))
+              @?= Just sampleSnapshot {csSnapshotIntervalSec = 0}
+          _ -> assertBool "expected top-level object" False,
       testCase "CameraSnapshotBatch JSON roundtrip" $
         decode (encode sampleBatch) @?= Just sampleBatch,
       testCase "batch wire shape is a cameras-keyed object" $
@@ -101,6 +107,7 @@ sampleSnapshot =
       csSubWidth = Just 720,
       csSubHeight = Just 480,
       csAnalysisFps = 5,
+      csSnapshotIntervalSec = 60,
       csModelName = "yolov8n-320",
       csRules = [],
       csPtz = Nothing

@@ -11,7 +11,7 @@ import Data.Aeson (decode, encode, object, (.=))
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), secondsToDiffTime)
 import qualified Data.UUID as UUID
-import Hnvr.Core.Event (CvEvent (..))
+import Hnvr.Core.Event (CvEvent (..), SnapshotWritten (..))
 import Hnvr.Core.Id (CameraId (..), HostId (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -23,8 +23,22 @@ tests =
     [ testCase "CvEvent JSON roundtrip (fully populated)" $
         decode (encode sampleEvent) @?= Just sampleEvent,
       testCase "CvEvent JSON roundtrip (minimal — all Maybe fields Nothing)" $
-        decode (encode minimalEvent) @?= Just minimalEvent
+        decode (encode minimalEvent) @?= Just minimalEvent,
+      testCase "SnapshotWritten JSON roundtrip" $
+        decode (encode sampleSnapshotWritten) @?= Just sampleSnapshotWritten,
+      testCase "SnapshotWritten never decodes as CvEvent (sn* prefix)" $
+        (decode (encode sampleSnapshotWritten) :: Maybe CvEvent) @?= Nothing
     ]
+
+sampleSnapshotWritten :: SnapshotWritten
+sampleSnapshotWritten =
+  SnapshotWritten
+    { snCamera = CameraId sampleUuid,
+      snTs = ts,
+      snObjectKey = "floor_2_5/snapshots/2026-08-14/12-30-45.123.jpg",
+      snBytes = 34120,
+      snHost = HostId "hnvr-2"
+    }
 
 -- ---- fixtures ------------------------------------------------------
 

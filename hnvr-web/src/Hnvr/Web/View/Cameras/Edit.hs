@@ -97,6 +97,11 @@ instance View EditView where
               <label><input type="checkbox" name="useSubstreamForAnalysis" checked={camera.useSubstreamForAnalysis} /> use sub-stream for CV analysis</label>
             </div>
             {intFieldFor "analysisFps" "Analysis FPS" (Just camera.analysisFps) "Frames per second through the detector (1–15)"}
+            <div class="field">
+              <label>Snapshot interval (seconds)</label>
+              <input class="input" type="number" name="snapshotIntervalSec" value={tshow camera.snapshotIntervalSec} min="0" max="3600" />
+              <div class="hint">Periodic JPEG for the archive timeline thumbnails — 0 disables</div>
+            </div>
 
             <div class="field">
               <label>Analysis model</label>
@@ -159,6 +164,21 @@ instance View EditView where
               <a class="btn btn-ghost" href={showUrl}>Cancel</a>
             </div>
           </form>
+
+          <div class="card mt-4">
+            <div class="card-header">Danger zone</div>
+            <div class="card-body">
+              <p class="text-sm muted mb-4">
+                Deleting the camera stops its worker immediately, removes ALL its database history
+                (segments, events, snapshots, rules, presets — FK cascade), and purges every stored
+                object under its S3 prefix in the background.
+              </p>
+              <form method="POST" action={deleteUrl camera} data-confirm={"Delete camera " <> camera.slug <> "? All recordings and history are permanently removed."}>
+                <input type="hidden" name="_method" value="DELETE" />
+                <button class="btn btn-danger" type="submit">Delete Camera</button>
+              </form>
+            </div>
+          </div>
           <script>
             document.querySelectorAll("select[data-res-select]").forEach(function (sel) {
               sel.addEventListener("change", function () {
@@ -177,6 +197,10 @@ instance View EditView where
             Nothing -> [hsx| <span class="t-warn">Camera unreachable or unmanaged — free-text inputs shown; values are validated on push only.</span>|]
 
       updateUrl cam = "/UpdateCamera?cameraId=" <> tshow (cam |> get #id)
+
+      -- \| AutoRoute maps Delete* to HTTP DELETE; plain forms use the
+      -- _method override (same pattern as the layout's logout form).
+      deleteUrl cam = "/DeleteCamera?cameraId=" <> tshow (cam |> get #id)
 
       -- \| One video stream section. With live options: dropdowns for
       -- encoding + resolution (a select feeding hidden width/height

@@ -29,6 +29,7 @@ library
     Hnvr.Core.Recording
     Hnvr.Core.Segment
     Hnvr.Core.Time
+    Hnvr.Core.Timeline
     Hnvr.Core.Whep
 
   build-depends:
@@ -84,6 +85,7 @@ test-suite hnvr-core-test
     Hnvr.Core.PtzSpec
     Hnvr.Core.RecordingSpec
     Hnvr.Core.SegmentSpec
+    Hnvr.Core.TimelineSpec
     Hnvr.Core.TimeSpec
     Hnvr.Core.WhepSpec
 

@@ -45,7 +45,7 @@ renderLayout inner =
         <div class="nav-section">Monitor</div>
         {navItem "/" "▦" "Dashboard" (currentPath == "/" || currentPath == "/Dashboard")}
         {navItem "/Events" "◈" "Events" (isPrefix "/Events")}
-        {navItem "/Archive" "▤" "Archive" (isPrefix "/Archive" || isPrefix "/PlayerArchive")}
+        {navItem "/Timeline" "◷" "Archive" (isPrefix "/Timeline" || isPrefix "/PlayerArchive")}
         <div class="nav-section">Configure</div>
         {navItem "/Cameras" "◫" "Cameras" (isPrefix "/Cameras" || isPrefix "/NewCamera" || isPrefix "/EditCamera" || isPrefix "/ShowCamera")}
         {navItem "/Rules" "⌖" "Rules" (isPrefix "/Rules" || isPrefix "/NewRule" || isPrefix "/EditRule")}

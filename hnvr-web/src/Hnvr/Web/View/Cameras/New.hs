@@ -61,6 +61,11 @@ instance View NewView where
               <label><input type="checkbox" name="useSubstreamForAnalysis" checked={camera.useSubstreamForAnalysis} /> use sub-stream for CV analysis</label>
             </div>
             {intField "analysisFps" "Analysis FPS" camera.analysisFps "Frames per second through the detector (1–15)"}
+            <div class="field">
+              <label>Snapshot interval (seconds)</label>
+              <input class="input" type="number" name="snapshotIntervalSec" value={tshow camera.snapshotIntervalSec} min="0" max="3600" />
+              <div class="hint">Periodic JPEG for the archive timeline thumbnails — 0 disables</div>
+            </div>
 
             <div class="field">
               <label>Analysis model</label>

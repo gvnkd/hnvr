@@ -25,6 +25,7 @@ import Web.Controller.PtzPresets (PtzPresetsController (..))
 import Web.Controller.Rules (RulesController (..))
 import Web.Controller.Sessions (SessionsController (..))
 import Web.Controller.Stats (StatsController (..))
+import Web.Controller.Timeline (TimelineController (..))
 
 instance FrontController RootApplication where
   controllers =
@@ -44,7 +45,8 @@ instance FrontController RootApplication where
       parseRoute @PtzController,
       parseRoute @PtzPresetsController,
       parseRoute @StatsController,
-      parseRoute @AuditLogController
+      parseRoute @AuditLogController,
+      parseRoute @TimelineController
     ]
 
 instance Worker RootApplication where

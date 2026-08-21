@@ -29,6 +29,7 @@ where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
 import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -100,6 +101,9 @@ data CameraSnapshot = CameraSnapshot
     csSubWidth :: !(Maybe Int),
     csSubHeight :: !(Maybe Int),
     csAnalysisFps :: !Int,
+    -- | Periodic snapshot interval in seconds (archive-timeline
+    -- thumbnail store); 0 = snapshots disabled for this camera.
+    csSnapshotIntervalSec :: !Int,
     -- | Bare model name (e.g. @yolov8n-320@); the receiving host
     -- resolves it to @<model-dir>/<name>.onnx@ (design 04
     -- §"Model: YOLOv8n" — per-camera model override).
@@ -134,6 +138,9 @@ instance FromJSON CameraSnapshot where
       <*> o .: "csSubWidth"
       <*> o .: "csSubHeight"
       <*> o .: "csAnalysisFps"
+      -- Absent on pre-timeline leaders: default to disabled (0), the
+      -- safe direction — snapshots are additive, never required.
+      <*> fmap (fromMaybe 0) (o .:? "csSnapshotIntervalSec")
       <*> o .: "csModelName"
       <*> o .: "csRules"
       <*> o .:? "csPtz"

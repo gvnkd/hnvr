@@ -116,6 +116,11 @@ ptzSql = $(embedFile "migrations/0011-ptz.sql")
 userTimezoneSql :: ByteString
 userTimezoneSql = $(embedFile "migrations/0012-user-timezone.sql")
 
+-- | Periodic snapshot store for the archive timeline: camera_snapshots
+-- table + cameras.snapshot_interval_sec. See the file header.
+cameraSnapshotsSql :: ByteString
+cameraSnapshotsSql = $(embedFile "migrations/0013-camera-snapshots.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -183,6 +188,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0012-user-timezone" userTimezoneSql) True conn
     handleResult "0012-user-timezone" tzRes
+    snapsRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0013-camera-snapshots" cameraSnapshotsSql) True conn
+    handleResult "0013-camera-snapshots" snapsRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

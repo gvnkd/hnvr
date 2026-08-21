@@ -78,6 +78,7 @@ CREATE TABLE cameras (
     ptz_home_preset_id  UUID,
     ptz_idle_timeout_s  INT NOT NULL DEFAULT 30,
     ptz_viewer_control  BOOLEAN NOT NULL DEFAULT FALSE,
+    snapshot_interval_sec INT NOT NULL DEFAULT 60,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     FOREIGN KEY (assigned_host) REFERENCES hosts(id) ON DELETE SET NULL
@@ -231,6 +232,24 @@ CREATE TABLE event_clip_events (
 );
 
 CREATE INDEX event_clip_events_event_idx ON event_clip_events (event_id);
+
+-- Periodic per-camera snapshots for the unified archive timeline
+-- (design_docs/12-timeline-archive.md). Produced by the node-side
+-- SnapshotWriter from the analysis decode stream; swept with the camera's
+-- retention_hours. UNIQUE (camera_id, ts) = idempotent inserts.
+CREATE TABLE camera_snapshots (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    camera_id   UUID NOT NULL,
+    ts          TIMESTAMP WITH TIME ZONE NOT NULL,
+    object_key  TEXT NOT NULL,
+    bytes       BIGINT NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (camera_id, ts),
+    FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE
+);
+
+CREATE INDEX camera_snapshots_cam_ts_idx
+    ON camera_snapshots (camera_id, ts DESC);
 
 -- Phase 4: admin action audit log.
 CREATE TABLE audit_log (

@@ -1152,6 +1152,81 @@
   100% { opacity: 1; transform: none; }
 }
 
+/* ── Archive timeline (/Timeline, design_docs/12) ────────────── */
+@layer components {
+  .tl-rangebar {
+    @apply flex flex-wrap items-center gap-2;
+  }
+  .tl-custom {
+    @apply flex items-center gap-2;
+  }
+  .tl-cursor-label {
+    @apply ml-auto text-sm font-mono;
+  }
+  .tl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    @apply gap-3;
+  }
+  .tl-tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-panel);
+    cursor: pointer;
+  }
+  .tl-tile.tl-active {
+    border-color: var(--accent);
+    box-shadow: var(--glow-accent);
+  }
+  .tl-tile-head {
+    @apply flex items-center justify-between px-3 py-2;
+    border-bottom: 1px solid var(--border);
+  }
+  .tl-tile-slug {
+    @apply font-mono text-sm;
+    color: var(--text);
+  }
+  .tl-tile-toggle {
+    @apply flex items-center gap-1 text-xs cursor-pointer select-none;
+    color: var(--text-dim);
+  }
+  .tl-tile-body {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: #000;
+  }
+  .tl-tile-body img {
+    @apply w-full h-full object-cover block;
+  }
+  .tl-tile-video {
+    @apply w-full h-full object-cover block;
+    background: #000;
+  }
+  .tl-tile-placeholder {
+    @apply absolute inset-0 flex items-center justify-center text-sm font-mono;
+    color: var(--text-dim);
+  }
+  .tl-tile-foot {
+    @apply px-3 py-1.5 flex items-center justify-between;
+    border-top: 1px solid var(--border);
+  }
+  .tl-purge-form {
+    display: inline;
+  }
+  .tl-purge-btn {
+    color: var(--rec);
+  }
+  .tl-canvas-wrap {
+    @apply w-full select-none;
+  }
+  .tl-canvas {
+    @apply block w-full cursor-crosshair;
+    touch-action: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

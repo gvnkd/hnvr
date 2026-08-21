@@ -121,6 +121,8 @@ import qualified Hnvr.Nats.Bus as Bus
 import qualified Hnvr.Nats.Subjects as Subjects
 import Hnvr.Node.ClipRecorder (ClipState)
 import qualified Hnvr.Node.ClipRecorder as Clip
+import Hnvr.Node.SnapshotWriter (SnapshotState)
+import qualified Hnvr.Node.SnapshotWriter as SnapWr
 import Hnvr.Onvif.Client (OnvifCreds (..))
 import Hnvr.Ptz.Controller (PtzControllerConfig (..), startPtzController)
 import qualified Hnvr.Ptz.Onvif as Ptz
@@ -141,7 +143,10 @@ data CaptureSupervisor = CaptureSupervisor
     -- | PTZ controllers (Phase 5): one per PTZ-enabled camera.
     csPtz :: !(IORef (Map CameraId PtzHandle)),
     -- | Event-clip recorder state (ring buffers + open clips).
-    csClipState :: !ClipState
+    csClipState :: !ClipState,
+    -- | Periodic snapshot writer state ('Nothing' when
+    -- @HNVR_DISABLE_SNAPSHOTWRITER=1@).
+    csSnapshots :: !(Maybe SnapshotState)
   }
 
 -- | One PTZ controller = command loop + idle ticker.
@@ -179,13 +184,16 @@ startCaptureSupervisor cfg = do
   aRef <- newIORef Map.empty
   pRef <- newIORef Map.empty
   clipState <- Clip.newClipState
+  snapshots <- do
+    disabled <- (== Just "1") <$> lookupEnv "HNVR_DISABLE_SNAPSHOTWRITER"
+    if disabled then pure Nothing else Just <$> SnapWr.newSnapshotState
   -- SpoolDrainer is process-wide (not per-camera) so it can clean up
   -- after camera reassignments too. Started here so it shares the
   -- supervisor's CaptureConfig (capS3, capBucket, capSpoolDir).
   startSpoolDrainer cfg
   Clip.startClipTicker cfg clipState
   logInfo "CaptureSupervisor: started"
-  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csClipState = clipState})
+  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csClipState = clipState, csSnapshots = snapshots})
 
 -- | Idempotent: starts a worker for the given camera. If a worker is
 -- already running for the same 'CameraId', it is stopped first (so
@@ -367,6 +375,7 @@ analysisSink ::
   IO ()
 analysisSink sup snap rules clipRules rulesRef latest frame tracks = do
   atomically (writeTVar latest (Just (frame, tracks)))
+  forM_ sup.csSnapshots $ \st -> SnapWr.maybeSnapshot st sup.csConfig snap frame
   evs <-
     atomicModifyIORef' rulesRef $ \st ->
       evalTracks st rules (frameWidth frame) (frameHeight frame) tracks (frameTimestamp frame)

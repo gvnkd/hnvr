@@ -28,13 +28,14 @@
 module Hnvr.Web.PendingPurge
   ( startPendingPurgeSweeper,
     forkCameraPurge,
+    forkCameraFullPurge,
   )
 where
 
 import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException, bracket, catch)
+import Control.Exception (SomeException, bracket, catch, try)
 import Control.Monad (forM, forM_, forever, unless, when)
 import qualified Data.ByteString.Char8 as BSC
 import Data.List (nub, (\\))
@@ -111,6 +112,49 @@ forkCameraPurge cameraId = do
           bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn -> do
             batches <- listPendingBatches conn (Just cameraId) 0
             forM_ batches (purgeBatch s3cfg conn)
+
+-- | Fork a full-prefix purge for a DELETED camera: every object under
+-- @<slug>/@ — segments (incl. @init.mp4@), event thumbnails, clips,
+-- timeline snapshots. The DB rows are already cascade-gone when this
+-- runs (the controller calls it after 'deleteRecord'), so unlike
+-- 'purgeBatch' there is nothing to verify against: per-key failures
+-- are logged and dropped, and the stragglers stay orphaned (manual
+-- @mc rm --recursive@ is the recovery).
+--
+-- The key set is snapshotted by the initial listing: a camera
+-- re-created under the same slug while the purge runs keeps everything
+-- it writes after that listing. Fragments in flight from the
+-- just-stopped worker can land after the listing and remain orphaned
+-- — accepted; same exposure class as pre-existing orphan handling.
+forkCameraFullPurge :: Text -> IO ()
+forkCameraFullPurge slug = do
+  _ <- async (worker `catch` \(e :: SomeException) -> logError ("PendingPurge: full purge failed for " <> slug <> ": " <> T.pack (show e)))
+  pure ()
+  where
+    worker = do
+      mS3 <- S3.readS3Config
+      case mS3 of
+        Nothing -> logWarn ("PendingPurge: S3 config missing; " <> slug <> " objects stay orphaned")
+        Just s3cfg -> do
+          let ci = S3.connectInfo s3cfg
+              bucket = S3.s3cBucket s3cfg
+          keys <- S3.listObjectKeys ci bucket (slug <> "/")
+          fails <- forM keys $ \k -> do
+            r <- try (S3.deleteObject ci bucket k)
+            case r of
+              Right () -> pure (0 :: Int)
+              Left (e :: SomeException) -> do
+                logWarn ("PendingPurge: delete failed for " <> k <> ": " <> T.pack (show e))
+                pure 1
+          logInfo
+            ( "PendingPurge: full purge "
+                <> slug
+                <> ": deleted "
+                <> T.pack (show (length keys - sum fails))
+                <> " object(s), "
+                <> T.pack (show (sum fails))
+                <> " failed"
+            )
 
 -- | One sweeper pass over all cameras' stale batches.
 sweepOnce :: IO ()

@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:          hnvr-web
-version:       0.12.0.1
+version:       0.14.3.0
 synopsis:
   HNVR leader (IHP web + event writer + MediaMTX sync) and node binaries
 
@@ -13,6 +13,7 @@ library
     Generated.ActualTypes.AuditLog
     Generated.ActualTypes.Camera
     Generated.ActualTypes.CameraDrift
+    Generated.ActualTypes.CameraSnapshot
     Generated.ActualTypes.Event
     Generated.ActualTypes.EventClip
     Generated.ActualTypes.EventClipEvent
@@ -29,6 +30,8 @@ library
     Generated.CameraDrift
     Generated.CameraDriftInclude
     Generated.CameraInclude
+    Generated.CameraSnapshot
+    Generated.CameraSnapshotInclude
     Generated.Enums
     Generated.Event
     Generated.EventClip
@@ -50,6 +53,7 @@ library
     Generated.Statements.CreateAuditLog
     Generated.Statements.CreateCamera
     Generated.Statements.CreateCameraDrift
+    Generated.Statements.CreateCameraSnapshot
     Generated.Statements.CreateEvent
     Generated.Statements.CreateEventClip
     Generated.Statements.CreateEventClipEvent
@@ -57,6 +61,7 @@ library
     Generated.Statements.CreateManyAuditLog
     Generated.Statements.CreateManyCamera
     Generated.Statements.CreateManyCameraDrift
+    Generated.Statements.CreateManyCameraSnapshot
     Generated.Statements.CreateManyEvent
     Generated.Statements.CreateManyEventClip
     Generated.Statements.CreateManyEventClipEvent
@@ -74,6 +79,7 @@ library
     Generated.Statements.FetchAuditLog
     Generated.Statements.FetchCamera
     Generated.Statements.FetchCameraDrift
+    Generated.Statements.FetchCameraSnapshot
     Generated.Statements.FetchEvent
     Generated.Statements.FetchEventClip
     Generated.Statements.FetchEventClipEvent
@@ -86,6 +92,7 @@ library
     Generated.Statements.RowDecoderAuditLog
     Generated.Statements.RowDecoderCamera
     Generated.Statements.RowDecoderCameraDrift
+    Generated.Statements.RowDecoderCameraSnapshot
     Generated.Statements.RowDecoderEvent
     Generated.Statements.RowDecoderEventClip
     Generated.Statements.RowDecoderEventClipEvent
@@ -98,6 +105,7 @@ library
     Generated.Statements.UpdateAuditLog
     Generated.Statements.UpdateCamera
     Generated.Statements.UpdateCameraDrift
+    Generated.Statements.UpdateCameraSnapshot
     Generated.Statements.UpdateEvent
     Generated.Statements.UpdateEventClip
     Generated.Statements.UpdateEventClipEvent
@@ -114,6 +122,7 @@ library
     Hnvr.Node.ClipRecorder
     Hnvr.Node.ConfigWatcher
     Hnvr.Node.HealthReporter
+    Hnvr.Node.SnapshotWriter
     Hnvr.Web
     Hnvr.Web.AssignmentCoordinator
     Hnvr.Web.Audit
@@ -138,7 +147,6 @@ library
     Hnvr.Web.SchemaMigration
     Hnvr.Web.SnapshotResponder
     Hnvr.Web.SupervisorRegistry
-    Hnvr.Web.View.Archive.Index
     Hnvr.Web.View.Archive.Player
     Hnvr.Web.View.AuditLog.Index
     Hnvr.Web.View.Cameras.Edit
@@ -162,6 +170,7 @@ library
     Hnvr.Web.View.Sessions.New
     Hnvr.Web.View.Stats.Index
     Hnvr.Web.View.Time
+    Hnvr.Web.View.Timeline.Index
     Hnvr.Web.WhepProxy
     Web.Controller.Archive
     Web.Controller.AuditLog
@@ -180,6 +189,7 @@ library
     Web.Controller.Sessions
     Web.Controller.Stats
     Web.Controller.Support.Crypto
+    Web.Controller.Timeline
 
   -- IHP-generated from Application/Schema.sql.
   -- Regenerate via:

@@ -13,8 +13,9 @@ import {test, expect} from '../lib/auth';
 test.describe('Sessions / login', () => {
   test('valid admin credentials reach the dashboard', async ({loggedInPage}) => {
     await loggedInPage.goto('/');
-    // Nav has a Logout link when authenticated (View/Layout.hs).
-    await expect(loggedInPage.getByRole('link', {name: /logout/i})).toBeVisible();
+    // Nav has a Logout button when authenticated (View/Layout.hs —
+    // POST form with _method=DELETE since v0.12.0.1).
+    await expect(loggedInPage.getByRole('button', {name: /logout/i})).toBeVisible();
   });
 
   test('invalid credentials bounce back to /NewSession', async ({page}) => {

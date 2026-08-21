@@ -94,9 +94,10 @@ instance FromRow Generated.ActualTypes.Camera where
         ptzHomePresetId <- field
         ptzIdleTimeoutS <- field
         ptzViewerControl <- field
+        snapshotIntervalSec <- field
         createdAt <- field
         updatedAt <- field
-        let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTransport host username passwordEnc passwordNonce codec rtspSubUrl useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz ptzEnabled ptzProfileToken ptzHomePresetId ptzIdleTimeoutS ptzViewerControl createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
+        let theRecord = Generated.ActualTypes.Camera id slug name rtspUrl rtspTransport host username passwordEnc passwordNonce codec rtspSubUrl useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz ptzEnabled ptzProfileToken ptzHomePresetId ptzIdleTimeoutS ptzViewerControl snapshotIntervalSec createdAt updatedAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
         pure theRecord
 
 instance FromRowHasql Generated.ActualTypes.Camera where
@@ -148,7 +149,7 @@ updateRecordDiscardResultCamera model = do
 
 instance Record Generated.ActualTypes.Camera where
     {-# INLINE newRecord #-}
-    newRecord = Generated.ActualTypes.Camera def def def def "tcp" def def def def def def True def def def False def "yolov8n-320" True def def False def "onvif" def def def def def def def def def def def def def def def False def def def False def def  def
+    newRecord = Generated.ActualTypes.Camera def def def def "tcp" def def def def def def True def def def False def "yolov8n-320" True def def False def "onvif" def def def def def def def def def def def def def def def False def def def False def def def  def
 
 
 instance QueryBuilder.FilterPrimaryKey "cameras" where
@@ -288,12 +289,15 @@ instance SetField "ptzIdleTimeoutS" (Camera' ptzHomePresetId) Int where
 instance SetField "ptzViewerControl" (Camera' ptzHomePresetId) Bool where
     {-# INLINE setField #-}
     setField newValue record = record { ptzViewerControl = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8796093022208 } }
+instance SetField "snapshotIntervalSec" (Camera' ptzHomePresetId) Int where
+    {-# INLINE setField #-}
+    setField newValue record = record { snapshotIntervalSec = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 17592186044416 } }
 instance SetField "createdAt" (Camera' ptzHomePresetId) UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 17592186044416 } }
+    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 35184372088832 } }
 instance SetField "updatedAt" (Camera' ptzHomePresetId) UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 35184372088832 } }
+    setField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 70368744177664 } }
 instance SetField "meta" (Camera' ptzHomePresetId) MetaBag where
     {-# INLINE setField #-}
     setField newValue record = record { meta = newValue }
@@ -422,19 +426,22 @@ instance UpdateField "ptzProfileToken" (Camera' ptzHomePresetId) (Camera' ptzHom
     updateField newValue record = record { ptzProfileToken = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 1099511627776 } }
 instance UpdateField "ptzHomePresetId" (Camera' ptzHomePresetId) (Camera' ptzHomePresetId') ptzHomePresetId ptzHomePresetId' where
     {-# INLINE updateField #-}
-    updateField newValue (Camera id slug name rtspUrl rtspTransport host username passwordEnc passwordNonce codec rtspSubUrl useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz ptzEnabled ptzProfileToken ptzHomePresetId ptzIdleTimeoutS ptzViewerControl createdAt updatedAt meta) = Camera id slug name rtspUrl rtspTransport host username passwordEnc passwordNonce codec rtspSubUrl useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz ptzEnabled ptzProfileToken newValue ptzIdleTimeoutS ptzViewerControl createdAt updatedAt (meta { touchedFields = touchedFields meta .|. 2199023255552 })
+    updateField newValue (Camera id slug name rtspUrl rtspTransport host username passwordEnc passwordNonce codec rtspSubUrl useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz ptzEnabled ptzProfileToken ptzHomePresetId ptzIdleTimeoutS ptzViewerControl snapshotIntervalSec createdAt updatedAt meta) = Camera id slug name rtspUrl rtspTransport host username passwordEnc passwordNonce codec rtspSubUrl useSubstreamForAnalysis substreamCodec substreamWidth substreamHeight recordAudio analysisFps modelName enabled retentionHours assignedHost manualAssign onvifPort mgmtProto mainVideoEncoding mainVideoWidth mainVideoHeight mainVideoFps mainVideoBitrateKbps mainVideoGovLength subVideoEncoding subVideoWidth subVideoHeight subVideoFps subVideoBitrateKbps subVideoGovLength audioEncoding audioBitrateKbps audioSampleRateKhz ptzEnabled ptzProfileToken newValue ptzIdleTimeoutS ptzViewerControl snapshotIntervalSec createdAt updatedAt (meta { touchedFields = touchedFields meta .|. 2199023255552 })
 instance UpdateField "ptzIdleTimeoutS" (Camera' ptzHomePresetId) (Camera' ptzHomePresetId) Int Int where
     {-# INLINE updateField #-}
     updateField newValue record = record { ptzIdleTimeoutS = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4398046511104 } }
 instance UpdateField "ptzViewerControl" (Camera' ptzHomePresetId) (Camera' ptzHomePresetId) Bool Bool where
     {-# INLINE updateField #-}
     updateField newValue record = record { ptzViewerControl = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8796093022208 } }
+instance UpdateField "snapshotIntervalSec" (Camera' ptzHomePresetId) (Camera' ptzHomePresetId) Int Int where
+    {-# INLINE updateField #-}
+    updateField newValue record = record { snapshotIntervalSec = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 17592186044416 } }
 instance UpdateField "createdAt" (Camera' ptzHomePresetId) (Camera' ptzHomePresetId) UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 17592186044416 } }
+    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 35184372088832 } }
 instance UpdateField "updatedAt" (Camera' ptzHomePresetId) (Camera' ptzHomePresetId) UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 35184372088832 } }
+    updateField newValue record = record { updatedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 70368744177664 } }
 instance UpdateField "meta" (Camera' ptzHomePresetId) (Camera' ptzHomePresetId) MetaBag MetaBag where
     {-# INLINE updateField #-}
     updateField newValue record = record { meta = newValue }
@@ -483,7 +490,8 @@ instance FieldBit "ptzProfileToken" (Camera' ptzHomePresetId) where fieldBit = 1
 instance FieldBit "ptzHomePresetId" (Camera' ptzHomePresetId) where fieldBit = 2199023255552
 instance FieldBit "ptzIdleTimeoutS" (Camera' ptzHomePresetId) where fieldBit = 4398046511104
 instance FieldBit "ptzViewerControl" (Camera' ptzHomePresetId) where fieldBit = 8796093022208
-instance FieldBit "createdAt" (Camera' ptzHomePresetId) where fieldBit = 17592186044416
-instance FieldBit "updatedAt" (Camera' ptzHomePresetId) where fieldBit = 35184372088832
+instance FieldBit "snapshotIntervalSec" (Camera' ptzHomePresetId) where fieldBit = 17592186044416
+instance FieldBit "createdAt" (Camera' ptzHomePresetId) where fieldBit = 35184372088832
+instance FieldBit "updatedAt" (Camera' ptzHomePresetId) where fieldBit = 70368744177664
 
 

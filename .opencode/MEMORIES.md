@@ -1,5 +1,130 @@
 # HNVR — Project Memories
 
+> **Camera delete purges S3 (Aug 21 2026 — v0.14.3.0)**: DeleteCameraAction
+> now forks `Hnvr.Web.PendingPurge.forkCameraFullPurge slug` after
+> deleteRecord — deletes EVERY object under `<slug>/` (segments, init.mp4,
+> events/, clips/, snapshots/). Key set is snapshotted at listing time so
+> a same-slug recreation mid-purge keeps its new objects; per-key failures
+> logged+dropped (rows are cascade-gone, nothing to verify against).
+> Verified live on :18002 + SeaweedFS via curl-only probe (PUT 200 →
+> DELETE /DeleteCamera → "full purge purge-probe2: deleted 1 object(s)" →
+> GET 404). **Tooling trap: devenv rewrites ~/.mc config (Src:
+> .devenv/state/minio/mc/config.json) — custom mc aliases vanish
+> mid-session; use curl --aws-sigv4 "aws:amz:us-east-1:s3" -u key:secret
+> against 254:8333 instead.** Also: curl -X DELETE to warp flaked once
+> with 000 (retry worked); e2e UI delete test stays green.
+
+> **Camera delete button (Aug 20 2026 — v0.14.2.0)**: DeleteCameraAction
+> existed since Phase 1 but no view linked it. Edit camera page gained a
+> "Danger zone" card → POST form to /DeleteCamera?cameraId=… with
+> `_method=DELETE` hidden input (AutoRoute maps Delete* to DELETE; same
+> override pattern as logout). Confirm gate is now SHARED: app.js has a
+> delegated submit handler for any `form[data-confirm]` (timeline.js's
+> purge-specific one removed). Note for future: camera delete FK-cascades
+> segments/events/snapshots/rules rows but S3 objects ORPHAN (sweeper
+> skips row-less objects by design) — a purge-then-delete flow is the
+> obvious follow-up if Sergey complains. e2e: cameras-crud gained a UI
+> delete test (dialog accept → /Cameras, row gone). 33 passed.
+
+> **Single-active-player timeline (Aug 20 2026 — v0.14.1.0)**: N
+> concurrent hls.js tiles was too laggy (Sergey). Now exactly ONE tile
+> streams: the "active" camera — click a tile to select (accent border
+> .tl-active, no-op re-click so the playing video isn't restarted),
+> persisted in localStorage hnvr-timeline-active, deep-link ?active=
+> <uuid> (the /Events ▶ playUrl now passes it). playAll → playActive:
+> release/marker-seek starts playback ONLY on the active tile
+> (stopPlayback on all others); toggle-off stops it too. Default active
+> = first tile. New e2e: "only the active camera plays; clicking a tile
+> switches active" (≤1 .tl-tile-video after release, class moves,
+> persists). Full suite 32 passed on :18002. **Boot trap hit again**:
+> starting the leader from tests/e2e cwd — ./result/bin/hnvr-leader
+> missing → ALL specs fail fast (~150 ms each); check "Server started"
+> in the log before running playwright.
+>
+> **Timeline Phase C: playback + cutover (Aug 20 2026 — v0.14.0.0)**:
+> /Timeline is now THE archive UI (sidebar "Archive" → /Timeline;
+> /Archive recordings table + Hnvr.Web.View.Archive.Index DELETED,
+> archive-browser.spec.ts deleted with it). timeline.js: pointerdown
+> tears down all hls.js instances (hls.destroy + video.remove),
+> pointerup → playAll(): per enabled+covered tile, video element +
+> hls.js (CDN script tag in the view) on
+> /PlaylistArchive?cameraId&from=cursor&to=min(rangeEnd,cursor+6h) —
+> playback starts at the COVERING segment (≤~1s early; startPosition
+> can't be exact without segment boundaries client-side); fatal hls
+> error → gap placeholder. Deep link ?t= auto-plays after fetchData.
+> Tile purge (admin): POST /PurgeRecording?purgeCameraId + hidden
+> purgeFrom/purgeTo = timeline window, JS confirm() via delegated
+> submit handler on .tl-purge-form; controller returnTo simplified to
+> /Timeline?from&to (old browseQueryString round-trip gone).
+> /Events ▶ rows now deep-link /Timeline?from=t-1h&to=t+1h&t=ts
+> (ui-v2 spec updated). PlayerArchive "Browse" button → /Timeline.
+> **Pre-existing failure fixed**: login.spec expected logout as role
+> link — v0.12.0.1 made it a POST button; spec now matches.
+> e2e: NEW timeline.spec.ts (8 tests: auth gate, 24h default window,
+> preset narrow, TimelineData 200 + tiles settle, drag updates label,
+> toggle persists, t= clamp, purge form contract — purge is NEVER
+> submitted in e2e: window = whole timeline range, would tombstone a
+> full day of dev recordings). Full suite 31 passed on :18002.
+> h264 decode is NOT assertable in headless chromium — desktop-verify
+> actual video playback. Deploy pending: live :18001 runs v0.11.0.0
+> (needs restart for 0012+0013 migrations + timeline UI; SnapshotWriter
+> starts producing camera_snapshots only then — thumbnails 404 until
+> the first interval elapses per camera).
+>
+> **Timeline Phase B: read path (Aug 20 2026 — v0.13.0.0)**: /Timeline
+> page live (sidebar "Timeline" under Monitor; /Archive untouched until
+> Phase C cutover). `Web.Controller.Timeline`: TimelineAction (shell,
+> default last-24h, 7d cap, ?from&to&t deep links), TimelineDataAction
+> (JSON: per-camera coverage spans via groupRecordingsBy 30s + event
+> markers bucketed to 500/cam), TimelineThumbAction (cameraId field —
+> AutoRoute URL derives from the FIELD NAME, my thumbCameraId caution
+> 400'd every call; nearest camera_snapshots row ≤ t, stale >4×
+> interval = 404, else 302 → ro-presigned URL via redirectToUrl —
+> redirectToPath would mangle absolute URLs; 404 via respondAndExit +
+> responseLBS status404). `Hnvr.Core.Timeline` pure module (8 tests:
+> merge + bucketMarkers single-pass, earliest-per-bucket).
+> `View/Timeline/Index.hs` needed RankNTypes (Html implicit-params
+> gotcha). static/timeline.js: canvas lanes + markers + drag cursor
+> (pointer capture), 150ms-debounced per-tile thumbs via plain img.src
+> (browser follows the 302; token-guarded onload), localStorage
+> hnvr-timeline-disabled toggles, marker click seek / shift-click →
+> /PlayerEventClip. timeline.js added to BOTH flake.nix hnvr-static
+> copy lists + nix/module.nix preStart. Verified on :18002: shell (4
+> tiles), JSON (backyard 2 spans/316 events), thumb 404/302/stale-404/
+> bad-t-404, Playwright scratch (coverage pixels drawn, drag updates
+> localized cursor label, toggle persists). Only expected 404 thumb
+> misses (no snapshots yet — Phase A producer needs node roles).
+> Phase C remaining: hls.js playback on release, purge entry, /Events
+> ▶ repoint, sidebar swap, /Archive table removal, e2e spec.
+>
+> **Timeline Phase A: snapshot pipeline (Aug 20 2026 — v0.13.0.0)**:
+> design_docs/12-timeline-archive.md Phase A landed. Migration
+> 0013-camera-snapshots (camera_snapshots table, UNIQUE (camera_id,ts);
+> cameras.snapshot_interval_sec NOT NULL DEFAULT 60, 0=off) — wired into
+> SchemaMigration, applied to dev DB by leader boot on :18002.
+> `Hnvr.Core.Event.SnapshotWritten` (sn*-prefixed envelope, 4th decode
+> case in EventWriter.drainLoop → insertSnapshot, ON CONFLICT DO
+> NOTHING). Node side: `Hnvr.Node.SnapshotWriter` tapped from
+> CaptureSupervisor.analysisSink per analyzed frame — STM due-check
+> (attempt-time throttle), forkIO encode+upload+publish so the analyzer
+> never blocks; key `<slug>/snapshots/<YYYY-MM-DD/HH-MM-SS.mmm>.jpg`.
+> **DebugRender's "JuicyPixels has no JPEG encoder" comment was STALE**
+> — 3.3.9 has encodeJpegAtQuality (Word8 quality, Image PixelYCbCr8);
+> new `renderJpeg` (q75) via Codec.Picture.Types.convertImage (NOT
+> re-exported by Codec.Picture). CameraSnapshot wire type gained
+> csSnapshotIntervalSec (FromJSON .:? default 0 = old-leader safe);
+> SnapshotResponder CamRow now 22 cols, CommandTypes projection syncs.
+> RetentionSweeper.sweepCameraSnapshots sweeps with retention_hours (no
+> tombstone case). Camera New/Edit forms + both fill lists gained
+> snapshotIntervalSec; NewCameraAction sets 60 (codegen 0 = disabled).
+> Kill switch HNVR_DISABLE_SNAPSHOTWRITER (supervisor start).
+> **Collision trap**: Generated.Types now exports a CameraSnapshot ROW
+> type — CommandTypes imports `Generated.Types hiding (CameraSnapshot)`.
+> Verified: 224 core + 98 cv tests, pre-commit green, nix build green;
+> synthetic SnapshotWritten over raw NATS (auth nats:nats) inserted +
+> duplicate absorbed on dev DB. NOT live-verified against a real camera
+> (needs node roles; :18001 untouched). Phases B/C (timeline UI) pending.
+
 > Read this file FIRST before any work on this project. It's the fast-onboarding
 > context for new sessions. Update it whenever you make non-trivial changes.
 

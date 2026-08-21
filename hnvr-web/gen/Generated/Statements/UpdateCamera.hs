@@ -86,13 +86,14 @@ sql touchedFields returning =
             , if testBit touchedFields 41 then Just "ptz_home_preset_id" else Nothing
             , if testBit touchedFields 42 then Just "ptz_idle_timeout_s" else Nothing
             , if testBit touchedFields 43 then Just "ptz_viewer_control" else Nothing
-            , if testBit touchedFields 44 then Just "created_at" else Nothing
-            , if testBit touchedFields 45 then Just "updated_at" else Nothing
+            , if testBit touchedFields 44 then Just "snapshot_interval_sec" else Nothing
+            , if testBit touchedFields 45 then Just "created_at" else Nothing
+            , if testBit touchedFields 46 then Just "updated_at" else Nothing
             ]
         setClauses = [col <> " = $" <> Text.pack (show i) | (i, col) <- zip [1..] setEntries]
         pkIdx = length setEntries + 1
         whereClause = \startIdx -> "id" <> " = $" <> Text.pack (show startIdx)
-        returningClause = if returning then " RETURNING id, slug, name, rtsp_url, rtsp_transport, host, username, password_enc, password_nonce, codec, rtsp_sub_url, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, onvif_port, mgmt_proto, main_video_encoding, main_video_width, main_video_height, main_video_fps, main_video_bitrate_kbps, main_video_gov_length, sub_video_encoding, sub_video_width, sub_video_height, sub_video_fps, sub_video_bitrate_kbps, sub_video_gov_length, audio_encoding, audio_bitrate_kbps, audio_sample_rate_khz, ptz_enabled, ptz_profile_token, ptz_home_preset_id, ptz_idle_timeout_s, ptz_viewer_control, created_at, updated_at" else ""
+        returningClause = if returning then " RETURNING id, slug, name, rtsp_url, rtsp_transport, host, username, password_enc, password_nonce, codec, rtsp_sub_url, use_substream_for_analysis, substream_codec, substream_width, substream_height, record_audio, analysis_fps, model_name, enabled, retention_hours, assigned_host, manual_assign, onvif_port, mgmt_proto, main_video_encoding, main_video_width, main_video_height, main_video_fps, main_video_bitrate_kbps, main_video_gov_length, sub_video_encoding, sub_video_width, sub_video_height, sub_video_fps, sub_video_bitrate_kbps, sub_video_gov_length, audio_encoding, audio_bitrate_kbps, audio_sample_rate_khz, ptz_enabled, ptz_profile_token, ptz_home_preset_id, ptz_idle_timeout_s, ptz_viewer_control, snapshot_interval_sec, created_at, updated_at" else ""
     in "UPDATE cameras SET " <> Text.intercalate ", " setClauses <> " WHERE " <> whereClause pkIdx <> returningClause
 
 
@@ -141,8 +142,9 @@ encoder touchedFields = mconcat (catMaybes
     , if testBit touchedFields 41 then Just ((.ptzHomePresetId) >$< Encoders.param (Encoders.nullable Mapping.encoder)) else Nothing
     , if testBit touchedFields 42 then Just ((.ptzIdleTimeoutS) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , if testBit touchedFields 43 then Just ((.ptzViewerControl) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 44 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
-    , if testBit touchedFields 45 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 44 then Just ((.snapshotIntervalSec) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 45 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 46 then Just ((.updatedAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ])
     <> ((.id) >$< Encoders.param (Encoders.nonNullable Mapping.encoder))
 

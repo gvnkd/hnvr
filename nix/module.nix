@@ -246,6 +246,7 @@ in
         cp -fL ${cfg.staticAssets}/app.css ${cfg.dataDir}/static/app.css
         cp -fL ${cfg.staticAssets}/app.js ${cfg.dataDir}/static/app.js
         cp -fL ${cfg.staticAssets}/ptz.js ${cfg.dataDir}/static/ptz.js
+        cp -fL ${cfg.staticAssets}/timeline.js ${cfg.dataDir}/static/timeline.js
         if [ ! -f ${cfg.dataDir}/client_session_key.aes ]; then
           head -c 32 /dev/urandom > ${cfg.dataDir}/client_session_key.aes
           chmod 0600 ${cfg.dataDir}/client_session_key.aes

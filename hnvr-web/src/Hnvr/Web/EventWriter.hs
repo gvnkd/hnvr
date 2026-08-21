@@ -39,7 +39,7 @@ import qualified Data.Text.Lazy.Encoding as TLE
 import Data.UUID (UUID)
 import qualified Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.Types ((:.) (..))
-import Hnvr.Core.Event (ClipReady (..), CvEvent (..))
+import Hnvr.Core.Event (ClipReady (..), CvEvent (..), SnapshotWritten (..))
 import Hnvr.Core.Id (CameraId (..), HostId (..), sha256ToHex)
 import Hnvr.Core.Logging (logError, logInfo)
 import Hnvr.Core.Segment (SegmentWritten (..))
@@ -113,8 +113,14 @@ drainLoop sub = forever $ do
                 `catch` \(e :: SomeException) ->
                   logError ("EventWriter: clip insert failed: " <> T.pack (show e))
             Nothing ->
-              -- Unknown envelope shape (or parse error) — drop silently.
-              pure ()
+              case decodeStrict (msgPayload msg) :: Maybe SnapshotWritten of
+                Just sn ->
+                  insertSnapshot sn
+                    `catch` \(e :: SomeException) ->
+                      logError ("EventWriter: snapshot insert failed: " <> T.pack (show e))
+                Nothing ->
+                  -- Unknown envelope shape (or parse error) — drop silently.
+                  pure ()
 
 -- | Persist a finished event clip (separated event video store) and
 -- link every event it covers. Linkage is by camera + time window: a
@@ -196,6 +202,24 @@ insertCvEvent ev = do
 
 defaultDbUrl :: String
 defaultDbUrl = "postgresql:///hnvr?host=/run/postgresql"
+
+-- | Insert a periodic camera snapshot row (archive-timeline thumbnail
+-- store, design_docs/12-timeline-archive.md). Idempotent on
+-- @(camera_id, ts)@ — same duplicate-publish absorption as
+-- 'insertSegment'.
+insertSnapshot :: (?modelContext :: ModelContext) => SnapshotWritten -> IO ()
+insertSnapshot sn =
+  void $
+    sqlExec
+      "INSERT INTO camera_snapshots \
+      \  (camera_id, ts, object_key, bytes, created_at) \
+      \ VALUES (?, ?, ?, ?, NOW()) \
+      \ ON CONFLICT (camera_id, ts) DO NOTHING"
+      ( unCameraId (snCamera sn) :: UUID,
+        snTs sn,
+        snObjectKey sn,
+        fromIntegral (snBytes sn) :: Integer
+      )
 
 -- | Insert a 'SegmentWritten' row idempotently.
 --

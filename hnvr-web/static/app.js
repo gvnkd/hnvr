@@ -997,6 +997,14 @@
     initSortableTables();
     initTableFilters();
     initRowLinks();
+    // Destructive forms: <form data-confirm="..."> gets a confirm()
+    // gate before submit (camera delete, timeline purge, …).
+    document.addEventListener("submit", function (e) {
+      var f = e.target;
+      if (!f.getAttribute) return;
+      var msg = f.getAttribute("data-confirm");
+      if (msg && !window.confirm(msg)) e.preventDefault();
+    });
     initLiveFrames();
     initLiveOverlay();
     initLightbox();
