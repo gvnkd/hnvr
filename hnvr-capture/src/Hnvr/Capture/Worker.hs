@@ -103,6 +103,10 @@ data CameraConfig = CameraConfig
     -- (band-passed 60 Hz – 14 kHz, re-encoded to AAC) into the video
     -- fragments — see 'Hnvr.Capture.Ffmpeg.recordingArgs'. Default False.
     ccRecordAudio :: !Bool,
+    -- | Camera's real audio sampling rate (Hz) for fixed-clock codecs
+    -- (G.711/G.726 at ≠8 kHz — see 'Hnvr.Core.CameraSnapshot.audioInputRateHz').
+    -- 'Nothing' = trust the SDP clock.
+    ccAudioInputRateHz :: !(Maybe Int),
     -- | Rolling fragment buffer feeding the event-clip recorder
     -- ('Hnvr.Capture.RingBuffer'). 'Nothing' when no clip-enabled rule
     -- exists for the camera — zero overhead in that case. Shared (STM)
@@ -258,7 +262,8 @@ runOnce cfg cam = do
         RecordingConfig
           { rcUrl = ccRtspUrl cam,
             rcTransport = ccTransport cam,
-            rcRecordAudio = ccRecordAudio cam
+            rcRecordAudio = ccRecordAudio cam,
+            rcAudioInputRateHz = ccAudioInputRateHz cam
           }
   (_, mOut, _, ph) <-
     createProcess

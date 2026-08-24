@@ -12,6 +12,14 @@
 -- the per-(track, rule) state is threaded explicitly so the engine
 -- stays testable without IO.
 --
+-- The cooldown clock follows the /person/, not the fragile SORT id:
+-- 'EngineState' carries a short memory of recently-seen tracks so a
+-- detection dropout (pose change → missed frames) doesn't prune the
+-- rule state, and a freshly-appearing track that matches a
+-- recently-dead one (same class, close, recent) ADOPTS its state —
+-- otherwise every tracker id switch would reset the cooldown and
+-- re-fire the rule for the same physical object.
+--
 -- All geometry is /normalized/ image coordinates (0..1) — independent
 -- of analysis resolution. The UI draws on a 640×360 still; the
 -- analyzer converts track boxes from source pixels with the frame
@@ -28,6 +36,11 @@ module Hnvr.Cv.Rules
     -- * Per-(track, rule) state
     RuleState (..),
     emptyRuleState,
+
+    -- * Engine state (frame-to-frame)
+    EngineState (..),
+    SeenTrack (..),
+    emptyEngineState,
 
     -- * Events
     RuleEvent (..),
@@ -52,12 +65,14 @@ where
 import Data.Aeson (Value (..))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
+import Data.Maybe (fromMaybe)
 import Data.Scientific (toRealFloat)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time.Clock (UTCTime, diffUTCTime)
+import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime)
 import qualified Data.Vector as V
 import Hnvr.Core.CameraSnapshot (RuleSnapshot (..))
 import Hnvr.Core.Geometry (Box (..), V2 (..))
@@ -201,6 +216,77 @@ data RuleState = RuleState
 emptyRuleState :: RuleState
 emptyRuleState = RuleState {rsLastEmit = Nothing, rsInside = Nothing, rsAnchor = Nothing}
 
+-- | Last observation of a track: detection class, normalized center,
+-- center velocity (normalized units\/s, capped at 'maxTrackVelocity'),
+-- frame timestamp. The memory behind grace pruning, id-switch
+-- adoption and duplicate shadowing — see 'EngineState'.
+data SeenTrack = SeenTrack
+  { stClassId :: !Int,
+    stCenter :: !(V2 Double),
+    stVelocity :: !(V2 Double),
+    stLastSeen :: !UTCTime
+  }
+  deriving stock (Eq, Show)
+
+-- | Per-camera state threaded between frames: per-(rule, track) rule
+-- state plus a short memory of recently-seen tracks. The memory makes
+-- the cooldown clock follow the physical object rather than the SORT
+-- id:
+--
+--   * /Grace pruning/ — a track missing from a frame (detection
+--     dropout, e.g. a pose change) keeps its rule state for
+--     'trackMemorySec' instead of losing it on the spot.
+--   * /Id-switch adoption/ — SORT hands a re-acquired object a NEW
+--     id. A freshly-appearing track whose class matches a
+--     recently-dead one (within 'handoverWindowSec') and whose center
+--     is within 'handoverRadius' of the dead track's
+--     velocity-extrapolated position adopts the dead track's per-rule
+--     state (cooldown clock, zone inside flag, motion anchor).
+--   * /Duplicate shadowing/ — pose-variant detections slip past NMS
+--     and confirm as a SECOND, concurrent SORT track for the same
+--     object. A freshly-confirmed track within 'shadowMaxDist' of an
+--     already-live same-class track becomes its shadow: it is never
+--     rule-evaluated, and when the primary disappears the shadow
+--     inherits its rule state (so the person's cooldown still holds).
+data EngineState = EngineState
+  { esRules :: !(Map (Text, Int) RuleState),
+    esSeen :: !(Map Int SeenTrack),
+    -- | Shadow track id → primary track id (live duplicates only).
+    esShadows :: !(Map Int Int)
+  }
+  deriving stock (Eq, Show)
+
+emptyEngineState :: EngineState
+emptyEngineState = EngineState {esRules = M.empty, esSeen = M.empty, esShadows = M.empty}
+
+-- | Seconds a disappeared track's rule state survives. MUST exceed
+-- 'handoverWindowSec' — this trim runs before adoption, so a memory
+-- shorter than the adoption window makes older donors unreachable.
+-- Sized to outlast the tracker's coast budget (SORT maxAge is 30
+-- frames ≈ 6 s at 5 fps analysis) plus re-confirmation latency.
+trackMemorySec :: NominalDiffTime
+trackMemorySec = 10
+
+-- | Max age of a dead track eligible for id-switch adoption.
+handoverWindowSec :: NominalDiffTime
+handoverWindowSec = 8
+
+-- | Max distance between a fresh track's center and a dead track's
+-- velocity-extrapolated position for adoption (≈20% of the frame).
+handoverRadius :: Double
+handoverRadius = 0.2
+
+-- | Max center distance between a fresh track and a live one for
+-- duplicate shadowing (≈1\/3 of the frame — pose-variant boxes of the
+-- same person can be center-shifted that much).
+shadowMaxDist :: Double
+shadowMaxDist = 0.35
+
+-- | Cap on the stored center velocity (normalized units\/s) so
+-- jittery pose-variant centers can't produce absurd extrapolations.
+maxTrackVelocity :: Double
+maxTrackVelocity = 0.6
+
 -- | Event kind emitted by the engine (design @event_kind@ CV subset).
 data RuleEventKind = LineCrossed | ZoneEntered | ZoneExited | ZoneInsideEvent | ZoneMotionEvent
   deriving stock (Eq, Show)
@@ -256,41 +342,156 @@ evalRule rule classId now p0 p1 st
          in (mEv, st' {rsInside = Just insideNow})
 
 -- | Evaluate a set of rules over one frame's tracks. Threads the
--- per-(rule, track) cooldown\/zone state via the returned map — the
--- caller stores it (IORef\/TVar) between frames. State entries for
--- tracks that disappeared are pruned (a re-appearing object gets a
--- fresh track id from SORT anyway, so fresh rule state is correct).
+-- 'EngineState' via the return value — the caller stores it
+-- (IORef\/TVar) between frames.
 --
 -- Track boxes are in source-frame pixels; they are normalized with
 -- the frame dims before evaluation.
 evalTracks ::
-  Map (Text, Int) RuleState ->
+  EngineState ->
   [Rule] ->
   -- | Frame width \/ height (source pixels).
   Int ->
   Int ->
   [Track] ->
   UTCTime ->
-  (Map (Text, Int) RuleState, [(Rule, Track, RuleEvent)])
-evalTracks states rules fw fh tracks now =
-  let liveTids = [n | Track {tId = TrackId n} <- tracks]
-      pruned = M.filterWithKey (\(_, tid) _ -> tid `elem` liveTids) states
-      step (st, evs) track =
-        let p0 = norm (boxCenter (tPrevBox track))
-            p1 = norm (boxCenter (tBox track))
-            stepRule (st', evs') rule =
-              let key = (ruleId rule, let TrackId n = tId track in n)
-                  prevSt = M.findWithDefault emptyRuleState key st'
-                  (mEv, newSt) = evalRule rule (tClassId track) now p0 p1 prevSt
-               in ( M.insert key newSt st',
-                    maybe evs' (\ev -> (rule, track, ev) : evs') mEv
-                  )
-         in foldl stepRule (st, evs) rules
-      (st', evs) = foldl step (pruned, []) tracks
-   in (st', reverse evs)
+  (EngineState, [(Rule, Track, RuleEvent)])
+evalTracks st rules fw fh tracks now =
+  let -- Forget tracks unseen beyond the memory window.
+      seen0 = M.filter (\s -> diffUTCTime now (stLastSeen s) <= trackMemorySec) (esSeen st)
+      freshTids = sortOn id [n | n <- liveTids, not (M.member n seen0)]
+      -- Shadow bookkeeping. A mapping dies when the shadow disappears;
+      -- when only the primary disappears the shadow inherits its rule
+      -- state and becomes an ordinary track; mappings whose tracks
+      -- have visibly diverged are dropped (two objects that split
+      -- re-arm independently).
+      (rules0, seen1, shadows0) =
+        M.foldlWithKey' inheritStep (esRules st, seen0, M.empty) (esShadows st)
+      shadows1 = M.filterWithKey closeLive shadows0
+      established0 =
+        [ n
+        | n <- liveTids,
+          M.member n seen1,
+          not (M.member n shadows1)
+        ]
+      -- New duplicates: fresh ids close to an already-live same-class
+      -- track become its shadow (nearest primary wins). Fresh ids
+      -- that match nobody join the established pool as they go.
+      (shadows2, _) = foldl assignShadow (shadows1, established0) freshTids
+      -- Id-switch adoption for fresh ids that weren't shadowed:
+      -- inherit the nearest recently-dead track's rule state
+      -- (cooldown clock included), matched on its
+      -- velocity-extrapolated position.
+      (rules1, seen2) = foldl adopt (rules0, seen1) [n | n <- freshTids, not (M.member n shadows2)]
+      -- Refresh the memory with this frame's observations (velocity
+      -- from the previous entry, capped).
+      seen3 =
+        foldl refreshSeen seen2 (M.toList liveCenters)
+      -- Grace pruning: state survives while its track is live OR
+      -- remembered — an absent track is forgotten only after the
+      -- memory window elapses.
+      rules2 = M.filterWithKey (\(_, tid) _ -> M.member tid seen3) rules1
+      step (st', evs) track
+        | M.member (let TrackId n = tId track in n) shadows2 = (st', evs)
+        | otherwise =
+            let p0 = norm (boxCenter (tPrevBox track))
+                p1 = norm (boxCenter (tBox track))
+                stepRule (st'', evs') rule =
+                  let key = (ruleId rule, let TrackId n = tId track in n)
+                      prevSt = M.findWithDefault emptyRuleState key st''
+                      (mEv, newSt) = evalRule rule (tClassId track) now p0 p1 prevSt
+                   in ( M.insert key newSt st'',
+                        maybe evs' (\ev -> (rule, track, ev) : evs') mEv
+                      )
+             in foldl stepRule (st', evs) rules
+      (rules3, evs) = foldl step (rules2, []) tracks
+   in (EngineState rules3 seen3 shadows2, reverse evs)
   where
+    liveTids = [n | Track {tId = TrackId n} <- tracks]
+    liveCenters =
+      M.fromList
+        [ (n, (tClassId tr, norm (boxCenter (tBox tr))))
+        | tr@Track {tId = TrackId n} <- tracks
+        ]
     norm (V2 (x, y)) =
       V2 (realToFrac x / fromIntegral fw, realToFrac y / fromIntegral fh)
+    liveCenterOf n = snd <$> M.lookup n liveCenters
+    liveClassOf n = fst <$> M.lookup n liveCenters
+    -- \| Resolve one existing shadow mapping.
+    inheritStep (ruleMap, seenMap, keep) shadow primary
+      -- Shadow gone: drop the mapping, leave everything else.
+      | shadow `notElem` liveTids = (ruleMap, seenMap, keep)
+      -- Both alive: mapping survives (distance re-validated after).
+      | primary `elem` liveTids = (ruleMap, seenMap, M.insert shadow primary keep)
+      -- Primary gone, shadow alive: the shadow continues the object's
+      -- identity — inherit the primary's rule state, consume the
+      -- primary's memory entry.
+      | otherwise =
+          ( M.mapKeys (\(r, t) -> if t == primary then (r, shadow) else (r, t)) ruleMap,
+            M.delete primary seenMap,
+            keep
+          )
+    -- \| A kept mapping holds only while the pair stays close.
+    closeLive shadow primary = fromMaybe False $ do
+      c1 <- liveCenterOf shadow
+      c2 <- liveCenterOf primary
+      pure (dist c1 c2 <= shadowMaxDist)
+    -- \| Try to enroll a fresh id as a shadow of the nearest
+    -- established live track of the same class.
+    assignShadow (shs, established) tid =
+      case (M.lookup tid liveCenters, bestPrimary shs established tid) of
+        (Just _, Just primary) -> (M.insert tid primary shs, established)
+        _ -> (shs, tid : established)
+    bestPrimary shs established tid = do
+      (cls, c) <- M.lookup tid liveCenters
+      let cands =
+            [ (d, p)
+            | p <- established,
+              p /= tid,
+              not (M.member p shs),
+              Just cls == liveClassOf p,
+              Just c' <- [liveCenterOf p],
+              let d = dist c c',
+              d <= shadowMaxDist
+            ]
+      case sortOn fst cands of
+        [] -> Nothing
+        ((_, p) : _) -> Just p
+    -- \| Adopt the nearest eligible dead track's rule states for a
+    -- fresh id. The donor is removed from the memory so it can't be
+    -- adopted twice.
+    adopt (ruleMap, seenMap) tid =
+      case bestDonor seenMap tid of
+        Nothing -> (ruleMap, seenMap)
+        Just donor ->
+          ( M.mapKeys (\(r, t) -> if t == donor then (r, tid) else (r, t)) ruleMap,
+            M.delete donor seenMap
+          )
+    bestDonor seenMap tid = do
+      (cls, c) <- M.lookup tid liveCenters
+      let cands =
+            [ (d, donorTid)
+            | (donorTid, s) <- M.toList seenMap,
+              donorTid `notElem` liveTids,
+              stClassId s == cls,
+              let gap = diffUTCTime now (stLastSeen s),
+              gap <= handoverWindowSec,
+              let predicted = vadd (stCenter s) (vscale (realToFrac gap) (stVelocity s)),
+              let d = dist c predicted,
+              d <= handoverRadius
+            ]
+      case sortOn fst cands of
+        [] -> Nothing
+        ((_, donorTid) : _) -> Just donorTid
+    refreshSeen sm (n, (cls, c)) =
+      let v = case M.lookup n sm of
+            Just old
+              | dt > 0 -> capVelocity (vscale (1 / realToFrac dt) (vsub c (stCenter old)))
+              | otherwise -> stVelocity old
+              where
+                dt = diffUTCTime now (stLastSeen old)
+            Nothing -> V2 (0, 0)
+       in M.insert n (SeenTrack cls c v now) sm
 
 -- | Normalize a source-pixel box to 0..1 coords.
 normalizeBox :: Int -> Int -> Box Float -> Box Double
@@ -338,6 +539,21 @@ boxCenter Box {bxX = x, bxY = y, bxW = w, bxH = h} =
 dist :: (Floating a) => V2 a -> V2 a -> a
 dist (V2 (x1, y1)) (V2 (x2, y2)) =
   sqrt ((x2 - x1) ^ (2 :: Int) + (y2 - y1) ^ (2 :: Int))
+
+vadd :: (Num a) => V2 a -> V2 a -> V2 a
+vadd (V2 (x1, y1)) (V2 (x2, y2)) = V2 (x1 + x2, y1 + y2)
+
+vsub :: (Num a) => V2 a -> V2 a -> V2 a
+vsub (V2 (x1, y1)) (V2 (x2, y2)) = V2 (x1 - x2, y1 - y2)
+
+vscale :: (Num a) => a -> V2 a -> V2 a
+vscale s (V2 (x, y)) = V2 (s * x, s * y)
+
+-- | Clamp a velocity vector to 'maxTrackVelocity' magnitude.
+capVelocity :: V2 Double -> V2 Double
+capVelocity v@(V2 (x, y)) =
+  let l = sqrt (x * x + y * y)
+   in if l <= maxTrackVelocity || l == 0 then v else vscale (maxTrackVelocity / l) v
 
 -- | Segment-segment intersection test (proper + endpoint touching).
 segIntersect :: (Ord a, Fractional a) => V2 a -> V2 a -> V2 a -> V2 a -> Bool

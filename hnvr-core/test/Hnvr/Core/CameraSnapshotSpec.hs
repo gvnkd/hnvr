@@ -18,6 +18,7 @@ import Hnvr.Core.CameraSnapshot
     CameraSnapshotBatch (..),
     RuleSnapshot (..),
     Transport (..),
+    audioInputRateHz,
     transportFromText,
     transportToText,
   )
@@ -78,6 +79,18 @@ tests =
             decode (encode (Object (KM.delete "csSnapshotIntervalSec" o)))
               @?= Just sampleSnapshot {csSnapshotIntervalSec = 0}
           _ -> assertBool "expected top-level object" False,
+      testCase "missing csAudioInputRateHz decodes as Nothing (old leader)" $
+        case toJSON sampleSnapshot of
+          Object o ->
+            decode (encode (Object (KM.delete "csAudioInputRateHz" o)))
+              @?= Just sampleSnapshot {csAudioInputRateHz = Nothing}
+          _ -> assertBool "expected top-level object" False,
+      testCase "audioInputRateHz retags only fixed-clock encodings" $ do
+        audioInputRateHz (Just "G711") (Just 16) @?= Just 16000
+        audioInputRateHz (Just "G726") (Just 16) @?= Just 16000
+        audioInputRateHz (Just "AAC") (Just 16) @?= Nothing
+        audioInputRateHz (Just "G711") Nothing @?= Nothing
+        audioInputRateHz Nothing (Just 16) @?= Nothing,
       testCase "CameraSnapshotBatch JSON roundtrip" $
         decode (encode sampleBatch) @?= Just sampleBatch,
       testCase "batch wire shape is a cameras-keyed object" $
@@ -110,7 +123,8 @@ sampleSnapshot =
       csSnapshotIntervalSec = 60,
       csModelName = "yolov8n-320",
       csRules = [],
-      csPtz = Nothing
+      csPtz = Nothing,
+      csAudioInputRateHz = Just 16000
     }
 
 sampleBatch :: CameraSnapshotBatch

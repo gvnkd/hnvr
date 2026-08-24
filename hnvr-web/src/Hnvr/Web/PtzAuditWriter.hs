@@ -38,15 +38,16 @@ startPtzAuditWriter bus = do
   _ <- async loop
   logInfo "PtzAuditWriter: subscribed to hnvr.ptz.audit"
   where
-    loop = forever $ do
+    loop = do
       sub <- Bus.subscribe bus Subjects.ptzAudit
-      msg <- Bus.readMessage sub
-      r <- try (handle msg)
-      case r of
-        Right () -> pure ()
-        Left (e :: SomeException) -> case fromException e of
-          Just (SomeAsyncException _) -> throwIO e
-          Nothing -> logError ("PtzAuditWriter: " <> T.pack (show e))
+      forever $ do
+        msg <- Bus.readMessage sub
+        r <- try (handle msg)
+        case r of
+          Right () -> pure ()
+          Left (e :: SomeException) -> case fromException e of
+            Just (SomeAsyncException _) -> throwIO e
+            Nothing -> logError ("PtzAuditWriter: " <> T.pack (show e))
 
 handle :: Message -> IO ()
 handle msg = case decodeStrict' (msgPayload msg) of

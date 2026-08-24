@@ -18,12 +18,16 @@ import Hnvr.Cv.Rules
     RuleState (..),
     ZoneMode (..),
     boxCenter,
+    emptyEngineState,
     emptyRuleState,
     evalRule,
+    evalTracks,
     pointInPoly,
     projectRule,
     segIntersect,
   )
+import Hnvr.Cv.Tracker.Kalman (initKalman)
+import Hnvr.Cv.Tracker.Sort (Track (..), TrackId (..))
 import Test.QuickCheck (Property, choose, forAll, (===))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
@@ -186,6 +190,129 @@ tests =
             mEv @?= Nothing
         ],
       testGroup
+        "evalTracks track memory"
+        [ testCase "cooldown survives a one-frame dropout" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 7 0 (0.5, 0.5)] t0
+                (st2, evs2) = evalTracks st1 [r] 1 1 [] (plus 0.2 t0)
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 7 0 (0.5, 0.5)] (plus 1 t0)
+            length evs1 @?= 1
+            assertBool "no tracks, no events" (null evs2)
+            -- without grace pruning the dropout would have reset the
+            -- cooldown and this frame would re-fire
+            assertBool "cooldown held across the dropout" (null evs3),
+          testCase "id switch adopts the cooldown clock" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                -- pose change: SORT re-acquires the person as id 2
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 0 (0.52, 0.5)] (plus 0.5 t0)
+            length evs1 @?= 1
+            assertBool "id switch suppressed by adopted cooldown" (null evs2)
+            -- the adopted clock really started at the first fire:
+            -- once the cooldown elapses the same track fires again
+            let (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 2 0 (0.52, 0.5)] (plus 6 t0)
+            length evs3 @?= 1,
+          testCase "no adoption when the fresh track is too far" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.3, 0.3)] t0
+                (_, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 0 (0.7, 0.7)] (plus 0.5 t0)
+            length evs1 @?= 1
+            length evs2 @?= 1,
+          testCase "no adoption across detection classes" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                (_, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 2 (0.51, 0.5)] (plus 0.5 t0)
+            length evs1 @?= 1
+            length evs2 @?= 1,
+          testCase "memory expiry prunes the state" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 5 0 (0.5, 0.5)] t0
+                (st2, _) = evalTracks st1 [r] 1 1 [] (plus 12 t0)
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 5 0 (0.5, 0.5)] (plus 12.5 t0)
+            length evs1 @?= 1
+            -- 12 s gone > 10 s memory: the same id is treated as new
+            length evs3 @?= 1,
+          testCase "zone motion anchor is adopted on id switch" $ do
+            let r = motionRule
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 0 (0.51, 0.5)] (plus 0.5 t0)
+                -- 0.055 from the adopted anchor (0.50) fires; from a
+                -- fresh anchor (0.51) it would be 0.045 — below 0.05
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 2 0 (0.555, 0.5)] (plus 1 t0)
+            assertBool "anchor only" (null evs1)
+            assertBool "adopted anchor, small step" (null evs2)
+            length evs3 @?= 1,
+          testCase "live duplicate is shadowed and inherits on primary death" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                -- duplicate detection of the same person confirms as
+                -- track 2 while track 1 is still live
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.6, 0.5)] (plus 0.5 t0)
+                -- primary dies: the shadow inherits its cooldown
+                -- clock instead of re-firing as a fresh track
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 2 0 (0.6, 0.5)] (plus 1 t0)
+            length evs1 @?= 1
+            assertBool "shadow not evaluated, primary in cooldown" (null evs2)
+            assertBool "inherited cooldown suppresses refire" (null evs3),
+          testCase "different class live track does not shadow" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                (_, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 2 (0.55, 0.5)] (plus 0.5 t0)
+            length evs1 @?= 1
+            length evs2 @?= 1,
+          testCase "far live track does not shadow" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                (_, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.75, 0.75)] (plus 0.5 t0)
+            length evs1 @?= 1
+            length evs2 @?= 1,
+          testCase "shadow split re-arms the second track" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.6, 0.5)] (plus 0.5 t0)
+                -- the pair diverges beyond shadow range: two objects
+                -- after all — the second one evaluates (and fires,
+                -- having never accumulated rule state)
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.75, 0.75)] (plus 1 t0)
+            length evs1 @?= 1
+            assertBool "shadowed" (null evs2)
+            length evs3 @?= 1,
+          testCase "velocity prediction adopts a walking person" $ do
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.4, 0.5)] t0
+                -- second frame establishes the velocity (0.1/s to the right)
+                (st2, _) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.45, 0.5)] (plus 0.5 t0)
+                -- 3 s later the person is re-acquired as id 2 at
+                -- (0.74, 0.5): 0.29 from the last SEEN position (no
+                -- adoption without prediction) but 0.01 from the
+                -- extrapolated (0.75, 0.5)
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 2 0 (0.74, 0.5)] (plus 3.5 t0)
+            length evs1 @?= 1
+            assertBool "adopted cooldown suppresses refire" (null evs3),
+          testCase "donor older than 3 s is still adoptable" $ do
+            -- regression: trackMemorySec must exceed the adoption
+            -- window — a 3 s memory trimmed donors before a 5 s
+            -- window could match them (the 13:04 triple)
+            let r = (squareZone ZoneInside) {rCooldownMs = 15000}
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.3, 0.25)] t0
+                (st2, _) = evalTracks st1 [r] 1 1 [] (plus 1 t0)
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 2 0 (0.31, 0.24)] (plus 5.5 t0)
+            length evs1 @?= 1
+            assertBool "5.5 s gap, same spot: adopted, no refire" (null evs3),
+          testCase "long occlusion: velocity prediction carries across 6 s" $ do
+            -- the 13:05 case: person walks ~0.47 normalized in 6.6 s —
+            -- far beyond any static radius, but right where the
+            -- velocity extrapolation points
+            let r = (squareZone ZoneInside) {rCooldownMs = 15000}
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 2 0 (0.3, 0.25)] t0
+                (st2, _) = evalTracks st1 [r] 1 1 [mkTrack 2 0 (0.35, 0.3)] (plus 1 t0)
+                -- v = (0.05, 0.05)/s; donor last seen at t0+1;
+                -- 6 s later predicted at (0.65, 0.60)
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 4 0 (0.645, 0.605)] (plus 7 t0)
+            length evs1 @?= 1
+            assertBool "adopted via prediction" (null evs3)
+        ],
+      testGroup
         "projectRule zone_motion"
         [ testCase "parses min_displacement" $
             motionSnap (Just 0.1) @?= Just (ZoneMotion 0.1),
@@ -205,6 +332,22 @@ tests =
     concave = [V2 (0, 0), V2 (1, 0), V2 (1, 1), V2 (0.5, 0.5), V2 (0, 1)]
     plus = addUTCTime
     motionRule = squareZone (ZoneMotion 0.05)
+    -- A track whose box is centered at the given normalized point
+    -- (frame dims are 1×1 in these tests, so norm is the identity).
+    mkTrack :: Int -> Int -> (Float, Float) -> Track
+    mkTrack tid cls (cx, cy) =
+      let b = Box (cx - 0.05) (cy - 0.05) 0.1 0.1
+       in Track
+            { tId = TrackId tid,
+              tBox = b,
+              tPrevBox = b,
+              tClassId = cls,
+              tScore = 0.9,
+              tHits = 5,
+              tTimeSinceUpdate = 0,
+              tAge = 5,
+              tKalman = initKalman b
+            }
     motionSnap :: Maybe Double -> Maybe ZoneMode
     motionSnap mThr =
       case projectRule (motionSnapRaw (motionGeo mThr)) of

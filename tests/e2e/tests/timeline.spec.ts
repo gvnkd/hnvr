@@ -36,23 +36,24 @@ test.describe('Archive timeline', () => {
     expect(to - from).toBe(3600 * 1000);
   });
 
-  test('tiles fetch timeline data and leave thumbnail mode', async ({loggedInPage: page}) => {
+  test('player fetches timeline data and settles out of idle', async ({loggedInPage: page}) => {
     await page.goto('/Timeline');
     const resp = await page.waitForResponse(/\/TimelineData\?from=/);
     expect(resp.status()).toBe(200);
     const data = await resp.json();
     expect(data.cameras.length).toBeGreaterThan(0);
-    // Tiles settle out of "idle" once data lands (snapshot 404s are
-    // expected until a node produces camera_snapshots rows — the tile
-    // shows its gap/no-frame placeholder then).
+    // The player settles out of "idle" once data lands (snapshot 404s
+    // are expected until a node produces camera_snapshots rows — the
+    // player shows its gap/no-frame placeholder then).
     await expect
-      .poll(async () => page.locator('[data-tl-state]').first().textContent())
+      .poll(async () => page.locator('[data-tl-state]').textContent())
       .not.toBe('idle');
   });
 
   test('cursor drag updates the cursor label', async ({loggedInPage: page}) => {
     await page.goto('/Timeline');
     const canvas = page.locator('[data-tl-canvas]');
+    await canvas.scrollIntoViewIfNeeded();
     const box = (await canvas.boundingBox())!;
     const before = await page.locator('[data-tl-cursor-label]').textContent();
     await page.mouse.move(box.x + box.width * 0.8, box.y + 20);
@@ -63,42 +64,34 @@ test.describe('Archive timeline', () => {
     expect(after).not.toBe(before);
   });
 
-  test('only the active camera plays; clicking a tile switches active', async ({loggedInPage: page}) => {
+  test('single player; the dropdown switches the active camera', async ({loggedInPage: page}) => {
     await page.goto('/Timeline');
     await page.waitForResponse(/\/TimelineData\?from=/);
-    // First tile is the default active camera.
-    await expect(page.locator('[data-tl-tile]').first()).toHaveClass(/tl-active/);
+    const sel = page.locator('[data-tl-camera]');
+    const options = sel.locator('option');
+    test.skip((await options.count()) < 2, 'need 2+ cameras');
+    const firstId = (await options.nth(0).getAttribute('value'))!;
+    const secondId = (await options.nth(1).getAttribute('value'))!;
+    // First camera is the default active one.
+    await expect(sel).toHaveValue(firstId);
     // Drag-release seeks; at most ONE video element may exist (N
     // concurrent hls.js instances was the lag Sergey reported).
     const canvas = page.locator('[data-tl-canvas]');
+    await canvas.scrollIntoViewIfNeeded();
     const box = (await canvas.boundingBox())!;
     await page.mouse.move(box.x + box.width * 0.9, box.y + 20);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width * 0.85, box.y + 20, {steps: 3});
     await page.mouse.up();
     await page.waitForTimeout(500);
-    expect(await page.locator('.tl-tile-video').count()).toBeLessThanOrEqual(1);
-    // Click the second tile: active class moves over.
-    const second = page.locator('[data-tl-tile]').nth(1);
-    await second.locator('.tl-tile-head').click();
-    await expect(second).toHaveClass(/tl-active/);
-    await expect(page.locator('[data-tl-tile]').first()).not.toHaveClass(/tl-active/);
-    // Persisted across reload.
+    expect(await page.locator('.tl-player-video').count()).toBeLessThanOrEqual(1);
+    // Switch via the dropdown: value changes and persists across reload.
+    await sel.selectOption(secondId);
+    await expect(sel).toHaveValue(secondId);
     await page.reload();
-    await expect(page.locator('[data-tl-tile]').nth(1)).toHaveClass(/tl-active/);
+    await expect(page.locator('[data-tl-camera]')).toHaveValue(secondId);
     // Restore default for the shared browser profile.
-    await page.locator('[data-tl-tile]').first().locator('.tl-tile-head').click();
-  });
-
-  test('disable toggle persists across reload', async ({loggedInPage: page}) => {
-    await page.goto('/Timeline');
-    const first = page.locator('[data-tl-toggle]').first();
-    await first.uncheck();
-    await page.reload();
-    await expect(page.locator('[data-tl-toggle]').first()).not.toBeChecked();
-    await expect(page.locator('[data-tl-state]').first()).toContainText('disabled');
-    // Restore default for other tests/users of the shared browser profile.
-    await page.locator('[data-tl-toggle]').first().check();
+    await page.locator('[data-tl-camera]').selectOption(firstId);
   });
 
   test('deep link with t= clamps cursor into the window', async ({loggedInPage: page}) => {
@@ -112,18 +105,26 @@ test.describe('Archive timeline', () => {
     expect(Math.abs(cursor - Date.parse(mid))).toBeLessThan(1000);
   });
 
-  test('admin purge forms post prefixed window params', async ({loggedInPage: page}) => {
+  test('admin purge form posts prefixed window params for the selected camera', async ({loggedInPage: page}) => {
     await page.goto('/Timeline');
-    const forms = page.locator('form.tl-purge-form');
-    test.skip((await forms.count()) === 0, 'not an admin user');
-    const first = forms.first();
-    const action = await first.getAttribute('action');
+    const form = page.locator('form.tl-purge-form');
+    test.skip((await form.count()) === 0, 'not an admin user');
+    const action = await form.getAttribute('action');
     expect(action).toMatch(/\/PurgeRecording\?purgeCameraId=/);
     // purgeFrom/purgeTo are hidden INPUTS, never URL params.
     expect(action).not.toMatch(/purgeFrom/);
     expect(action).not.toMatch(/purgeTo/);
-    await expect(first.locator('input[name="purgeFrom"]')).toHaveCount(1);
-    await expect(first.locator('input[name="purgeTo"]')).toHaveCount(1);
+    await expect(form.locator('input[name="purgeFrom"]')).toHaveCount(1);
+    await expect(form.locator('input[name="purgeTo"]')).toHaveCount(1);
+    // The form follows the dropdown-selected camera.
+    const sel = page.locator('[data-tl-camera]');
+    const options = sel.locator('option');
+    if ((await options.count()) > 1) {
+      const secondId = (await options.nth(1).getAttribute('value'))!;
+      await sel.selectOption(secondId);
+      expect(await form.getAttribute('action')).toContain(`purgeCameraId=${secondId}`);
+      await sel.selectOption((await options.nth(0).getAttribute('value'))!);
+    }
     // Never submitted here: the purge window is the whole timeline
     // window — clicking it on the shared dev DB would tombstone a full
     // day of recordings.

@@ -1,5 +1,268 @@
 # HNVR — Project Memories
 
+> **Playlist EXTINF repair + upfront legacy strip (Aug 24 2026,
+> v0.15.0.0 cont. 2)**: Sergey's 18:38–20:38 window stalled at 1.7 s
+> (bufferFullError → eventually the storm guard's "recording
+> unreadable"). Root causes: (a) that window's audio tfdt deltas are
+> IRREGULAR garbage (2x/0x/3.4x per boundary), so the clean-2x skew
+> detector never engaged; (b) mid-playback audio strip stalls Chromium
+> on A/V sync (audio track initialized then starved); (c) EXTINF from
+> DB wall-clock vs real fragment durations → cumulative holes AND
+> overlaps (overlaps → bufferAppendNoProgress churn → bufferFull).
+> Fixes: `HNVR.fmp4RewritePlaylist` (app.js) — range-GETs every
+> fragment's moof head (8-way, bytes=0-8191; SeaweedFS presign signs
+> only host so Range works), EXTINF := real video-tfdt deltas (last
+> frag: trun span sum), and detects legacy windows globally (audio/video
+> tfdt-delta ratio outside [0.75,1.33] on 2 CONSECUTIVE boundaries —
+> ffmpeg restarts jump both tracks equally, ratio ≈1, no trip). Legacy
+> → init moov stripped of the audio trak (+trex in mvex, size fixes) via
+> Blob URL in EXT-X-MAP, and fragments stripped from the FIRST append.
+> `HNVR.hlsArchive(Hls, video, src, cfg)` = one-call fetch→rewrite→
+> Hls(fLoader=fmp4PatchLoader(Hls,{stripAudio})) used by all three
+> players; the loader no longer self-detects (mid-playback strip was
+> the stall). Shared box helpers hoisted (fmp4Tracks/fmp4Fragment/
+> fmp4Trun). Verified headless on the EXACT failing URL: smooth 1x
+> playback, continuous pixels; clean-2x window + floor_2_5 still fine.
+> Probe cost: ~600 moof heads per 10-min window, few seconds of
+> "indexing…". e2e 32 green, pre-commit green.
+
+
+> **Old-recording video freeze root cause + client-side tfdt patch
+> (Aug 24 2026, v0.15.0.0 cont.)**: after the storm fixes Sergey still
+> got "first frame + advancing clock, frozen picture". Reproduced
+> headlessly via drawImage pixel hashing + requestVideoFrameCallback
+> (rVFC never fires; getVideoPlaybackQuality counts decodes, dropped=0
+> — frames decode but never PRESENT). Isolation matrix (system chromium
+> 148 + local fMP4 fixtures): whole-file single MSE append of skewed
+> old bytes = fine; per-fragment appends (what hls.js does) = frozen,
+> in both 'segments' and 'sequence' modes; video-only per-fragment =
+> fine; video-only init + audio-carrying fragments = hard
+> bufferAppendingError (Chromium does NOT ignore undeclared tracks).
+> Per-fragment + skewed audio = the poison. **Fix:
+> `HNVR.fmp4PatchLoader(Hls)` in app.js** — an hls.js fLoader that
+> parses the init moov (tkhd/mdhd/hdlr) for track ids + timescales and
+> rewrites every non-video traf's tfdt in each moof to the video traf's
+> tfdt rescaled (±1 tick no-op on fixed recordings). Wired into all
+> three hls.js players. Plus hole tolerance `maxBufferHole 0.6 /
+> maxSeekHole 4 / nudgeMaxRetry 12` everywhere (EXTINF = DB wall-clock
+> vs real content drift leaves sub-second holes; default 3 nudges dies
+> fatally with bufferSeekOverHole). Verified on REAL old segments via
+> the /Timeline page: both skew variants (196 2x-PTS, 197 compressed-
+> PTS) play with continuously changing pixels. Audio on old data is
+> choppy/degraded (MSE drops the overlap) — it was slowed garbage
+> anyway. **Verification tooling notes**: pixel-hash via
+> drawImage→canvas.toDataURL works headlessly; tfdt boxes are 64-bit
+> v1 (video 1.8e10 @90k); presigned URLs expire in 1h (re-download
+> fixtures); `rm -f glob*` with no matches ABORTS a zsh &&-chain;
+> /PlaylistArchive presigns hundreds of URLs ≈ 8 s per request.
+> **Legacy-audio strip in the player loader + timeline zoompan
+> (Aug 24 2026, v0.15.0.0 cont.)**: Sergey's old backyard archive still
+> showed warn: bufferSeekOverHole spam + jerky playback, and zoompan was
+> never wired into the new timeline player. `HNVR.fmp4PatchLoader`
+> (app.js) grew skew DETECTION + AUDIO STRIP: per fragment it diffs
+> video/audio tfdt deltas (rescaled by track timescale from the init
+> moov); 2 consecutive boundaries with audioDelta > 1.4x videoDelta →
+> stripAudio mode = rebuild the moof without the audio traf and the mdat
+> without the audio sample block, fixing sizes + the video trun
+> data_offset (our fragments: one trun per traf, single contiguous
+> per-track mdat run, default_base_moof → data_offset relative to moof
+> start, minus moofShrink and minus audioLen when audio precedes video).
+> Result: skewed legacy recordings play VIDEO-ONLY and smooth (the audio
+> was slowed garbage); aligned recordings keep audio (tfdt patch is a
+> ±1-tick no-op, deltas match so no strip). Hole-nudge details
+> (bufferSeekOverHole/bufferNudgeOnStall/bufferStalledError) no longer
+> flash on the state line — self-healing routine. Timeline player video
+> gets HNVR.zoompan (wheel zoom verified headless via style.transform);
+> floating fs button in .tl-player-body (closest() extended; bar is a
+> SIBLING of the body — closest() from a bar button finds nothing).
+> Verified headless on real old segments (both cameras): pixels change
+> continuously, state stays "playing", zoom transform applies. e2e 32
+> green, pre-commit green.
+
+
+> **Archive player storm/black-screen fix (Aug 24 2026 — v0.15.0.0,
+> same build)**: Sergey hit ~1 GB downloads in seconds + black screen +
+> CPU overload watching archive. Root causes found by probing real
+> segments + headless-chromium (system /run/current-system/sw/bin/chromium
+> 148 HAS h264 + claims native HLS — see trap below) repro rigs:
+> (1) **canPlayType("application/vnd.apple.mpegurl") = "maybe" on
+> nixpkgs chromium** — the old gate took the NATIVE path there, which
+> downloads the entire playlist at line rate and (data-dependent)
+> stalls at 0. ALL THREE players (timeline.js, Archive/Player.hs,
+> EventClips/Player.hs) now try hls.js FIRST, native only as Safari
+> fallback. (2) **Hole at playlist position 0**: old segments' skewed
+> A/V timestamps (the G.711-16k doubling) leave nothing buffered at 0;
+> hls.js's gap nudge only works once playback STARTED → frozen at 0 →
+> it loads forward forever. New `kickStart` (on BUFFER_APPENDED until
+> first 'playing': jump currentTime to buffered.start(0)+0.05, force
+> play()). (3) **No buffer caps**: timeline player now
+> `{maxBufferLength:30, maxMaxBufferLength:60, maxBufferSize:60MB,
+> backBufferLength:30}` + a bad-append guard (>40
+> bufferAppendNoProgress/bufferAppendError while currentTime==0 →
+> "recording unreadable" stop; after playhead moves, overlap errors are
+> benign and ignored). (4) **Playlist windows 6h → 10min** in
+> timeline.js with chaining: video 'ended' before range end →
+> startPlayback(windowEndMs) (gap boundary → gap placeholder).
+> Verified on OLD skewed data via the hls.js path: playhead 1x,
+> contiguous buffer ~30s ahead with back-eviction, download settles to
+> ~stream rate (~1 MB/s incl. doubled-audio bloat). /PlayerArchive got
+> caps+guard+kick (no chaining). Cosmetic fix: thumb onload/onerror
+> token-guard also checks `video` (was overwriting "connecting…" state).
+> NOTE the doubled-audio PTS skew differs per camera: 196 (backyard)
+> audio PTS runs 2× wall (audio spans 2× video per fragment → MSE
+> overlap storm), 197 (floor_2_5) compressed (½-rate PTS steps). The
+> v0.15 asetrate fix heals both going forward; verified 10 s wall →
+> 9.9 s/10.3 s AAC with aligned A/V spans on both. e2e 32 passed,
+> pre-commit green. **Headless trap: nixpkgs chromium reports
+> canPlayType HLS "maybe" — page-level repros silently bypassed hls.js
+> until the branch order was flipped; always assert which branch ran
+> (data-tl-state shows "playing" vs "playing (native HLS)").**
+
+
+> **Archive player redesign + audio slowdown/overrun fix (Aug 24 2026 —
+> v0.15.0.0)**: /Timeline is now ONE player (camera dropdown +
+> 16/9 surface capped at 50vh) instead of the tile grid — tiles,
+> enable toggles, `hnvr-timeline-disabled` and `?cams=` are GONE.
+> Active camera: dropdown switch, localStorage hnvr-timeline-active,
+> `?active=<uuid>` wins (Events ▶ links keep working), default = first
+> option; the active lane is accented on the canvas. Player video has
+> `controls` + muted autoplay (unmute via native controls). Admin purge
+> is a single form in the player bar; timeline.js rewrites its
+> action/data-confirm to the selected camera. **e2e trap: the player
+> card pushed the canvas below the 720px viewport fold — off-viewport
+> playwright mouse coords silently hit nothing (elementFromPoint =
+> null, zero events, no error); drag tests need
+> scrollIntoViewIfNeeded().**
+> **Audio root cause (BOTH of Sergey's bugs, one fix)**: the Hik-OEMs
+> (196/197) sample G.711 at 16 kHz but clock PCMU RTP at the RFC-3551
+> fixed 8000 Hz — measured 12 s wall → 24.0 s decoded WAV from the
+> mediamtx relay, and a real clip held 955 AAC packets (20.4 s of
+> audio) in a 10.4 s clip. Result: slowed playback AND audio continuing
+> long after the video ends (buffered 2× audio). The EXTINF wall-clock
+> diffing in Clip.hs was NOT the cause (total error ~50 ms) — left
+> as-is. Fix: `Hnvr.Core.CameraSnapshot.audioInputRateHz` (Just rate
+> only for G711/G726 — fixed-clock encodings; AAC SDP carries the truth)
+> computed from the ONVIF `audio_encoding`/`audio_sample_rate_khz`
+> columns, plumbed via new `csAudioInputRateHz` (FromJSON .:?
+> old-leader safe; BOTH CommandTypes.projectCameraWithRules and
+> SnapshotResponder CamRow — now 24 cols) → ccAudioInputRateHz →
+> rcAudioInputRateHz → `asetrate=<Hz>,` prepended to the -af chain
+> (skipped when unset/8kHz). Verified live vs relay: 10 s wall → 9.9 s
+> AAC with asetrate=16000. Old recordings stay slowed (fix-forward,
+> Sergey's call). Goes live on leader restart. e2e 32 passed on :18002,
+> 234 core + 57 capture tests green, pre-commit green.
+
+> **Adoption window fix (Aug 21 2026 — v0.14.5.1)**: 0.14.5.0 was live
+> (verified via /status) yet Sergey still got a triple (floor_2_5
+> 09:04:48→53.76→09:05:00 UTC, tracks 1→2→4, gaps 5.0 s dist 0.03 and
+> 6.65 s dist 0.47). Root cause: PARAMETER INVERSION —
+> `trackMemorySec` (3 s) trimmed donors BEFORE `handoverWindowSec`
+> (5 s) could match them; adoption older than 3 s was unreachable, and
+> the 6.65 s gap exceeded even the nominal window. Fix: memory 10 s,
+> window 8 s (SORT maxAge 30 frames ≈ 6 s coast at 5 fps + reconfirm
+> latency). The 6.65 s/0.47-dist case is caught by velocity prediction
+> (donor v≈0.05/s diagonal → predicted pos within 0.06 of actual).
+> 2 regression tests with Sergey's exact numbers (both need a
+> 15000 ms cooldown override — the harness default 5000 ms is shorter
+> than the tested gaps and would legitimately refire); 111 cv tests
+> green. Residual risk: >8 s occlusions or single-observation donors
+> (v=0, no prediction) can still refire — the deterministic fallback
+> is a RULE-LEVEL cooldown for zone_inside/zone_motion (presence
+> semantics, merges different people within the window); offered to
+> Sergey, not implemented. Pending leader restart.
+
+> **Movement-aware object identity: shadowing + velocity adoption
+> (Aug 21 2026 — v0.14.5.0)**: follow-up to the v0.14.4.0 merge —
+> Sergey's 11:51 triple (floor_2_5 zone_inside, tracks 13/14/15 in 4 s)
+> showed adoption-only wasn't enough: track 13 fired LAST, i.e. it was
+> alive the whole time while 14/15 were CONCURRENT duplicate tracks
+> (pose-variant boxes slip past NMS, confirm in 3 frames, each fires
+> zone_inside on first inside observation). Dead-donor adoption can't
+> touch live duplicates, and a walking person (0.12 normalized/s)
+> outran the fixed 0.2 radius / 2 s window. `EngineState` extended:
+> SeenTrack gained stVelocity (center delta\/dt per frame, capped
+> 0.6\/s); new esShadows map (shadow → primary). (a) DUPLICATE
+> SHADOWING: a freshly-confirmed track within `shadowMaxDist` (0.35)
+> of an already-live same-class track is never rule-evaluated; when
+> the primary disappears the shadow INHERITS its rule state (cooldown
+> holds); pairs that diverge beyond the radius split and re-arm.
+> (b) Adoption is now velocity-predicted (match fresh id against the
+> dead track's extrapolated position, radius `handoverRadius` 0.2)
+> with the window raised to `handoverWindowSec` 5 s. 5 new cabal
+> tests (shadow+inherit, class/distance rejection, split re-arm,
+> velocity-predicted walk); 109 cv tests green, nix build + pre-commit
+> green. Live effect pending leader restart (12:07 restart already
+> picked up 0.14.4.0; this needs another).
+
+> **Same-person event bursts merged detection-side (Aug 21 2026 —
+> v0.14.4.0)**: Sergey hit triple zone_inside events for ONE person
+> (floor_2_5, 07:24:58–07:25:22 UTC): cooldown (15 s, config-correct)
+> fired per schedule, but track id switches (1→2→4 on pose changes)
+> bypassed it — new SORT id = fresh per-(rule,track) state. Root
+> cause holes: `evalTracks` pruned state the instant a track missed
+> one frame, and nothing carried state across id switches. Fix in
+> `Hnvr.Cv.Rules`: new `EngineState` = esRules + `esSeen` track memory
+> (class, normalized center, last-seen ts). (a) GRACE PRUNING: state
+> survives dropouts up to `trackMemorySec` (3 s). (b) ID-SWITCH
+> ADOPTION: a fresh track id matching a recently-dead one (same class,
+> ≤`handoverWindowSec` 2 s, ≤`handoverMaxDist` 0.2 normalized center
+> distance, nearest wins, donor consumed) inherits its per-rule states
+> — cooldown clock, zone inside flag, motion anchor all follow the
+> person. evalTracks signature changed: takes\/returns EngineState
+> (emptyEngineState); CaptureSupervisor rulesRef updated (only call
+> site). 6 new cabal tests (dropout survival, adoption, too-far/
+> cross-class rejection, memory expiry, motion-anchor adoption —
+> fixtures via initKalman, fw=fh=1 so norm is identity); 104 cv tests
+> green. NOTE Rule has no Show (rClasses function) — assert with
+> null/length, not @?=. Adoption can suppress a legit event when two
+> people pass the same spot within 2 s — accepted tradeoff (miss over
+> dupe direction chosen by Sergey). Live effect pending leader restart
+> (stacks with the 0014 dedup + 0.14.3.2 race/leak fixes).
+
+> **Duplicate events fix (Aug 21 2026 — v0.14.3.1)**: Sergey reported
+> doubled event rows (same ts/track/rule/conf). Diagnosis: NOT the rule
+> cooldown (analyzer layer works) — the rows were perfect copies with
+> sub-ms `created_at` deltas (0.1–0.5 ms), impossible for one
+> sequential EventWriter thread (fresh PG conn per insert ≳1 ms) →
+> TWO CONCURRENT inserters = two leader processes draining
+> hnvr.events into the shared dev DB (stray/test leader alongside the
+> real one; dup bursts correlate with second-leader windows, Aug 20
+> 11:00–14:00 UTC + Aug 21 05:31–05:33 UTC). Fix follows the existing
+> absorb-dupes pattern (segments/snapshots/clips): migration
+> **0014-event-dedup** (wired into SchemaMigration) purged 135 dup
+> groups keeping earliest-created (event_clip_events links re-pointed
+> first — the clip linker had linked BOTH rows of each pair, so all
+> re-points conflict-absorbed) + UNIQUE (camera_id, rule_id,
+> track_id, ts); insertCvEvent gained `ON CONFLICT ... DO NOTHING`.
+> Constraint alone stops dupes even on the OLD binary (unique_violation
+> → caught + logged "CV event insert failed", row skipped); new binary
+> makes it silent. **Trap hit: ADD CONSTRAINT duplicate raises
+> `duplicate_table` (42P07, backing index), NOT duplicate_object
+> (42710) — idempotency DO-block must catch both.** Also hit pitfall
+> #122 again (`hnvr-leader --version` BOOTS; stray died with the tool
+> call before NATS init, txn rolled back — use
+> `strings result/bin/hnvr-leader | grep` for version checks). Dev DB
+> has no 0014 row in schema_migrations yet (applied manually via psql);
+> next leader boot replays it as a verified no-op and records it.
+> Latent bugs found during diagnosis, FIXED in **v0.14.3.2**:
+> (1) `CaptureSupervisor.startCamera` stop-then-start was not
+> serialized — bootstrap `forM_ (startCamera sup)` (startNodeRoles)
+> could race an assignLoop startCamera for the same camera → two
+> analyzer pairs, one orphaned in csAnalysis (unstoppable until
+> restart). Fix: per-camera lifecycle MVar (`csLocks` IORef map,
+> `withCameraLock`); public startCamera/stopCamera/restartCamera take
+> it, `*Locked` variants assume it, stopAllCameras locks per camera.
+> Locks never removed from the map (camera-count small).
+> (2) Re-subscribe-per-message leak in FOUR consumers: ConfigWatcher
+> (all 3 loops), SnapshotResponder, PtzAuditWriter, PtzStatusCache each
+> called `Bus.subscribe` INSIDE `forever` — every processed message
+> leaked a live NATS subscription whose TChan accumulates all future
+> messages unread (nats-queue keeps the callback registered; reconnects
+> re-register sids automatically, so one subscribe is correct). All
+> hoisted to subscribe-once-before-forever. EventWriter/HealthCache/
+> Ptz.Controller were already correct. Verified: nix build + pre-commit
+> green; leader restart pending (Sergey's call, same as 0014).
+
 > **Camera delete purges S3 (Aug 21 2026 — v0.14.3.0)**: DeleteCameraAction
 > now forks `Hnvr.Web.PendingPurge.forkCameraFullPurge slug` after
 > deleteRecord — deletes EVERY object under `<slug>/` (segments, init.mp4,

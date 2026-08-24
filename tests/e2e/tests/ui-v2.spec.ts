@@ -78,15 +78,14 @@ test.describe('UI v2', () => {
     await expect(page.locator('#live-overlay')).toBeHidden();
   });
 
-  test('archive timeline shell renders tiles + canvas', async ({loggedInPage: page}) => {
+  test('archive timeline shell renders player + canvas', async ({loggedInPage: page}) => {
     await page.goto('/Timeline');
     await expect(page.locator('.section-h').first()).toContainText('Archive timeline');
     await expect(page.locator('[data-timeline]')).toBeVisible();
     await expect(page.locator('[data-tl-canvas]')).toBeVisible();
-    // One tile per camera; toggles default on.
-    const tiles = page.locator('[data-tl-tile]');
-    expect(await tiles.count()).toBeGreaterThan(0);
-    await expect(tiles.first().locator('[data-tl-toggle]')).toBeChecked();
+    // One camera dropdown; an option per camera.
+    const options = page.locator('[data-tl-camera] option');
+    expect(await options.count()).toBeGreaterThan(0);
   });
 
   test('events table: sortable + rows deep-link to timeline', async ({loggedInPage: page}) => {

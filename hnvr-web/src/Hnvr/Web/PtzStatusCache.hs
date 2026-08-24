@@ -38,15 +38,16 @@ startPtzStatusCache bus = do
   _ <- async loop
   logInfo "PtzStatusCache: subscribed to hnvr.ptz.status.>"
   where
-    loop = forever $ do
+    loop = do
       sub <- Bus.subscribe bus "hnvr.ptz.status.>"
-      msg <- Bus.readMessage sub
-      r <- try (handle msg)
-      case r of
-        Right () -> pure ()
-        Left (e :: SomeException) -> case fromException e of
-          Just (SomeAsyncException _) -> throwIO e
-          Nothing -> logError ("PtzStatusCache: " <> T.pack (show e))
+      forever $ do
+        msg <- Bus.readMessage sub
+        r <- try (handle msg)
+        case r of
+          Right () -> pure ()
+          Left (e :: SomeException) -> case fromException e of
+            Just (SomeAsyncException _) -> throwIO e
+            Nothing -> logError ("PtzStatusCache: " <> T.pack (show e))
     handle msg =
       case decodeStrict' (msgPayload msg) of
         Nothing -> logError ("PtzStatusCache: undecodable status on " <> msgSubject msg)

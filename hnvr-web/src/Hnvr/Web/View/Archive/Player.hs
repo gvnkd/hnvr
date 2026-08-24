@@ -67,9 +67,14 @@ instance View PlayerView where
       -- in Haskell and inject as a single body-level splice. See pitfall #63.
       scriptTag = preEscapedTextValue ("<script>" <> js <> "</script>" :: Text)
 
-      hlsConfig = case startOffset of
-        Just off -> "{ startPosition: " <> tshow off <> " }"
-        Nothing -> ""
+      -- Buffer caps bound hls.js's forward loading; the bad-append
+      -- guard stops the "black screen while the whole playlist
+      -- downloads" failure mode on old recordings whose skewed A/V
+      -- timestamps make MSE reject/overlap every segment (v0.15.0.0).
+      hlsConfig =
+        "{ maxBufferLength: 30, maxMaxBufferLength: 60, maxBufferSize: 60000000, backBufferLength: 30, maxBufferHole: 0.6, maxSeekHole: 4, nudgeMaxRetry: 12"
+          <> (case startOffset of Just off -> ", startPosition: " <> tshow off; Nothing -> "")
+          <> " }"
 
       js =
         "const video = document.getElementById('hnvr-player');"
@@ -80,18 +85,36 @@ instance View PlayerView where
           <> "const src = '"
           <> playlistUrl
           <> "';"
-          <> "if (video.canPlayType('application/vnd.apple.mpegurl')) {"
+          -- HNVR.hlsArchive repairs EXTINF durations + strips legacy
+          -- skewed audio up-front; native HLS is the Safari fallback.
+          <> "if (window.Hls && Hls.isSupported()) {"
+          <> "  let badAppends = 0;"
+          <> "  let started = false;"
+          <> "  video.addEventListener('playing', () => { started = true; });"
+          <> "  const kickStart = () => {"
+          <> "    if (started || !video.buffered.length) return;"
+          <> "    const first = video.buffered.start(0);"
+          <> "    if (video.currentTime + 0.25 < first) { try { video.currentTime = first + 0.05; } catch (e) {} }"
+          <> "    if (video.paused) video.play().catch(() => {});"
+          <> "  };"
+          <> "  HNVR.hlsArchive(Hls, video, src, "
+          <> hlsConfig
+          <> ").then((hls) => {"
+          <> "  hls.on(Hls.Events.BUFFER_APPENDED, kickStart);"
+          <> "  hls.on(Hls.Events.MANIFEST_PARSED, () => { status.textContent = 'Ready'; setLed('led-on'); });"
+          <> "  hls.on(Hls.Events.ERROR, (_, d) => {"
+          <> "    if (d.details === 'bufferAppendNoProgress' || d.details === 'bufferAppendError' || d.details === 'bufferFullError') {"
+          <> "      if (video.currentTime > 0) return;"
+          <> "      if (++badAppends > 40) { hls.destroy(); status.textContent = 'Recording unreadable (bad timestamps)'; setLed('led-off'); }"
+          <> "      return;"
+          <> "    }"
+          <> "    status.textContent = 'Error: ' + d.details; setLed('led-off');"
+          <> "  });"
+          <> "  });"
+          <> "} else if (video.canPlayType('application/vnd.apple.mpegurl')) {"
           <> "  video.src = src;"
           <> seekJs
           <> "  status.textContent = 'Native HLS (Safari)'; setLed('led-on');"
-          <> "} else if (window.Hls && Hls.isSupported()) {"
-          <> "  const hls = new Hls("
-          <> hlsConfig
-          <> ");"
-          <> "  hls.loadSource(src);"
-          <> "  hls.attachMedia(video);"
-          <> "  hls.on(Hls.Events.MANIFEST_PARSED, () => { status.textContent = 'Ready'; setLed('led-on'); });"
-          <> "  hls.on(Hls.Events.ERROR, (_, d) => { status.textContent = 'Error: ' + d.details; setLed('led-off'); });"
           <> "} else {"
           <> "  status.textContent = 'HLS not supported in this browser'; setLed('led-off');"
           <> "}"

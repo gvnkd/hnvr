@@ -57,7 +57,15 @@ data RecordingConfig = RecordingConfig
     -- fragments as the video. When False the audio track is dropped
     -- (@-an@). Cameras without an audio track produce video-only
     -- fragments either way (default stream mapping finds no audio).
-    rcRecordAudio :: !Bool
+    rcRecordAudio :: !Bool,
+    -- | Camera's real audio sampling rate (Hz) when it runs a fixed
+    -- 8 kHz RTP clock at a higher true rate (G.711/G.726 — RFC 3551
+    -- fixes the PCMU\/PCMA clock at 8000 whatever the camera samples
+    -- at; Sergey's Hik-OEMs send 16000 samples\/s that ffmpeg then
+    -- decodes as 2×-slowed 8 kHz audio). When set (and ≠ 8 kHz), the
+    -- decoded stream is retagged with @asetrate@ BEFORE resampling so
+    -- pitch and speed come out right. 'Nothing' = trust the SDP clock.
+    rcAudioInputRateHz :: !(Maybe Int)
   }
   deriving stock (Eq, Show)
 
@@ -126,16 +134,25 @@ recordingArgs cfg =
     -- highpass + 14 kHz lowpass, then AAC. Filter order matters:
     -- aresample must precede highpass/lowpass. Measured: -24 dB @
     -- 30 Hz, -52 dB @ 20 kHz, 0 dB @ 1 kHz.
+    --
+    -- When the camera runs a fixed 8 kHz RTP clock at a higher real
+    -- sampling rate ('rcAudioInputRateHz'), an @asetrate@ retag comes
+    -- first of all: it re-labels the decoded frames at the true rate
+    -- (no resample, pitch+speed corrected) before aresample does the
+    -- rate conversion.
     audioOpts
       | rcRecordAudio cfg =
           [ "-af",
-            "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000",
+            asetrate <> "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000",
             "-c:a",
             "aac",
             "-b:a",
             "64k"
           ]
       | otherwise = ["-an"]
+    asetrate = case rcAudioInputRateHz cfg of
+      Just r | r > 0 && r /= 8000 -> "asetrate=" <> show r <> ","
+      _ -> ""
 
 -- | Build the recording ffmpeg process spec via @typed-process@. Stdin and
 -- stderr are inherited; stdout is left as 'Inherited' so the caller can

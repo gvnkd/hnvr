@@ -86,17 +86,24 @@ Same shape as the v0 design. Used as safety net; alarm via `hnvr_substream_fallb
 - Every 5 min, attempt to revert to sub-stream
 - If sub-stream succeeds for 60 s, mark recovered; stop alarm
 
-### 3. Audio ffmpeg (only if `record_audio=true`)
+### 3. Audio (only if `record_audio=true`)
 
-Per-camera `record_audio` defaults to `false`. If enabled, a third ffmpeg pulls the main stream:
+Audio is decoded, filtered and re-encoded to AAC by the SAME recording
+ffmpeg (muxed into the shared fMP4 fragments — the separate-audio-ffmpeg
+design above was superseded). Filter chain:
 
 ```
-ffmpeg ... -i '<rtsp_url>' -vn -c:a copy -f mp4 \
-  -movflags +frag_keyframe+empty_moov+default_base_moof+omit_tfhd_offset \
-  -frag_duration 1000000 pipe:1
+[asetrate=<input Hz>,]aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000
 ```
 
-Audio fragments written as `cam-196/.../<ts>.m4a` referenced from the same segment row.
+The `asetrate` retag applies only for fixed-clock codecs (G.711/G.726 —
+RFC 3551 pins PCMU/PCMA to an 8 kHz RTP clock) whose camera samples at a
+higher real rate: the ONVIF-reported `audio_sample_rate_khz` then carries
+the truth (e.g. 16 kHz), the SDP clock does not. Without the retag the
+decoded audio is slowed (16k samples interpreted as 8k = 2× slow) and
+twice as much audio is muxed per wall second — video ends while the
+buffered audio keeps playing. AAC carries its real rate in the SDP and
+needs no correction.
 
 ## Why two (or three) independent RTSP pulls
 

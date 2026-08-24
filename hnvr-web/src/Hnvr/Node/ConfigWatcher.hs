@@ -45,10 +45,14 @@ import Hnvr.Web.CommandTypes
     ControlPayload (..),
   )
 
--- | Spawn the subscriber. Reads messages forever in background asyncs
--- (one per subject — nats-queue delivers each on its own thread via
--- the subscription's TChan). @host@ is this node's id, used to filter
--- the control subject to directives aimed at us.
+-- | Spawn the subscriber. One subscription per subject, each drained
+-- forever on its own background async (nats-queue delivers messages
+-- into the subscription's TChan; reconnects re-register the sid
+-- automatically, so a single subscribe is sufficient and correct —
+-- re-subscribing per message would leak live subscriptions whose
+-- TChans accumulate every future message unread).
+-- @host@ is this node's id, used to filter the control subject to
+-- directives aimed at us.
 startConfigWatcher :: Bus -> Text -> CaptureSupervisor -> IO ()
 startConfigWatcher bus host sup = do
   _ <- async (assignLoop host sup)
@@ -62,22 +66,22 @@ startConfigWatcher bus host sup = do
         <> host
     )
   where
-    assignLoop thisHost supervisor =
+    assignLoop thisHost supervisor = do
+      sub <- Bus.subscribe bus "hnvr.commands.assign.>"
       forever $ do
-        sub <- Bus.subscribe bus "hnvr.commands.assign.>"
         msg <- Bus.readMessage sub
         handleAssign thisHost supervisor msg
 
-    controlLoop thisHost supervisor =
+    controlLoop thisHost supervisor = do
+      let subject = "hnvr.commands.control." <> thisHost <> ".>"
+      sub <- Bus.subscribe bus subject
       forever $ do
-        let subject = "hnvr.commands.control." <> thisHost <> ".>"
-        sub <- Bus.subscribe bus subject
         msg <- Bus.readMessage sub
         handleControl supervisor msg
 
-    configLoop =
+    configLoop = do
+      sub <- Bus.subscribe bus "hnvr.config.cameras.>"
       forever $ do
-        sub <- Bus.subscribe bus "hnvr.config.cameras.>"
         msg <- Bus.readMessage sub
         handleConfig msg
 

@@ -185,6 +185,10 @@ CREATE TABLE events (
     host_id         TEXT,
     payload         JSONB,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    -- Duplicate-publish absorption (migration 0014): one analyzer emits
+    -- at most one event per rule+track per frame ts, so an exact match
+    -- is a duplicate publish (second EventWriter, redelivery).
+    UNIQUE (camera_id, rule_id, track_id, ts),
     FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
     FOREIGN KEY (rule_id) REFERENCES rules(id) ON DELETE SET NULL,
     FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE SET NULL

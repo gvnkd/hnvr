@@ -163,6 +163,12 @@ insertClipReady cr = do
 -- lags the fragment close — 'segmentTsBackfillLoop' re-resolves it
 -- within a minute). @payload@ stores the full 'CvEvent' JSON envelope.
 --
+-- Idempotent: @ON CONFLICT (camera_id, rule_id, track_id, ts) DO
+-- NOTHING@ absorbs duplicate publishes — a second leader draining
+-- @hnvr.events@ (the Aug 21 2026 duplicate-rows bug) or any future
+-- redelivery. Same pattern as 'insertSegment'/'insertSnapshot';
+-- constraint added by migration 0014.
+--
 -- Uses a one-shot postgresql-simple connection (like
 -- 'Web.Controller.Events.fetchEventRows'): the 14-param INSERT exceeds
 -- IHP sqlExec's ToSnippetParams arity.
@@ -181,7 +187,8 @@ insertCvEvent ev = do
         \    WHERE s.camera_id = ? AND s.start_ts <= ? AND s.end_ts >= ? \
         \      AND s.pending_delete_at IS NULL \
         \    ORDER BY s.start_ts DESC LIMIT 1), \
-        \  ?::jsonb, NOW())"
+        \  ?::jsonb, NOW()) \
+        \ ON CONFLICT (camera_id, rule_id, track_id, ts) DO NOTHING"
         ( ( unCameraId (ceCamera ev) :: UUID,
             ceRuleId ev,
             ceTs ev,

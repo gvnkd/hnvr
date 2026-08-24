@@ -24,6 +24,7 @@ module Hnvr.Core.CameraSnapshot
     Transport (..),
     transportToText,
     transportFromText,
+    audioInputRateHz,
   )
 where
 
@@ -116,7 +117,14 @@ data CameraSnapshot = CameraSnapshot
     -- credentials, profile token). @psPassword@ is decrypted leader-side
     -- and crosses NATS in plaintext — same exposure class as
     -- @csRtspUrl@, which embeds the same credentials.
-    csPtz :: !(Maybe PtzSnapshot)
+    csPtz :: !(Maybe PtzSnapshot),
+    -- | Camera's real audio sampling rate (Hz) when the encoding runs
+    -- a fixed 8 kHz RTP clock (G.711/G.726 per RFC 3551) at a higher
+    -- true rate — see 'audioInputRateHz'. The recording ffmpeg retags
+    -- the decoded stream with @asetrate@ before resampling, otherwise
+    -- the audio plays slowed (and twice as much audio is muxed in).
+    -- 'Nothing' = trust the SDP clock (AAC, unmanaged audio, 8 kHz).
+    csAudioInputRateHz :: !(Maybe Int)
   }
   deriving stock (Eq, Show, Generic)
 
@@ -144,6 +152,20 @@ instance FromJSON CameraSnapshot where
       <*> o .: "csModelName"
       <*> o .: "csRules"
       <*> o .:? "csPtz"
+      -- Absent on pre-audio-fix leaders: no retag (old behavior).
+      <*> o .:? "csAudioInputRateHz"
+
+-- | Compute the camera's real audio input rate (Hz) for encodings with
+-- a fixed 8 kHz RTP clock (G.711/G.726 per RFC 3551). Sergey's Hik-OEM
+-- cameras sample at 16 kHz but clock PCMU at 8000, delivering 16000
+-- samples\/s that ffmpeg decodes as 2×-slowed 8 kHz audio; the
+-- ONVIF-reported sampling rate (@audio_sample_rate_khz@) is the truth
+-- for the @asetrate@ retag. AAC carries its real rate in the SDP and
+-- unmanaged audio gets no correction ('Nothing').
+audioInputRateHz :: Maybe Text -> Maybe Int -> Maybe Int
+audioInputRateHz mEnc mKhz = case mEnc of
+  Just enc | enc `elem` ["G711", "G726"] -> (* 1000) <$> mKhz
+  _ -> Nothing
 
 -- | PTZ config for one camera, as sent to the owning host.
 data PtzSnapshot = PtzSnapshot

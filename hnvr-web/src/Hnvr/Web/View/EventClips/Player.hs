@@ -62,15 +62,16 @@ instance View ClipPlayerView where
           <> "const src = '"
           <> playlistUrl
           <> "';"
-          <> "if (video.canPlayType('application/vnd.apple.mpegurl')) {"
-          <> "  video.src = src;"
-          <> "  status.textContent = 'Native HLS (Safari)'; setLed('led-on');"
-          <> "} else if (window.Hls && Hls.isSupported()) {"
-          <> "  const hls = new Hls();"
-          <> "  hls.loadSource(src);"
-          <> "  hls.attachMedia(video);"
+          -- HNVR.hlsArchive repairs EXTINF durations + strips legacy
+          -- skewed audio up-front; native HLS is the Safari fallback.
+          <> "if (window.Hls && Hls.isSupported()) {"
+          <> "  HNVR.hlsArchive(Hls, video, src, {maxBufferHole: 0.6, maxSeekHole: 4, nudgeMaxRetry: 12}).then((hls) => {"
           <> "  hls.on(Hls.Events.MANIFEST_PARSED, () => { status.textContent = 'Ready'; setLed('led-on'); });"
           <> "  hls.on(Hls.Events.ERROR, (_, d) => { status.textContent = 'Error: ' + d.details; setLed('led-off'); });"
+          <> "  });"
+          <> "} else if (video.canPlayType('application/vnd.apple.mpegurl')) {"
+          <> "  video.src = src;"
+          <> "  status.textContent = 'Native HLS (Safari)'; setLed('led-on');"
           <> "} else {"
           <> "  status.textContent = 'HLS not supported in this browser'; setLed('led-off');"
           <> "}"

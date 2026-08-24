@@ -980,7 +980,7 @@
     // HNVR.toggleFullscreen).
     document.querySelectorAll("[data-zoompan-fs]").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        HNVR.toggleFullscreen(btn.closest(".video-frame, .live-overlay-video"));
+        HNVR.toggleFullscreen(btn.closest(".video-frame, .live-overlay-video, .tl-player-body"));
       });
     });
     // PTZ drawer slide toggle (ShowLive page + dashboard overlay).
@@ -1016,6 +1016,471 @@
       document.documentElement.getAttribute("data-theme") || "midnight"
     );
   }
+
+  /* ── fMP4 box helpers (archive playback surgery) ─────────────── */
+  function fmp4typ(b, o) {
+    return String.fromCharCode(b[o + 4], b[o + 5], b[o + 6], b[o + 7]);
+  }
+  function fmp4EachBox(dv, b, start, end, cb) {
+    var i = start;
+    while (i + 8 <= end) {
+      var size = dv.getUint32(i);
+      var hdr = 8;
+      if (size === 1) {
+        size = Number(dv.getBigUint64(i + 8));
+        hdr = 16;
+      } else if (size === 0) size = end - i;
+      if (size < hdr || i + size > end) break;
+      cb(i, size, hdr);
+      i += size;
+    }
+  }
+  function fmp4Find(dv, b, start, end, want) {
+    var hit = null;
+    fmp4EachBox(dv, b, start, end, function (i, size, hdr) {
+      if (!hit && fmp4typ(b, i) === want) hit = { off: i, size: size, hdr: hdr };
+    });
+    return hit;
+  }
+  /* init moov → per-track {id, ts, handler}; video track singled out. */
+  function fmp4Tracks(dv, b) {
+    var moov = fmp4Find(dv, b, 0, b.length, "moov");
+    if (!moov) return null;
+    var tracks = [];
+    fmp4EachBox(dv, b, moov.off + moov.hdr, moov.off + moov.size, function (ti, tsize, thdr) {
+      if (fmp4typ(b, ti) !== "trak") return;
+      var trackId = 0,
+        ts = 0,
+        handler = "";
+      var tkhd = fmp4Find(dv, b, ti + thdr, ti + tsize, "tkhd");
+      if (tkhd) trackId = dv.getUint32(tkhd.off + tkhd.hdr + (b[tkhd.off + tkhd.hdr] === 1 ? 20 : 12));
+      var mdia = fmp4Find(dv, b, ti + thdr, ti + tsize, "mdia");
+      if (mdia) {
+        var mdhd = fmp4Find(dv, b, mdia.off + mdia.hdr, mdia.off + mdia.size, "mdhd");
+        if (mdhd) ts = dv.getUint32(mdhd.off + mdhd.hdr + (b[mdhd.off + mdhd.hdr] === 1 ? 20 : 12));
+        var hdlr = fmp4Find(dv, b, mdia.off + mdia.hdr, mdia.off + mdia.size, "hdlr");
+        if (hdlr)
+          handler = String.fromCharCode(
+            b[hdlr.off + hdlr.hdr + 8],
+            b[hdlr.off + hdlr.hdr + 9],
+            b[hdlr.off + hdlr.hdr + 10],
+            b[hdlr.off + hdlr.hdr + 11]
+          );
+      }
+      if (trackId && ts) tracks.push({ id: trackId, ts: ts, handler: handler });
+    });
+    return tracks.length ? tracks : null;
+  }
+  /* moof → per-traf {trackId, tfdtOff, ver, tfdt, trun} */
+  function fmp4Fragment(dv, b) {
+    var moof = fmp4Find(dv, b, 0, b.length, "moof");
+    var mdat = fmp4Find(dv, b, 0, b.length, "mdat");
+    if (!moof) return null;
+    var trafs = [];
+    fmp4EachBox(dv, b, moof.off + moof.hdr, moof.off + moof.size, function (ti, tsize, thdr) {
+      if (fmp4typ(b, ti) !== "traf") return;
+      var tfhd = fmp4Find(dv, b, ti + thdr, ti + tsize, "tfhd");
+      if (!tfhd) return;
+      var trackId = dv.getUint32(tfhd.off + tfhd.hdr + 4);
+      var tfdt = fmp4Find(dv, b, ti + thdr, ti + tsize, "tfdt");
+      var trun = fmp4Find(dv, b, ti + thdr, ti + tsize, "trun");
+      var val = null,
+        ver = 0,
+        tfdtOff = 0;
+      if (tfdt) {
+        ver = b[tfdt.off + tfdt.hdr];
+        tfdtOff = tfdt.off + tfdt.hdr + 4;
+        val = ver === 1 ? Number(dv.getBigUint64(tfdtOff)) : dv.getUint32(tfdtOff);
+      }
+      trafs.push({
+        trackId: trackId,
+        trafOff: ti,
+        trafSize: tsize,
+        tfdtOff: tfdtOff,
+        ver: ver,
+        tfdt: val,
+        trun: trun ? { off: trun.off, hdr: trun.hdr } : null,
+      });
+    });
+    return { moof: moof, mdat: mdat, trafs: trafs };
+  }
+  /* trun → {dataOffset, bytes, span}: sample byte total and duration
+   * sum. Our layout: one trun per traf, single data_offset, per-sample
+   * duration+size entries. */
+  function fmp4Trun(dv, b, off, hdr) {
+    var p = off + hdr;
+    var flags = (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3];
+    var count = dv.getUint32(p + 4);
+    p += 8;
+    var dataOffset = null;
+    if (flags & 0x1) {
+      dataOffset = dv.getInt32(p);
+      p += 4;
+    }
+    if (flags & 0x4) p += 4;
+    var bytes = 0,
+      span = 0;
+    for (var s = 0; s < count; s++) {
+      if (flags & 0x100) {
+        span += dv.getUint32(p);
+        p += 4;
+      }
+      if (flags & 0x200) {
+        bytes += dv.getUint32(p);
+        p += 4;
+      }
+      if (flags & 0x400) p += 4;
+      if (flags & 0x800) p += 4;
+    }
+    return { dataOffset: dataOffset, bytes: bytes, span: span };
+  }
+
+  /* ── fMP4 legacy-audio loader for hls.js ───────────────────────
+   * Pre-v0.15 recordings carry a malformed audio track (camera G.711
+   * sampled at 16 kHz but clocked at 8 kHz): audio PTS runs ~2x video
+   * PTS (or jitters wildly), which makes per-fragment MSE appends
+   * present only the first video frame (black/frozen player) while
+   * hls.js storms the whole playlist. This hls.js fLoader:
+   *  1. rewrites every non-video traf's tfdt in each moof to the video
+   *     traf's tfdt (rescaled by track timescale) — no-op (±1 tick) on
+   *     fixed recordings;
+   *  2. with {stripAudio: true} (legacy window, detected up-front by
+   *     HNVR.fmp4RewritePlaylist), rebuilds each fragment WITHOUT the
+   *     audio traf and its mdat bytes (sizes + video trun data_offset
+   *     fixed; the init passed to hls.js is likewise audio-less) —
+   *     legacy recordings play video-only, smooth; the audio on them
+   *     was slowed garbage anyway. */
+  HNVR.fmp4PatchLoader = function (Hls, opts) {
+    var stripAudio = !!(opts && opts.stripAudio);
+    var trackTs = {};
+    var videoTrackId = 0;
+    var videoTs = 90000;
+
+    function parseInit(dv, b) {
+      var tracks = fmp4Tracks(dv, b);
+      if (!tracks) return;
+      tracks.forEach(function (t) {
+        trackTs[t.id] = t.ts;
+        if (t.handler === "vide") {
+          videoTrackId = t.id;
+          videoTs = t.ts || videoTs;
+        }
+      });
+    }
+    function patchTfdts(dv, trafs) {
+      if (trafs.length < 2 || !videoTrackId) return;
+      var vt = null;
+      trafs.forEach(function (t) {
+        if (t.trackId === videoTrackId) vt = t.tfdt;
+      });
+      if (vt === null) return;
+      trafs.forEach(function (t) {
+        if (t.trackId === videoTrackId || t.tfdt === null) return;
+        var ts = trackTs[t.trackId];
+        if (!ts) return;
+        var aligned = Math.round((vt * ts) / videoTs);
+        if (t.ver === 1) dv.setBigUint64(t.tfdtOff, BigInt(aligned));
+        else dv.setUint32(t.tfdtOff, aligned >>> 0);
+      });
+    }
+    /* Rebuild the fragment without the audio traf and its mdat bytes,
+     * fixing moof/mdat sizes and the video trun data_offset (relative
+     * to moof start — the moof shrinks, and the audio block may precede
+     * the video block). */
+    function stripFragment(dv, b, frag) {
+      var audio = null,
+        videoTraf = null;
+      frag.trafs.forEach(function (t) {
+        if (t.trackId === videoTrackId) videoTraf = t;
+        else if (!audio) audio = t;
+      });
+      if (!audio || !videoTraf || !videoTraf.trun || !audio.trun || !frag.mdat) return b;
+      var vTrun = fmp4Trun(dv, b, videoTraf.trun.off, videoTraf.trun.hdr);
+      var aTrun = fmp4Trun(dv, b, audio.trun.off, audio.trun.hdr);
+      if (vTrun.dataOffset === null || aTrun.dataOffset === null) return b;
+      var moofShrink = audio.trafSize;
+      var aStart = frag.moof.off + aTrun.dataOffset;
+      var vDataDelta = moofShrink + (aStart < frag.moof.off + vTrun.dataOffset ? aTrun.bytes : 0);
+      var newMoofSize = frag.moof.size - moofShrink;
+      var newMdatSize = frag.mdat.size - aTrun.bytes;
+      var out = new Uint8Array(b.length - moofShrink - aTrun.bytes);
+      var odv = new DataView(out.buffer);
+      var o = 0;
+      out.set(b.subarray(frag.moof.off, frag.moof.off + 4), o);
+      odv.setUint32(o, newMoofSize);
+      o += 4;
+      out.set(b.subarray(frag.moof.off + 4, frag.moof.off + frag.moof.hdr), o);
+      o += frag.moof.hdr - 4;
+      fmp4EachBox(dv, b, frag.moof.off + frag.moof.hdr, frag.moof.off + frag.moof.size, function (bi, bsize) {
+        if (bi === audio.trafOff) return;
+        var chunk = new Uint8Array(b.subarray(bi, bi + bsize));
+        if (bi === videoTraf.trafOff && videoTraf.trun) {
+          var cvd = new DataView(chunk.buffer);
+          cvd.setInt32(videoTraf.trun.off + videoTraf.trun.hdr + 8 - bi, vTrun.dataOffset - vDataDelta);
+        }
+        out.set(chunk, o);
+        o += bsize;
+      });
+      out.set(b.subarray(frag.mdat.off, frag.mdat.off + 4), o);
+      odv.setUint32(o, newMdatSize);
+      o += 4;
+      out.set(b.subarray(frag.mdat.off + 4, frag.mdat.off + frag.mdat.hdr), o);
+      o += frag.mdat.hdr - 4;
+      var payloadStart = frag.mdat.off + frag.mdat.hdr;
+      var mdatEnd = frag.mdat.off + frag.mdat.size;
+      var aEnd = aStart + aTrun.bytes;
+      if (aEnd <= payloadStart || aStart >= mdatEnd) {
+        out.set(b.subarray(payloadStart, mdatEnd), o);
+        o += mdatEnd - payloadStart;
+      } else {
+        out.set(b.subarray(payloadStart, aStart), o);
+        o += aStart - payloadStart;
+        out.set(b.subarray(aEnd, mdatEnd), o);
+        o += mdatEnd - aEnd;
+      }
+      return out.slice(0, o);
+    }
+    return class TfdtPatchLoader extends Hls.DefaultConfig.loader {
+      load(context, config, callbacks) {
+        return super.load(context, config, {
+          onSuccess: function (resp, stats, ctx, xhr) {
+            try {
+              var data = resp && resp.data;
+              if (data && data.byteLength > 8) {
+                var b = new Uint8Array(data);
+                var dv = new DataView(data);
+                if (fmp4Find(dv, b, 0, b.length, "moov")) {
+                  parseInit(dv, b);
+                } else {
+                  var frag = fmp4Fragment(dv, b);
+                  if (frag && frag.trafs.length) {
+                    if (stripAudio) {
+                      var stripped = stripFragment(dv, b, frag);
+                      if (stripped !== b) resp.data = stripped.buffer;
+                    } else {
+                      patchTfdts(dv, frag.trafs);
+                    }
+                  }
+                }
+              }
+            } catch (e) {}
+            callbacks.onSuccess(resp, stats, ctx, xhr);
+          },
+          onError: callbacks.onError,
+          onTimeout: callbacks.onTimeout,
+          onProgress: callbacks.onProgress,
+        });
+      }
+    };
+  };
+
+  /* ── Archive playlist repair + legacy detection ────────────────
+   * Server playlists declare EXTINF from DB wall-clock segment times,
+   * which drift from real media durations (irregular keyframe-cut
+   * fragment lengths); hls.js positions fragments by cumulative EXTINF
+   * so the timeline accumulates holes and overlaps (stalls, bufferFull
+   * churn). This range-GETs every fragment's moof head, diffs video
+   * tfdts for TRUE durations, and detects legacy audio skew (audio tfdt
+   * deltas persistently off the video ratio — 2 consecutive unhealthy
+   * boundaries; an ffmpeg restart jumps both tracks equally and does
+   * not trip it). Legacy windows additionally get the init moov
+   * stripped of its audio trak (+trex) so playback is video-only from
+   * the first append — mid-playback audio loss would stall A/V sync.
+   * Resolves {text, stripAudio}; probe/init failures fall back to the
+   * original playlist text. Fragment/init URLs in the playlist are
+   * absolute presigned S3, so the result is fed to hls.js via Blob URL. */
+  HNVR.fmp4RewritePlaylist = function (m3u8Text) {
+    function fetchRange(url, bytes) {
+      return fetch(url, { headers: { Range: "bytes=0-" + bytes } }).then(function (r) {
+        if (!r.ok && r.status !== 206) throw new Error("probe " + r.status);
+        return r.arrayBuffer();
+      });
+    }
+    function stripInit(buf, audioTrackId) {
+      var b = new Uint8Array(buf);
+      var dv = new DataView(buf);
+      var moov = fmp4Find(dv, b, 0, b.length, "moov");
+      if (!moov) return buf;
+      var parts = [];
+      var newSize = moov.size;
+      fmp4EachBox(dv, b, moov.off + moov.hdr, moov.off + moov.size, function (ci, csize, chdr) {
+        var t = fmp4typ(b, ci);
+        if (t === "trak") {
+          var tkhd = fmp4Find(dv, b, ci + chdr, ci + csize, "tkhd");
+          var id = tkhd ? dv.getUint32(tkhd.off + tkhd.hdr + (b[tkhd.off + tkhd.hdr] === 1 ? 20 : 12)) : 0;
+          if (id === audioTrackId) {
+            newSize -= csize;
+            return;
+          }
+          parts.push({ off: ci, size: csize });
+        } else if (t === "mvex") {
+          var keep = [];
+          var mvexNew = csize;
+          fmp4EachBox(dv, b, ci + chdr, ci + csize, function (ti, tsize, thdr) {
+            if (fmp4typ(b, ti) === "trex" && dv.getUint32(ti + thdr + 4) === audioTrackId) {
+              mvexNew -= tsize;
+              newSize -= tsize;
+              return;
+            }
+            keep.push({ off: ti, size: tsize });
+          });
+          parts.push({ mvex: ci, hdr: chdr, keep: keep, newSize: mvexNew });
+        } else parts.push({ off: ci, size: csize });
+      });
+      if (newSize === moov.size) return buf;
+      var out = new Uint8Array(b.length - (moov.size - newSize));
+      var odv = new DataView(out.buffer);
+      out.set(b.subarray(0, moov.off));
+      odv.setUint32(moov.off, newSize);
+      var o = moov.off + 4;
+      out.set(b.subarray(moov.off + 4, moov.off + moov.hdr), o);
+      o += moov.hdr - 4;
+      parts.forEach(function (p) {
+        if (p.mvex !== undefined) {
+          out.set(b.subarray(p.mvex, p.mvex + p.hdr), o);
+          odv.setUint32(o, p.newSize);
+          o += p.hdr;
+          p.keep.forEach(function (k) {
+            out.set(b.subarray(k.off, k.off + k.size), o);
+            o += k.size;
+          });
+        } else {
+          out.set(b.subarray(p.off, p.off + p.size), o);
+          o += p.size;
+        }
+      });
+      return out.buffer;
+    }
+    var lines = m3u8Text.split("\n");
+    var initUrl = null;
+    var entries = [];
+    var mapRe = /EXT-X-MAP:URI="([^"]+)"/;
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].match(mapRe);
+      if (m) initUrl = m[1];
+      var e = lines[i].match(/^#EXTINF:([\d.]+)/);
+      if (e && i + 1 < lines.length && /^https?:/.test(lines[i + 1])) {
+        entries.push({ lineIndex: i, url: lines[i + 1], origDur: parseFloat(e[1]) });
+      }
+    }
+    if (!initUrl || !entries.length) return Promise.resolve({ text: m3u8Text, stripAudio: false });
+    return fetch(initUrl)
+      .then(function (r) {
+        return r.arrayBuffer();
+      })
+      .then(function (initBuf) {
+        var tracks = fmp4Tracks(new DataView(initBuf), new Uint8Array(initBuf));
+        if (!tracks) return { text: m3u8Text, stripAudio: false };
+        var video = null,
+          audio = null;
+        tracks.forEach(function (t) {
+          if (t.handler === "vide") video = t;
+          else if (!audio) audio = t;
+        });
+        if (!video) return { text: m3u8Text, stripAudio: false };
+        var probes = new Array(entries.length);
+        var next = 0;
+        function worker() {
+          if (next >= entries.length) return Promise.resolve();
+          var idx = next++;
+          return fetchRange(entries[idx].url, 8191)
+            .then(function (buf) {
+              var b = new Uint8Array(buf);
+              var dv = new DataView(buf);
+              var frag = fmp4Fragment(dv, b);
+              var rec = {};
+              if (frag)
+                frag.trafs.forEach(function (t) {
+                  if (t.tfdt === null || !t.trun) return;
+                  var tr = fmp4Trun(dv, b, t.trun.off, t.trun.hdr);
+                  rec[t.trackId] = { tfdt: t.tfdt, span: tr.span };
+                });
+              probes[idx] = rec;
+            })
+            .catch(function () {
+              probes[idx] = null;
+            })
+            .then(worker);
+        }
+        var pool = [];
+        for (var w = 0; w < 8; w++) pool.push(worker());
+        return Promise.all(pool).then(function () {
+          var ts = video.ts;
+          var durations = entries.map(function (en, k) {
+            var p = probes[k] && probes[k][video.id];
+            var nx = probes[k + 1] && probes[k + 1][video.id];
+            if (p && nx && nx.tfdt > p.tfdt) return (nx.tfdt - p.tfdt) / ts;
+            if (p && p.span > 0) return p.span / ts;
+            return en.origDur;
+          });
+          entries.forEach(function (en, k) {
+            lines[en.lineIndex] = "#EXTINF:" + durations[k].toFixed(3) + ",";
+          });
+          var legacy = false;
+          if (audio) {
+            var hits = 0;
+            for (var k = 1; k < entries.length; k++) {
+              var pv = probes[k - 1] && probes[k - 1][video.id];
+              var cv = probes[k] && probes[k][video.id];
+              var pa = probes[k - 1] && probes[k - 1][audio.id];
+              var ca = probes[k] && probes[k][audio.id];
+              if (!pv || !cv || !pa || !ca) continue;
+              var dV = (cv.tfdt - pv.tfdt) / video.ts;
+              var dA = (ca.tfdt - pa.tfdt) / audio.ts;
+              if (dV <= 0.02) continue;
+              var ratio = dA / dV;
+              if (ratio < 0.75 || ratio > 1.33) {
+                hits++;
+                if (hits >= 2) {
+                  legacy = true;
+                  break;
+                }
+              } else hits = 0;
+            }
+          }
+          if (legacy) {
+            var strippedInit = stripInit(initBuf, audio.id);
+            var blobUrl = URL.createObjectURL(new Blob([strippedInit], { type: "video/mp4" }));
+            for (var li = 0; li < lines.length; li++) {
+              if (mapRe.test(lines[li])) {
+                lines[li] = '#EXT-X-MAP:URI="' + blobUrl + '"';
+                break;
+              }
+            }
+          }
+          return { text: lines.join("\n"), stripAudio: legacy };
+        });
+      })
+      .catch(function () {
+        return { text: m3u8Text, stripAudio: false };
+      });
+  };
+
+  /* One-call archive wiring: fetch playlist → repair durations +
+   * legacy detection → hls.js with the right fLoader, blob-sourced.
+   * baseCfg carries the caller's buffer caps; onReady gets the hls
+   * instance for event handlers. */
+  HNVR.hlsArchive = function (Hls, video, src, baseCfg) {
+    return fetch(src, { credentials: "same-origin" })
+      .then(function (r) {
+        return r.text();
+      })
+      .then(HNVR.fmp4RewritePlaylist)
+      .catch(function () {
+        return { text: null, stripAudio: false };
+      })
+      .then(function (res) {
+        var cfg = Object.assign({}, baseCfg, {
+          fLoader: HNVR.fmp4PatchLoader(Hls, { stripAudio: res.stripAudio }),
+        });
+        var hls = new Hls(cfg);
+        hls.attachMedia(video);
+        if (res.text)
+          hls.loadSource(URL.createObjectURL(new Blob([res.text], { type: "application/vnd.apple.mpegurl" })));
+        else hls.loadSource(src);
+        return hls;
+      });
+  };
 
   if (document.readyState === "loading")
     document.addEventListener("DOMContentLoaded", init);

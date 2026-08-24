@@ -121,6 +121,11 @@ userTimezoneSql = $(embedFile "migrations/0012-user-timezone.sql")
 cameraSnapshotsSql :: ByteString
 cameraSnapshotsSql = $(embedFile "migrations/0013-camera-snapshots.sql")
 
+-- | Event dedup: UNIQUE (camera_id, rule_id, track_id, ts) + one-time
+-- duplicate purge. See the file header.
+eventDedupSql :: ByteString
+eventDedupSql = $(embedFile "migrations/0014-event-dedup.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -192,6 +197,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0013-camera-snapshots" cameraSnapshotsSql) True conn
     handleResult "0013-camera-snapshots" snapsRes
+    dedupRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0014-event-dedup" eventDedupSql) True conn
+    handleResult "0014-event-dedup" dedupRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

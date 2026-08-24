@@ -81,7 +81,7 @@ run slugS transport url outDir = do
       ++ url
       ++ " out="
       ++ slugDir
-  let args = recordingArgs RecordingConfig {rcUrl = T.pack url, rcTransport = transport, rcRecordAudio = False}
+  let args = recordingArgs RecordingConfig {rcUrl = T.pack url, rcTransport = transport, rcRecordAudio = False, rcAudioInputRateHz = Nothing}
   (_, mOut, _, ph) <-
     createProcess
       (proc "ffmpeg" args)

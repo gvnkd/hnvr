@@ -163,6 +163,7 @@ deadCam =
       ccRtspUrl = "file:///nonexistent-cam",
       ccTransport = TcpTransport,
       ccRecordAudio = False,
+      ccAudioInputRateHz = Nothing,
       ccClipBuffer = Nothing
     }
 

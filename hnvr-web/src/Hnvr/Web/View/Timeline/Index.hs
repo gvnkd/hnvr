@@ -5,10 +5,10 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 
 -- | /Timeline shell (design_docs/12-timeline-archive.md): range
--- presets + custom window, camera tile grid (thumbnail scrubbing →
--- hls.js playback on cursor release, enable toggle, admin purge), and
--- the canvas timeline. All behavior lives in /static/timeline.js,
--- driven by the @data-tl-*@ attributes here.
+-- presets + custom window, ONE archive player (camera dropdown +
+-- thumbnail scrubbing → hls.js playback on cursor release, admin
+-- purge), and the canvas timeline. All behavior lives in
+-- /static/timeline.js, driven by the @data-tl-*@ attributes here.
 module Hnvr.Web.View.Timeline.Index
   ( IndexView (..),
   )
@@ -54,9 +54,7 @@ instance View IndexView where
           </div>
         </div>
 
-        <div class="tl-grid" data-tl-grid>
-          {forEach cameras tile}
-        </div>
+        {playerCard}
 
         <div class="card mt-4">
           <div class="card-body">
@@ -70,9 +68,9 @@ instance View IndexView where
               <canvas class="tl-canvas" data-tl-canvas></canvas>
             </div>
             <div class="hint mt-2">
-              Drag the cursor to scrub — tiles show the snapshot nearest the cursor.
-              Click a tile to make it the active camera; on release it plays from the cursor time
-              while the others keep thumbnails. Click an event marker to jump to it; shift-click opens its clip.
+              Pick the camera from the dropdown. Drag the cursor to scrub — the player shows the
+              snapshot nearest the cursor; on release the selected camera plays from the cursor time.
+              Click an event marker to jump to it; shift-click opens its clip.
             </div>
           </div>
         </div>
@@ -98,41 +96,56 @@ instance View IndexView where
           active = abs (diffUTCTime winTo winFrom - width) < 60
           cls = (if active then "btn btn-primary" else "btn btn-ghost") :: Text
 
-      tile camera =
-        [hsx|
-          <div class="tl-tile" data-tl-tile data-cam-id={camIdText} data-slug={camera.slug}>
-            <div class="tl-tile-head">
-              <span class="tl-tile-slug">{camera.slug}</span>
-              <label class="tl-tile-toggle" title="Include this camera in scrubbing/playback">
-                <input type="checkbox" data-tl-toggle checked /> enabled
-              </label>
-            </div>
-            <div class="tl-tile-body">
-              <img data-tl-thumb alt="" hidden />
-              <div class="tl-tile-placeholder" data-tl-placeholder>—</div>
-            </div>
-            <div class="tl-tile-foot muted text-sm">
-              <span data-tl-state>idle</span>
-              {purgeBtn}
-            </div>
-          </div>
-        |]
-        where
-          camIdText = tshow (camera |> get #id)
-          -- Admin-only: tombstone this camera's recordings across the
-          -- CURRENT timeline window (same verified-purge flow the old
-          -- /Archive table used). Hidden inputs carry UTC ISO; the
-          -- controller redirects back to /Timeline with the window.
-          purgeBtn =
-            if isAdmin
-              then
-                [hsx|
-                  <form method="POST" action={purgeAction} class="tl-purge-form"
-                        data-confirm={"Purge " <> camera.slug <> " recordings in the current window?"}>
-                    <input type="hidden" name="purgeFrom" value={iso winFrom} />
-                    <input type="hidden" name="purgeTo" value={iso winTo} />
-                    <button type="submit" class="link-button tl-purge-btn" title="Purge recordings in window">purge</button>
-                  </form>
-                |]
-              else mempty
-          purgeAction = "/PurgeRecording?purgeCameraId=" <> camIdText
+      -- Single archive player: camera dropdown + one video surface.
+      -- Exactly one camera streams at a time (N concurrent hls.js
+      -- instances was too laggy); timeline.js owns switching.
+      playerCard =
+        if null cameras
+          then mempty
+          else
+            [hsx|
+              <div class="card mb-4">
+                <div class="card-body tl-player">
+                  <div class="tl-player-bar">
+                    <label class="tl-player-cam text-sm">
+                      <span class="muted">Camera:</span>
+                      <select class="input" data-tl-camera>
+                        {forEach cameras camOption}
+                      </select>
+                    </label>
+                    <span class="muted text-sm" data-tl-state>idle</span>
+                    {purgeForm}
+                  </div>
+                  <div class="tl-player-body">
+                    <img data-tl-thumb alt="" hidden />
+                    <div class="tl-player-placeholder" data-tl-placeholder>—</div>
+                    <button class="btn btn-ghost btn-sm zoompan-fs" data-zoompan-fs="1">fullscreen</button>
+                  </div>
+                </div>
+              </div>
+            |]
+
+      camOption camera =
+        [hsx|<option value={camIdText camera}>{camera.slug}</option>|]
+
+      camIdText camera = tshow (camera |> get #id)
+
+      -- Admin-only: tombstone the SELECTED camera's recordings across
+      -- the CURRENT timeline window. The form carries the first
+      -- camera; timeline.js rewrites action + data-confirm when the
+      -- dropdown changes. Hidden inputs carry UTC ISO; the controller
+      -- redirects back to /Timeline with the window.
+      purgeForm =
+        case (isAdmin, cameras) of
+          (True, firstCam : _) ->
+            [hsx|
+              <form method="POST" action={purgeAction firstCam} class="tl-purge-form" data-tl-purge
+                    data-confirm={confirmText firstCam}>
+                <input type="hidden" name="purgeFrom" value={iso winFrom} />
+                <input type="hidden" name="purgeTo" value={iso winTo} />
+                <button type="submit" class="link-button tl-purge-btn" title="Purge recordings in window">purge</button>
+              </form>
+            |]
+          _ -> mempty
+      purgeAction camera = "/PurgeRecording?purgeCameraId=" <> camIdText camera
+      confirmText camera = "Purge " <> camera.slug <> " recordings in the current window?"

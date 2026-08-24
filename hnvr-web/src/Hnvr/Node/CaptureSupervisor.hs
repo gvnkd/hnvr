@@ -56,6 +56,7 @@ module Hnvr.Node.CaptureSupervisor
 where
 
 import Control.Concurrent.Async (Async, async, cancel, waitCatch)
+import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
   ( TVar,
     atomically,
@@ -107,10 +108,11 @@ import Hnvr.Cv.Analyzer (defaultAnalyzerConfig, execProvidersFromEnv)
 import Hnvr.Cv.AnalyzerRunner (runAnalyzer)
 import Hnvr.Cv.DebugRender (renderDebugPng)
 import Hnvr.Cv.Rules
-  ( Rule,
+  ( EngineState,
+    Rule,
     RuleEvent (..),
     RuleEventKind (..),
-    RuleState,
+    emptyEngineState,
     evalTracks,
     normalizeBox,
     projectRule,
@@ -142,6 +144,15 @@ data CaptureSupervisor = CaptureSupervisor
     csAnalysis :: !(IORef (Map CameraId AnalysisHandle)),
     -- | PTZ controllers (Phase 5): one per PTZ-enabled camera.
     csPtz :: !(IORef (Map CameraId PtzHandle)),
+    -- | Per-camera lifecycle lock. Spawning a worker\/analysis pair is
+    -- not atomic with inserting its handle into the maps above, so an
+    -- unlocked stop-then-start racing another start (bootstrap
+    -- 'startNodeRoles' vs assignLoop) could orphan a just-spawned
+    -- analysis pair — unstoppable until process restart, double
+    -- recording + double rule events. The lock serializes all
+    -- start\/stop transitions per camera. Locks are never removed;
+    -- the map stays camera-count small.
+    csLocks :: !(IORef (Map CameraId (MVar ()))),
     -- | Event-clip recorder state (ring buffers + open clips).
     csClipState :: !ClipState,
     -- | Periodic snapshot writer state ('Nothing' when
@@ -183,6 +194,7 @@ startCaptureSupervisor cfg = do
   ref <- newIORef Map.empty
   aRef <- newIORef Map.empty
   pRef <- newIORef Map.empty
+  lRef <- newIORef Map.empty
   clipState <- Clip.newClipState
   snapshots <- do
     disabled <- (== Just "1") <$> lookupEnv "HNVR_DISABLE_SNAPSHOTWRITER"
@@ -193,11 +205,33 @@ startCaptureSupervisor cfg = do
   startSpoolDrainer cfg
   Clip.startClipTicker cfg clipState
   logInfo "CaptureSupervisor: started"
-  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csClipState = clipState, csSnapshots = snapshots})
+  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csLocks = lRef, csClipState = clipState, csSnapshots = snapshots})
+
+-- | Fetch (or create) the per-camera lifecycle lock backing
+-- 'withCameraLock'.
+cameraLock :: CaptureSupervisor -> CameraId -> IO (MVar ())
+cameraLock sup camId = do
+  candidate <- newMVar ()
+  atomicModifyIORef' sup.csLocks $ \m ->
+    case Map.lookup camId m of
+      Just l -> (m, l)
+      Nothing -> (Map.insert camId candidate m, candidate)
+
+-- | Run a start\/stop transition under the camera's lifecycle lock.
+withCameraLock :: CaptureSupervisor -> CameraId -> IO a -> IO a
+withCameraLock sup camId act = do
+  l <- cameraLock sup camId
+  withMVar l (const act)
 
 -- | Idempotent: starts a worker for the given camera. If a worker is
 -- already running for the same 'CameraId', it is stopped first (so
 -- updated RTSP URLs or transport take effect).
+--
+-- Race-safe: takes the per-camera lifecycle lock and runs the whole
+-- stop+start transition inside it. Concurrent callers (bootstrap
+-- 'Hnvr.Web.Config.startNodeRoles' vs ConfigWatcher's assignLoop)
+-- serialize instead of interleaving spawn\/insert steps — see
+-- 'csLocks'.
 --
 -- The worker pulls from mediamtx's RTSP *server*
 -- (@rtsp://localhost:8554/<slug>@) rather than from the camera
@@ -216,8 +250,13 @@ startCaptureSupervisor cfg = do
 -- 8554) so non-default deployments work. Transport is always TCP —
 -- mediamtx is on localhost, no UDP needed.
 startCamera :: CaptureSupervisor -> CameraSnapshot -> IO ()
-startCamera sup snap = do
-  stopCamera sup (csId snap)
+startCamera sup snap =
+  withCameraLock sup (csId snap) (startCameraLocked sup snap)
+
+-- | Unlocked start; callers must hold the camera's lifecycle lock.
+startCameraLocked :: CaptureSupervisor -> CameraSnapshot -> IO ()
+startCameraLocked sup snap = do
+  stopCameraLocked sup (csId snap)
   stopTVar <- newTVarIO False
   relayPort <- fromMaybe "8554" <$> lookupEnv "HNVR_MEDIAMTX_RTSP_PORT"
   -- Event-clip ring buffer: only when at least one rule on this camera
@@ -234,6 +273,7 @@ startCamera sup snap = do
             ccRtspUrl = relayUrl,
             ccTransport = TcpTransport,
             ccRecordAudio = csRecordAudio snap,
+            ccAudioInputRateHz = csAudioInputRateHz snap,
             ccClipBuffer = mClipBuf
           }
       shouldStop = readTVarIO stopTVar
@@ -305,7 +345,7 @@ maybeStartAnalysis sup snap relayUrl = do
       queue <- newFrameQueue
       latest <- newTVarIO Nothing
       fallbackScale <- readFallbackScale
-      rulesRef <- newIORef (M.empty :: M.Map (Text, Int) RuleState)
+      rulesRef <- newIORef emptyEngineState
       modelFile <- resolveModelPath modelPath (csModelName snap)
       let metrics = capMetrics sup.csConfig
           (analysisCfg, width, height) = analysisConfigFor fallbackScale snap relayUrl
@@ -368,7 +408,7 @@ analysisSink ::
   CameraSnapshot ->
   [Rule] ->
   M.Map Text Clip.ClipCfg ->
-  IORef (M.Map (Text, Int) RuleState) ->
+  IORef EngineState ->
   TVar (Maybe (Frame, [Track])) ->
   Frame ->
   [Track] ->
@@ -486,9 +526,14 @@ readFallbackScale = do
 
 -- | Signal stop for the worker owning this camera, wait up to 10 s for
 -- a clean exit, cancel the async if it takes too long. No-op if no
--- worker is running for the supplied id.
+-- worker is running for the supplied id. Race-safe: takes the
+-- per-camera lifecycle lock (see 'csLocks').
 stopCamera :: CaptureSupervisor -> CameraId -> IO ()
-stopCamera sup camId = do
+stopCamera sup camId = withCameraLock sup camId (stopCameraLocked sup camId)
+
+-- | Unlocked stop; callers must hold the camera's lifecycle lock.
+stopCameraLocked :: CaptureSupervisor -> CameraId -> IO ()
+stopCameraLocked sup camId = do
   stopAnalysisPair
   stopPtzController
   Clip.closeCameraClip sup.csConfig sup.csClipState camId
@@ -526,13 +571,14 @@ stopCamera sup camId = do
         cancel cmdLoop
         cancel ticker
 
--- | Convenience: stop + start. Useful when only config has changed
--- (e.g. RTSP URL rotation) and the caller already has the new
--- 'CameraSnapshot'.
+-- | Convenience: stop + start under a single lock hold. Useful when
+-- only config has changed (e.g. RTSP URL rotation) and the caller
+-- already has the new 'CameraSnapshot'.
 restartCamera :: CaptureSupervisor -> CameraSnapshot -> IO ()
-restartCamera sup snap = do
-  stopCamera sup (csId snap)
-  startCamera sup snap
+restartCamera sup snap =
+  withCameraLock sup (csId snap) $ do
+    stopCameraLocked sup (csId snap)
+    startCameraLocked sup snap
 
 -- | Stop everything. Used on node shutdown (graceful drain before
 -- process exit) and on leader-handover (the new leader will respawn

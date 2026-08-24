@@ -47,7 +47,22 @@ tests =
           ( case dropWhile (/= "-af") args of
               [] -> Nothing
               xs -> Just (take 6 xs)
-          )
+          ),
+      testCase "16 kHz G.711 camera gets an asetrate retag before aresample" $ do
+        let args = recordingArgs tcpCfg {rcRecordAudio = True, rcAudioInputRateHz = Just 16000}
+        case dropWhile (/= "-af") args of
+          _flag : chain : _ ->
+            assertEqual
+              "filter chain"
+              "asetrate=16000,aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000"
+              chain
+          _ -> fail "expected -af <chain> in argv",
+      testCase "8 kHz / unset input rate adds no asetrate" $ do
+        let chainOf c = case dropWhile (/= "-af") (recordingArgs c {rcRecordAudio = True}) of
+              _flag : chain : _ -> chain
+              _ -> ""
+        assertEqual "8 kHz" "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000" (chainOf tcpCfg {rcAudioInputRateHz = Just 8000})
+        assertEqual "unset" "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000" (chainOf tcpCfg)
     ]
 
 -- | The exact audio argv slice (from @-af@ through the bitrate) that
@@ -74,10 +89,10 @@ rtspUrlStr :: String
 rtspUrlStr = T.unpack rtspUrl
 
 tcpCfg :: RecordingConfig
-tcpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = TcpTransport, rcRecordAudio = False}
+tcpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = TcpTransport, rcRecordAudio = False, rcAudioInputRateHz = Nothing}
 
 udpCfg :: RecordingConfig
-udpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = UdpTransport, rcRecordAudio = False}
+udpCfg = RecordingConfig {rcUrl = rtspUrl, rcTransport = UdpTransport, rcRecordAudio = False, rcAudioInputRateHz = Nothing}
 
 -- The flags documented in design_docs/03-capture-and-storage.md plus
 -- the Sergey-camera-noise suppressors added Aug 11 2026

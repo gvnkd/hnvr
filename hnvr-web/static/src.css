@@ -972,6 +972,7 @@
   }
   .video-frame:hover .zoompan-fs,
   .live-overlay-video:hover .zoompan-fs,
+  .tl-player-body:hover .zoompan-fs,
   .zoompan-fs:focus-visible {
     opacity: 1;
   }
@@ -1163,54 +1164,36 @@
   .tl-cursor-label {
     @apply ml-auto text-sm font-mono;
   }
-  .tl-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    @apply gap-3;
+  .tl-player {
+    @apply flex flex-col gap-3;
   }
-  .tl-tile {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: var(--shadow-panel);
-    cursor: pointer;
+  .tl-player-bar {
+    @apply flex items-center gap-3;
   }
-  .tl-tile.tl-active {
-    border-color: var(--accent);
-    box-shadow: var(--glow-accent);
+  .tl-player-cam {
+    @apply flex items-center gap-2;
   }
-  .tl-tile-head {
-    @apply flex items-center justify-between px-3 py-2;
-    border-bottom: 1px solid var(--border);
+  .tl-player-bar .tl-purge-form {
+    margin-left: auto;
   }
-  .tl-tile-slug {
-    @apply font-mono text-sm;
-    color: var(--text);
-  }
-  .tl-tile-toggle {
-    @apply flex items-center gap-1 text-xs cursor-pointer select-none;
-    color: var(--text-dim);
-  }
-  .tl-tile-body {
+  .tl-player-body {
     position: relative;
     aspect-ratio: 16 / 9;
+    max-height: 50vh;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .tl-player-body img {
+    @apply w-full h-full object-contain block;
+  }
+  .tl-player-video {
+    @apply w-full h-full object-contain block;
     background: #000;
   }
-  .tl-tile-body img {
-    @apply w-full h-full object-cover block;
-  }
-  .tl-tile-video {
-    @apply w-full h-full object-cover block;
-    background: #000;
-  }
-  .tl-tile-placeholder {
+  .tl-player-placeholder {
     @apply absolute inset-0 flex items-center justify-center text-sm font-mono;
     color: var(--text-dim);
-  }
-  .tl-tile-foot {
-    @apply px-3 py-1.5 flex items-center justify-between;
-    border-top: 1px solid var(--border);
   }
   .tl-purge-form {
     display: inline;

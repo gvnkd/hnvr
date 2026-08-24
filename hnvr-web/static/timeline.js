@@ -1,16 +1,16 @@
-/* /Timeline — unified multi-camera archive timeline
- * (design_docs/12-timeline-archive.md, Phase B: read path, Phase C:
- * sync playback).
+/* /Timeline — unified archive timeline with a single player
+ * (design_docs/12-timeline-archive.md).
  *
  * Self-contained page module: boots on DOMContentLoaded when a
  * [data-timeline] element exists. Canvas renders one coverage lane per
  * camera + a shared event-marker lane + a draggable cursor. Scrubbing
- * swaps each enabled tile to the snapshot nearest the cursor
- * (/TimelineThumb 302s to a presigned S3 URL; <img> follows it
- * natively). Releasing the cursor starts hls.js playback on the ACTIVE
- * camera only (one stream at a time — N concurrent hls.js instances
- * was too laggy); click a tile to make it active. Starting a new drag
- * tears the player down.
+ * swaps the player to the snapshot nearest the cursor (/TimelineThumb
+ * 302s to a presigned S3 URL; <img> follows it natively). Releasing
+ * the cursor starts hls.js playback of the ACTIVE camera — exactly one
+ * camera streams at a time (N concurrent hls.js instances was too
+ * laggy). The active camera is chosen from the [data-tl-camera]
+ * dropdown, persisted in localStorage and deep-linkable via ?active=.
+ * Starting a new drag tears the player down.
  */
 (function () {
   "use strict";
@@ -22,42 +22,30 @@
     var canvas = root.querySelector("[data-tl-canvas]");
     var ctx = canvas.getContext("2d");
     var labelWrap = document.querySelector("[data-tl-cursor-label]");
-    var tiles = Array.prototype.slice.call(
-      document.querySelectorAll("[data-tl-tile]")
-    );
+    var camSelect = document.querySelector("[data-tl-camera]");
+    var stateEl = document.querySelector("[data-tl-state]");
+    var img = document.querySelector("[data-tl-thumb]");
+    var placeholder = document.querySelector("[data-tl-placeholder]");
+    var purgeForm = document.querySelector("[data-tl-purge]");
 
     var fromMs = Date.parse(root.getAttribute("data-from"));
     var toMs = Date.parse(root.getAttribute("data-to"));
     var cursorMs = Date.parse(root.getAttribute("data-cursor")) || toMs;
 
-    /* ── disabled cameras (persisted) ─────────────────────────── */
-    var LS_KEY = "hnvr-timeline-disabled";
-    var LS_ACTIVE = "hnvr-timeline-active";
-    function loadDisabled() {
-      try {
-        return JSON.parse(localStorage.getItem(LS_KEY) || "[]");
-      } catch (e) {
-        return [];
+    /* Camera list from the dropdown options; spans/markers land on
+     * fetchData. Order here = lane order on the canvas. */
+    var states = Array.prototype.map.call(
+      camSelect ? camSelect.options : [],
+      function (opt) {
+        return { camId: opt.value, slug: opt.textContent, spans: [], markers: [] };
       }
-    }
-    var disabled = loadDisabled();
-    // Deep link: ?cams=<csv uuids> adds to the disabled set.
-    var camsParam = new URLSearchParams(location.search).get("cams");
-    if (camsParam) {
-      camsParam.split(",").forEach(function (id) {
-        if (id && disabled.indexOf(id) < 0) disabled.push(id);
-      });
-      saveDisabled();
-    }
-    function saveDisabled() {
-      try {
-        localStorage.setItem(LS_KEY, JSON.stringify(disabled));
-      } catch (e) {}
+    );
+    function stateOf(camId) {
+      return states.filter(function (s) { return s.camId === camId; })[0] || null;
     }
 
-    /* ── active camera: the ONLY one that plays video (persisted).
-     * N concurrent hls.js instances was too laggy — all other tiles
-     * stay in thumbnail mode. ─────────────────────────────────── */
+    /* ── active camera: the ONLY one that plays (persisted) ────── */
+    var LS_ACTIVE = "hnvr-timeline-active";
     var activeCamId = null;
     try {
       activeCamId = localStorage.getItem(LS_ACTIVE);
@@ -65,196 +53,282 @@
     // Deep link: ?active=<uuid> wins over localStorage.
     var activeParam = new URLSearchParams(location.search).get("active");
     if (activeParam) activeCamId = activeParam;
+    if (!stateOf(activeCamId) && states.length) activeCamId = states[0].camId;
+    if (camSelect) camSelect.value = activeCamId || "";
+
     function saveActive() {
       try {
         localStorage.setItem(LS_ACTIVE, activeCamId || "");
       } catch (e) {}
     }
-    function isActive(st) {
-      return st.camId === activeCamId;
+    function syncPurgeForm() {
+      if (!purgeForm) return;
+      var st = stateOf(activeCamId);
+      if (!st) return;
+      purgeForm.setAttribute(
+        "action",
+        "/PurgeRecording?purgeCameraId=" + encodeURIComponent(st.camId)
+      );
+      purgeForm.setAttribute(
+        "data-confirm",
+        "Purge " + st.slug + " recordings in the current window?"
+      );
     }
-    function setActive(st, autoplay) {
-      activeCamId = st.camId;
+    function setActive(camId, autoplay) {
+      if (camId === activeCamId) return;
+      stopPlayback();
+      activeCamId = camId;
       saveActive();
-      states.forEach(function (s) {
-        s.el.classList.toggle("tl-active", isActive(s));
-        if (!isActive(s)) stopPlayback(s);
-      });
+      if (camSelect && camSelect.value !== camId) camSelect.value = camId;
+      syncPurgeForm();
       if (autoplay) playActive();
+      else updatePlayer(cursorMs);
+    }
+    if (camSelect) {
+      camSelect.addEventListener("change", function () {
+        setActive(camSelect.value, true);
+      });
+    }
+    syncPurgeForm();
+
+    function setState(txt) {
+      if (stateEl && stateEl.textContent !== txt) stateEl.textContent = txt;
+    }
+    function showPlaceholder(txt) {
+      if (!placeholder) return;
+      img.hidden = true;
+      placeholder.hidden = false;
+      placeholder.textContent = txt;
+    }
+    function showThumb(url) {
+      placeholder.hidden = true;
+      img.hidden = false;
+      img.src = url;
+    }
+    function coveredAt(camId, ms) {
+      var st = stateOf(camId);
+      return (
+        !!st &&
+        st.spans.some(function (s) {
+          return ms >= s.start && ms <= s.end;
+        })
+      );
     }
 
-    /* ── per-tile state ───────────────────────────────────────── */
-    var states = tiles.map(function (tile) {
-      var st = {
-        el: tile,
-        camId: tile.getAttribute("data-cam-id"),
-        slug: tile.getAttribute("data-slug"),
-        img: tile.querySelector("[data-tl-thumb]"),
-        placeholder: tile.querySelector("[data-tl-placeholder]"),
-        stateEl: tile.querySelector("[data-tl-state]"),
-        toggle: tile.querySelector("[data-tl-toggle]"),
-        thumbToken: 0,
-        spans: [],
-        markers: [],
-        hls: null,
-        video: null,
-      };
-      st.toggle.checked = disabled.indexOf(st.camId) < 0;
-      st.toggle.addEventListener("change", function () {
-        var i = disabled.indexOf(st.camId);
-        if (st.toggle.checked && i >= 0) disabled.splice(i, 1);
-        if (!st.toggle.checked && i < 0) disabled.push(st.camId);
-        saveDisabled();
-        if (!st.toggle.checked) stopPlayback(st);
-        updateTile(st, cursorMs);
-      });
-      st.img.addEventListener("error", function () {
-        showPlaceholder(st, "no frame");
-        setState(st, "gap");
-      });
-      // Click the tile (anywhere but the toggle) to make it the active
-      // (streaming) camera and start playback at the cursor. Clicking
-      // the already-active tile is a no-op (don't restart its stream).
-      st.el.addEventListener("click", function (e) {
-        if (e.target.closest("[data-tl-toggle]") || e.target.closest(".tl-purge-btn")) return;
-        if (isActive(st)) return;
-        setActive(st, true);
-      });
-      return st;
-    });
-    // Default active camera: first tile when nothing persisted/linked.
-    if (!states.some(isActive) && states.length) activeCamId = states[0].camId;
-    states.forEach(function (s) {
-      s.el.classList.toggle("tl-active", isActive(s));
-    });
-    function isEnabled(st) {
-      return disabled.indexOf(st.camId) < 0;
-    }
-    function setState(st, txt) {
-      if (st.stateEl.textContent !== txt) st.stateEl.textContent = txt;
-    }
-    function showPlaceholder(st, txt) {
-      st.img.hidden = true;
-      st.placeholder.hidden = false;
-      st.placeholder.textContent = txt;
-    }
-    function showThumb(st, url) {
-      st.placeholder.hidden = true;
-      st.img.hidden = false;
-      st.img.src = url;
-    }
-    function coveredAt(st, ms) {
-      return st.spans.some(function (s) {
-        return ms >= s.start && ms <= s.end;
-      });
-    }
-
-    /* ── playback (Phase C) ───────────────────────────────────── */
-    /* Playlist windows start at the cursor; the first playlist entry
-     * is the segment COVERING the cursor (server: endTs > from), so
-     * playback begins at most ~one segment (~1 s) early. hls.js
-     * startPosition can't do better without segment-boundary data. */
-    var PLAYLIST_MAX_MS = 6 * 3600 * 1000; // server cap, design 05
-    function stopPlayback(st) {
-      if (st.hls) {
-        st.hls.destroy();
-        st.hls = null;
+    /* ── playback (single player) ─────────────────────────────── */
+    /* Playlists are short windows (not the whole range): when the
+     * playhead never advances — old recordings with skewed A/V
+     * timestamps can make MSE appends fail with
+     * bufferAppendNoProgress — hls.js otherwise races through the
+     * ENTIRE playlist (measured: ~1 GB in seconds) while showing a
+     * black screen. A 10 min window + hard buffer caps bound the
+     * damage; reaching the window end loads the next one (chaining).
+     * The first playlist entry is the segment COVERING the cursor
+     * (server: endTs > from), so playback begins at most ~one
+     * segment (~1 s) early. */
+    var PLAYLIST_MAX_MS = 10 * 60 * 1000;
+    var HLS_CONFIG = {
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      maxBufferSize: 60 * 1000 * 1000,
+      backBufferLength: 30,
+      // Old recordings: EXTINF (DB wall-clock) vs real content drift
+      // leaves sub-second holes all over the timeline; the default
+      // 3 nudges / 2 s seek-hole cap die on the first unlucky one.
+      maxBufferHole: 0.6,
+      maxSeekHole: 4,
+      nudgeMaxRetry: 12,
+    };
+    var MAX_BAD_APPENDS = 40;
+    var hls = null;
+    var video = null;
+    var windowEndMs = 0;
+    var playToken = 0;
+    function stopPlayback() {
+      playToken++;
+      if (hls) {
+        hls.destroy();
+        hls = null;
       }
-      if (st.video) {
-        st.video.remove();
-        st.video = null;
+      if (video) {
+        video.remove();
+        video = null;
       }
     }
-    function stopAllPlayback() {
-      states.forEach(stopPlayback);
-    }
-    function startPlayback(st, ms) {
-      stopPlayback(st);
-      if (!isEnabled(st) || !coveredAt(st, ms)) return;
+    function startPlayback(ms) {
+      stopPlayback();
+      if (!activeCamId || !coveredAt(activeCamId, ms)) {
+        // Chain boundary landing in a coverage gap.
+        showPlaceholder("no recording");
+        setState("gap");
+        return;
+      }
       var from = new Date(ms).toISOString();
-      var to = new Date(Math.min(toMs, ms + PLAYLIST_MAX_MS)).toISOString();
+      windowEndMs = Math.min(toMs, ms + PLAYLIST_MAX_MS);
+      var to = new Date(windowEndMs).toISOString();
       var src =
         "/PlaylistArchive?cameraId=" +
-        encodeURIComponent(st.camId) +
+        encodeURIComponent(activeCamId) +
         "&from=" +
         encodeURIComponent(from) +
         "&to=" +
         encodeURIComponent(to);
-      var video = document.createElement("video");
+      video = document.createElement("video");
+      // Muted autoplay always starts (engagement-gated otherwise);
+      // controls let the user unmute.
       video.muted = true;
       video.autoplay = true;
+      video.controls = true;
       video.playsInline = true;
-      video.className = "tl-tile-video";
-      st.img.hidden = true;
-      st.placeholder.hidden = true;
-      st.el.querySelector(".tl-tile-body").appendChild(video);
-      st.video = video;
-      setState(st, "connecting…");
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = src;
-        setState(st, "playing (native HLS)");
-      } else if (window.Hls && Hls.isSupported()) {
-        var hls = new Hls();
-        st.hls = hls;
-        hls.loadSource(src);
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, function () {
-          if (st.hls === hls) setState(st, "playing");
-        });
-        hls.on(Hls.Events.ERROR, function (_, d) {
-          if (st.hls !== hls) return;
-          if (d.fatal) {
-            stopPlayback(st);
-            showPlaceholder(st, "no recording");
-            setState(st, "gap");
-          } else {
-            setState(st, "warn: " + d.details);
+      video.className = "tl-player-video";
+      // Window end reached and more range remains → chain the next
+      // playlist window from where this one stopped.
+      video.addEventListener("ended", function () {
+        if (windowEndMs < toMs && video) {
+          setState("loading next window…");
+          startPlayback(windowEndMs);
+        } else {
+          setState("ended");
+        }
+      });
+      img.hidden = true;
+      placeholder.hidden = true;
+      document.querySelector(".tl-player-body").appendChild(video);
+      HNVR.zoompan(video);
+      setState("connecting…");
+      var myHls = null;
+      var badAppends = 0;
+      /* Old recordings can start with a hole at playlist position 0
+       * (first fragment's A/V timestamps don't reach 0), and hls.js's
+       * gap nudge only works once playback has STARTED — so autoplay
+       * sits on a black frame forever. Kick: jump to the first
+       * buffered position and force play() until 'playing' fires. */
+      var started = false;
+      video.addEventListener("playing", function () {
+        started = true;
+      });
+      function kickStart() {
+        if (started || !video || !video.buffered.length) return;
+        var first = video.buffered.start(0);
+        if (video.currentTime + 0.25 < first) {
+          try {
+            video.currentTime = first + 0.05;
+          } catch (e) {}
+        }
+        if (video.paused) video.play().catch(function () {});
+      }
+      // hls.js first: its buffer caps + kickStart protect us from old
+      // recordings' timestamp quirks. Native HLS is the Safari-only
+      // fallback (chromium answers "maybe" for the MIME but its native
+      // path storms through the whole playlist with a black frame).
+      if (window.Hls && Hls.isSupported()) {
+        /* Server EXTINFs are DB wall-clock and drift from real media
+         * durations; hls.js positions by cumulative EXTINF, so the
+         * timeline gets holes/overlaps. HNVR.hlsArchive repairs the
+         * playlist (range-GETs moof heads for true durations) and
+         * detects legacy-skewed audio windows to strip audio up-front
+         * (app.js). */
+        var token = ++playToken;
+        setState("indexing…");
+        HNVR.hlsArchive(Hls, video, src, HLS_CONFIG).then(function (h) {
+          if (token !== playToken) {
+            h.destroy();
+            return;
           }
+          myHls = h;
+          hls = h;
+          setState("connecting…");
+          h.on(Hls.Events.BUFFER_APPENDED, function () {
+            if (hls === myHls) kickStart();
+          });
+          h.on(Hls.Events.MANIFEST_PARSED, function () {
+            if (hls === myHls) setState("playing");
+          });
+          h.on(Hls.Events.ERROR, function (_, d) {
+            if (hls !== myHls) return;
+            // Self-healing gap skips — routine on legacy recordings, not
+            // worth flashing on the state line.
+            if (
+              d.details === "bufferSeekOverHole" ||
+              d.details === "bufferNudgeOnStall" ||
+              d.details === "bufferStalledError"
+            )
+              return;
+            if (
+              d.details === "bufferAppendNoProgress" ||
+              d.details === "bufferAppendError" ||
+              d.details === "bufferFullError"
+            ) {
+              // MSE rejected/overlapped the segment. Old recordings with
+              // skewed A/V timestamps do this per fragment; without a
+              // guard hls.js retries forever while downloading the whole
+              // window — the 1 GB / black-screen storm. Only fatal-ize
+              // while playback has never started: once the playhead
+              // moves, overlap errors are benign.
+              if (video && video.currentTime > 0) return;
+              badAppends++;
+              if (badAppends > MAX_BAD_APPENDS) {
+                stopPlayback();
+                showPlaceholder("recording unreadable (bad timestamps)");
+                setState("error");
+              }
+              return;
+            }
+            if (d.fatal) {
+              console.warn("timeline hls fatal:", d.type, d.details, d.error && d.error.message);
+              stopPlayback();
+              showPlaceholder("no recording");
+              setState("gap");
+            } else {
+              setState("warn: " + d.details);
+            }
+          });
         });
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = src;
+        setState("playing (native HLS)");
       } else {
-        setState(st, "HLS unsupported");
+        setState("HLS unsupported");
       }
     }
     function playActive() {
-      states.forEach(function (st) {
-        if (isActive(st) && isEnabled(st) && coveredAt(st, cursorMs)) startPlayback(st, cursorMs);
-        else stopPlayback(st);
-      });
+      if (activeCamId && coveredAt(activeCamId, cursorMs)) startPlayback(cursorMs);
+      else stopPlayback();
     }
 
     /* ── thumbnail updates (debounced, token-guarded) ─────────── */
     var debounceTimer = null;
-    function scheduleThumbs() {
+    var thumbToken = 0;
+    function scheduleThumb() {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(function () {
-        states.forEach(function (st) {
-          updateTile(st, cursorMs);
-        });
+        updatePlayer(cursorMs);
       }, 150);
     }
-    function updateTile(st, ms) {
-      if (st.video) return; // playing — leave the video alone
-      if (!isEnabled(st)) {
-        showPlaceholder(st, "disabled");
-        setState(st, "disabled");
+    function updatePlayer(ms) {
+      if (video) return; // playing — leave the video alone
+      if (!activeCamId) return;
+      if (!coveredAt(activeCamId, ms)) {
+        showPlaceholder("no recording");
+        setState("gap");
         return;
       }
-      if (!coveredAt(st, ms)) {
-        showPlaceholder(st, "no recording");
-        setState(st, "gap");
-        return;
-      }
-      var token = ++st.thumbToken;
+      var token = ++thumbToken;
       var url =
         "/TimelineThumb?cameraId=" +
-        encodeURIComponent(st.camId) +
+        encodeURIComponent(activeCamId) +
         "&t=" +
         encodeURIComponent(new Date(ms).toISOString());
-      st.img.onload = function () {
-        if (token !== st.thumbToken) return;
-        setState(st, "snapshot " + HNVR.formatTs(new Date(ms).toISOString(), "time"));
+      img.onload = function () {
+        if (token !== thumbToken || video) return;
+        setState("snapshot " + HNVR.formatTs(new Date(ms).toISOString(), "time"));
       };
-      showThumb(st, url);
+      img.onerror = function () {
+        if (token !== thumbToken || video) return;
+        showPlaceholder("no frame");
+        setState("gap");
+      };
+      showThumb(url);
     }
 
     /* ── data fetch ───────────────────────────────────────────── */
@@ -281,9 +355,7 @@
             st.markers = cam ? cam.events : [];
           });
           draw();
-          states.forEach(function (st) {
-            updateTile(st, cursorMs);
-          });
+          updatePlayer(cursorMs);
         });
     }
 
@@ -341,21 +413,21 @@
       var textCol = cssVar("--text", "#e6eaf2");
       ctx.clearRect(0, 0, w, g.height);
 
-      // Coverage lanes
+      // Coverage lanes (active camera's lane is accented)
       states.forEach(function (st, i) {
         var y = g.topPad + i * (g.laneH + g.gap);
         ctx.fillStyle = border;
         ctx.globalAlpha = 0.35;
         ctx.fillRect(0, y, w, g.laneH);
         ctx.globalAlpha = 1;
-        ctx.fillStyle = ok;
+        ctx.fillStyle = st.camId === activeCamId ? accent : ok;
         st.spans.forEach(function (s) {
           var x0 = Math.max(0, xOf(s.start, w));
           var x1 = Math.min(w, xOf(s.end, w));
           if (x1 > x0) ctx.fillRect(x0, y, Math.max(1, x1 - x0), g.laneH);
         });
         ctx.fillStyle = textCol;
-        ctx.globalAlpha = 0.6;
+        ctx.globalAlpha = st.camId === activeCamId ? 1 : 0.6;
         ctx.font = "10px sans-serif";
         ctx.fillText(st.slug, 4, y + g.laneH - 3);
         ctx.globalAlpha = 1;
@@ -400,7 +472,6 @@
     /* ── pointer interaction ──────────────────────────────────── */
     var dragging = false;
     var downX = 0;
-    var downCursor = 0;
     function clampCursor(ms) {
       return Math.max(fromMs, Math.min(toMs, ms));
     }
@@ -408,14 +479,13 @@
       cursorMs = clampCursor(ms);
       draw();
       updateLabel();
-      scheduleThumbs();
+      scheduleThumb();
     }
     canvas.addEventListener("pointerdown", function (e) {
       dragging = true;
       downX = e.clientX;
-      downCursor = cursorMs;
       canvas.setPointerCapture(e.pointerId);
-      stopAllPlayback(); // new scrub: tiles return to thumbnail mode
+      stopPlayback(); // new scrub: back to thumbnail mode
       var rect = canvas.getBoundingClientRect();
       seekTo(msOf(e.clientX - rect.left, rect.width));
     });
@@ -455,7 +525,7 @@
         }
       }
       // Release: the active camera starts archive playback from the
-      // cursor time; every other tile settles on its thumbnail.
+      // cursor time.
       playActive();
     });
     canvas.addEventListener("pointercancel", function () {

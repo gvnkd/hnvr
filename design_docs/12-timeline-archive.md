@@ -62,13 +62,16 @@ Non-goals (v1): export/clip assembly from the timeline, motion-heatmap,
   `datetime-local` from/to (existing `input[data-tz-dt]` local↔UTC JS
   pattern, MEMORIES v0.12.0.0). Changing the range re-fetches timeline data
   and keeps the cursor if still in-window.
-- **Camera grid**: one tile per camera (all cameras, not just recording
-  ones — disabled cameras render greyed with their toggle pre-off).
-  - tile head: slug + enable checkbox (persisted in
-    `localStorage["hnvr-timeline-disabled"]` as a JSON array of camera uuids),
-  - tile body: `<img>` thumbnail during scrub, `<video>` (hls.js) after
-    release, or a `NO RECORDING` placeholder when the cursor sits in a gap,
-  - tile footer: state line (`idle` / `seeking…` / `playing` / `gap`).
+- **Archive player** (v0.15: single player, was a tile grid): one video
+  surface + a camera dropdown. Exactly one camera streams at a time.
+  - dropdown: one option per camera; the active camera is persisted in
+    `localStorage["hnvr-timeline-active"]` and deep-linkable via
+    `?active=<uuid>` (wins over localStorage),
+  - body: `<img>` thumbnail during scrub, `<video controls>` (hls.js,
+    muted autoplay — unmute via the native controls) after release, or a
+    `NO RECORDING` placeholder when the cursor sits in a gap,
+  - bar: state line (`idle` / `playing` / `gap`) + admin purge button
+    (purges the SELECTED camera across the current window).
 - **Timeline** (canvas, ~120 px tall): one coverage lane per camera (ordered
   by slug, matching the grid), one shared event-marker lane, cursor line with
   a grab handle. Cursor label shows the time via the existing
@@ -84,24 +87,21 @@ idle ──pointerdown on handle──▶ scrubbing ──pointermove──▶ s
                              loading playlists ──▶ playing
 ```
 
-- **Scrubbing**: cursor position → UTC time `t`. For each *enabled* camera
-  with coverage at `t`, the tile swaps to `<img src=/TimelineThumb?cameraId=…&t=…>`.
-  Debounce per camera; in-flight fetches are aborted on the next move
-  (`AbortController`).
-- **Release**: for each enabled camera:
-  - coverage at `t` → build `/PlaylistArchive?cameraId=…&from=t&to=rangeEnd`
-    (existing 6 h cap applies; `to = min(rangeEnd, t+6h)`), attach hls.js,
-    `startPosition = offset of t inside first segment`, play muted.
-  - no coverage → `NO RECORDING` placeholder, no player created.
-- **Post-release scrub**: dragging again tears down players (hls.js
-  `destroy()`) and returns tiles to thumbnail mode.
+- **Scrubbing**: cursor position → UTC time `t`. When the active camera
+  has coverage at `t`, the player swaps to `<img src=/TimelineThumb?cameraId=…&t=…>`.
+  Debounced (150 ms); stale loads are token-guarded.
+- **Release**: coverage at `t` → build `/PlaylistArchive?cameraId=…&from=t&to=rangeEnd`
+  (existing 6 h cap applies; `to = min(rangeEnd, t+6h)`), attach hls.js, play
+  muted (controls shown). No coverage → `NO RECORDING` placeholder, no player
+  created.
+- **Post-release scrub**: dragging again tears the player down (hls.js
+  `destroy()`) and returns to thumbnail mode.
 - **Event markers**: click a marker → cursor jumps to `events.ts` and the
-  tile set seeks (same as a release at that time). Marker tooltip: camera
+  player seeks (same as a release at that time). Marker tooltip: camera
   slug, kind, rule name, localized time. Shift-click opens the event clip
   player (`/PlayerEventClip`) when one exists.
-- **Deep-linkable**: `?from=&to=&t=&cams=<csv of disabled uuids>` — the
-  `/Events` table's "▶" links are repointed here (row camera enabled, all
-  others left as the user's toggle state).
+- **Deep-linkable**: `?from=&to=&t=&active=<uuid>` — the
+  `/Events` table's "▶" links are repointed here.
 
 ### Zoom/pan of the timeline itself
 

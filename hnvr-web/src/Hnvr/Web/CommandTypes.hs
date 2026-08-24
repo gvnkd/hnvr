@@ -41,6 +41,7 @@ import Hnvr.Core.CameraSnapshot
     PtzSnapshot (..),
     RuleSnapshot (..),
     Transport,
+    audioInputRateHz,
     transportFromText,
   )
 import Hnvr.Core.Id (CameraId (..))
@@ -168,7 +169,8 @@ projectCameraWithRules rules cam =
                 csSnapshotIntervalSec = fromIntegral cam.snapshotIntervalSec,
                 csModelName = cam.modelName,
                 csRules = rules,
-                csPtz = ptz
+                csPtz = ptz,
+                csAudioInputRateHz = audioInputRateHz cam.audioEncoding cam.audioSampleRateKhz
               }
 
 -- | Build the PTZ snapshot for a camera row (Phase 5). 'Nothing'
