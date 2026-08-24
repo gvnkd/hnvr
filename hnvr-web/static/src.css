@@ -1155,6 +1155,23 @@
 
 /* ── Archive timeline (/Timeline, design_docs/12) ────────────── */
 @layer components {
+  .tl-shell-body {
+    @apply flex flex-col gap-3;
+  }
+  /* Panel fullscreen: player grows to fill, timeline keeps its strip. */
+  .tl-shell:fullscreen {
+    @apply flex flex-col overflow-hidden;
+    border-radius: 0;
+  }
+  .tl-shell:fullscreen .tl-shell-body {
+    @apply flex-1 min-h-0;
+  }
+  .tl-shell:fullscreen .tl-player-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    aspect-ratio: auto;
+  }
   .tl-rangebar {
     @apply flex flex-wrap items-center gap-2;
   }
@@ -1162,7 +1179,10 @@
     @apply flex items-center gap-2;
   }
   .tl-cursor-label {
-    @apply ml-auto text-sm font-mono;
+    @apply text-sm font-mono;
+  }
+  .tl-rangebar-end {
+    @apply ml-auto flex items-center gap-2;
   }
   .tl-player {
     @apply flex flex-col gap-3;
@@ -1202,11 +1222,34 @@
     color: var(--rec);
   }
   .tl-canvas-wrap {
-    @apply w-full select-none;
+    @apply w-full select-none relative;
   }
   .tl-canvas {
     @apply block w-full cursor-crosshair;
     touch-action: none;
+  }
+  /* Hover scrub preview (YouTube-style) */
+  .tl-hover-preview {
+    position: absolute;
+    top: 4px;
+    transform: translateX(-50%);
+    width: 168px;
+    z-index: 3;
+    pointer-events: none;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--shadow-panel);
+  }
+  .tl-hover-preview img {
+    @apply w-full block;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    background: #000;
+  }
+  .tl-hover-time {
+    @apply px-2 py-1 text-xs font-mono text-center;
   }
 }
 

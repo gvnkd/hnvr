@@ -81,6 +81,7 @@
       saveActive();
       if (camSelect && camSelect.value !== camId) camSelect.value = camId;
       syncPurgeForm();
+      draw(); // marker lane shows only the active camera
       if (autoplay) playActive();
       else updatePlayer(cursorMs);
     }
@@ -360,16 +361,6 @@
     }
 
     /* ── canvas rendering ─────────────────────────────────────── */
-    var PALETTE = [
-      "#38bdf8",
-      "#34d399",
-      "#fbbf24",
-      "#f87171",
-      "#a78bfa",
-      "#22d3ee",
-      "#fb923c",
-      "#e879f9",
-    ];
     function cssVar(name, fallback) {
       var v = getComputedStyle(document.documentElement)
         .getPropertyValue(name)
@@ -433,11 +424,13 @@
         ctx.globalAlpha = 1;
       });
 
-      // Event markers
+      // Event markers (active camera only — the lanes give the full
+      // coverage picture, the markers answer "what happened HERE").
       var my = g.topPad + states.length * (g.laneH + g.gap);
-      states.forEach(function (st, i) {
-        ctx.fillStyle = PALETTE[i % PALETTE.length];
-        st.markers.forEach(function (m) {
+      var activeSt = stateOf(activeCamId);
+      if (activeSt) {
+        ctx.fillStyle = accent;
+        activeSt.markers.forEach(function (m) {
           var x = xOf(Date.parse(m.ts), w);
           ctx.beginPath();
           ctx.moveTo(x, my);
@@ -446,7 +439,20 @@
           ctx.closePath();
           ctx.fill();
         });
-      });
+      }
+
+      // Hover position (thumbnail preview target)
+      if (hoverMs !== null && !dragging) {
+        var hx = xOf(hoverMs, w);
+        ctx.strokeStyle = textCol;
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(hx, 0);
+        ctx.lineTo(hx, g.height - 14);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
 
       // Cursor
       var cx = xOf(cursorMs, w);
@@ -472,8 +478,46 @@
     /* ── pointer interaction ──────────────────────────────────── */
     var dragging = false;
     var downX = 0;
+    var hoverMs = null;
+    var hoverToken = 0;
+    var hoverTimer = null;
+    // Floating thumbnail preview that follows mouse hover over the
+    // timeline (YouTube-style scrub preview; drag still owns the player).
+    var hover = document.createElement("div");
+    hover.className = "tl-hover-preview";
+    hover.hidden = true;
+    hover.innerHTML = '<img alt="" hidden /><div class="tl-hover-time muted"></div>';
+    root.appendChild(hover);
+    var hoverImg = hover.querySelector("img");
+    var hoverTime = hover.querySelector(".tl-hover-time");
     function clampCursor(ms) {
       return Math.max(fromMs, Math.min(toMs, ms));
+    }
+    function positionHover(x) {
+      var w = root.clientWidth;
+      var bw = 170; // preview width + border, keep inside the wrap
+      hover.style.left = Math.max(bw / 2, Math.min(w - bw / 2, x)) + "px";
+    }
+    function updateHover(ms) {
+      hoverTime.textContent = HNVR.formatTs(new Date(ms).toISOString());
+      if (!activeCamId || !coveredAt(activeCamId, ms)) {
+        hoverImg.hidden = true;
+        return;
+      }
+      var token = ++hoverToken;
+      hoverImg.onload = function () {
+        if (token !== hoverToken) return;
+        hoverImg.hidden = false;
+      };
+      hoverImg.onerror = function () {
+        if (token !== hoverToken) return;
+        hoverImg.hidden = true;
+      };
+      hoverImg.src =
+        "/TimelineThumb?cameraId=" +
+        encodeURIComponent(activeCamId) +
+        "&t=" +
+        encodeURIComponent(new Date(ms).toISOString());
     }
     function seekTo(ms) {
       cursorMs = clampCursor(ms);
@@ -483,6 +527,7 @@
     }
     canvas.addEventListener("pointerdown", function (e) {
       dragging = true;
+      hover.hidden = true;
       downX = e.clientX;
       canvas.setPointerCapture(e.pointerId);
       stopPlayback(); // new scrub: back to thumbnail mode
@@ -490,9 +535,28 @@
       seekTo(msOf(e.clientX - rect.left, rect.width));
     });
     canvas.addEventListener("pointermove", function (e) {
-      if (!dragging) return;
       var rect = canvas.getBoundingClientRect();
-      seekTo(msOf(e.clientX - rect.left, rect.width));
+      if (dragging) {
+        seekTo(msOf(e.clientX - rect.left, rect.width));
+        return;
+      }
+      // Hover: light line + debounced thumbnail preview at that time.
+      hoverMs = clampCursor(msOf(e.clientX - rect.left, rect.width));
+      hover.hidden = false;
+      positionHover(e.clientX - rect.left);
+      hoverTime.textContent = HNVR.formatTs(new Date(hoverMs).toISOString());
+      draw();
+      if (hoverTimer) clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(function () {
+        if (hoverMs !== null && !dragging) updateHover(hoverMs);
+      }, 120);
+    });
+    canvas.addEventListener("pointerleave", function () {
+      hoverMs = null;
+      hover.hidden = true;
+      hoverImg.hidden = true;
+      if (hoverTimer) clearTimeout(hoverTimer);
+      draw();
     });
     canvas.addEventListener("pointerup", function (e) {
       if (!dragging) return;
@@ -507,12 +571,12 @@
         var relY = e.clientY - rect.top;
         if (relY >= my - 2 && relY <= my + g.markerH) {
           var hit = null;
-          states.forEach(function (st) {
-            st.markers.forEach(function (m) {
+          var activeSt = stateOf(activeCamId);
+          if (activeSt)
+            activeSt.markers.forEach(function (m) {
               var x = xOf(Date.parse(m.ts), rect.width);
               if (Math.abs(x - mx) < 8) hit = m;
             });
-          });
           if (hit) {
             if (e.shiftKey && hit.clipId) {
               window.location.href = "/PlayerEventClip?clipId=" + hit.clipId;
@@ -538,6 +602,48 @@
     window.addEventListener("resize", resize);
 
     // Purge forms use the shared data-confirm gate in app.js.
+
+    // Jump to the previous/next event marker of the active camera and
+    // play from there (same as a marker click). Marker order from
+    // TimelineData is newest-first — search order-agnostically.
+    function jumpEvent(dir) {
+      var st = stateOf(activeCamId);
+      if (!st || !st.markers.length) {
+        setState("no events");
+        return;
+      }
+      var best = null;
+      st.markers.forEach(function (m) {
+        var t = Date.parse(m.ts);
+        if (dir < 0 && t < cursorMs - 500 && (best === null || t > best)) best = t;
+        if (dir > 0 && t > cursorMs + 500 && (best === null || t < best)) best = t;
+      });
+      if (best === null) {
+        setState(dir < 0 ? "no earlier event" : "no later event");
+        return;
+      }
+      seekTo(best);
+      playActive();
+    }
+    var prevBtn = document.querySelector("[data-tl-prev-event]");
+    var nextBtn = document.querySelector("[data-tl-next-event]");
+    if (prevBtn)
+      prevBtn.addEventListener("click", function () {
+        jumpEvent(-1);
+      });
+    if (nextBtn)
+      nextBtn.addEventListener("click", function () {
+        jumpEvent(1);
+      });
+
+    // Panel fullscreen (range + player + timeline together).
+    var fsBtn = document.querySelector("[data-tl-fs]");
+    var shell = document.querySelector("[data-tl-shell]");
+    if (fsBtn && shell) {
+      fsBtn.addEventListener("click", function () {
+        HNVR.toggleFullscreen(shell);
+      });
+    }
 
     resize();
     updateLabel();

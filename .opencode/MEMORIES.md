@@ -1,5 +1,34 @@
 # HNVR — Project Memories
 
+> **Prev/next event jump buttons (Aug 24 2026, v0.15.0.0 cont. 4)**:
+> player bar gained "◀ event" / "event ▶" ([data-tl-prev-event] /
+> [data-tl-next-event]) → jumpEvent(±1): nearest active-camera marker
+> before/after cursorMs (±500 ms epsilon so landing on an event doesn't
+> re-jump to itself), seekTo + playActive (same as marker click);
+> "no earlier/later event" state when exhausted. **Trap: TimelineData
+> markers are NEWEST-FIRST** (first version assumed ascending → prev
+> jumped to the OLDEST event, next to the newest); jumpEvent is now
+> order-agnostic (scan all, keep nearest in the right direction) and
+> the e2e computes the max-ts marker instead of taking the last array
+> element. e2e 35 green.
+
+
+> **Timeline UX round (Aug 24 2026, v0.15.0.0 cont. 3)**: Sergey:
+> markers only for the ACTIVE camera (draw() + hit-test filter on
+> stateOf(activeCamId), accent color, PALETTE gone); hover scrub preview
+> on the canvas (pointermove when !dragging → debounced 120 ms
+> /TimelineThumb for the active camera in a floating .tl-hover-preview
+> bubble + dim hover line; pointerleave hides; pointerdown hides and the
+> drag owns the player); all three panels merged into ONE card
+> (.tl-shell: rangebar + player + canvas + hint, gap-3 column) with a
+> [data-tl-fs] button → HNVR.toggleFullscreen(shell); fullscreen CSS:
+> .tl-shell:fullscreen flex column, .tl-player-body flex:1 min-height:0
+> max-height:none aspect-ratio:auto. Trap: keep the fs button INSIDE a
+> right-aligned .tl-rangebar-end group (ml-auto) — a bare trailing item
+> wraps onto its own line. e2e +2 (hover bubble show/move/hide,
+> fullscreen enter/exit), 34 green, pre-commit green.
+
+
 > **Playlist EXTINF repair + upfront legacy strip (Aug 24 2026,
 > v0.15.0.0 cont. 2)**: Sergey's 18:38–20:38 window stalled at 1.7 s
 > (bufferFullError → eventually the storm guard's "recording

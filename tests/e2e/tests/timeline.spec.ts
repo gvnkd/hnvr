@@ -94,6 +94,61 @@ test.describe('Archive timeline', () => {
     await page.locator('[data-tl-camera]').selectOption(firstId);
   });
 
+  test('hovering the timeline shows a scrub preview bubble', async ({loggedInPage: page}) => {
+    await page.goto('/Timeline');
+    await page.waitForResponse(/\/TimelineData\?from=/);
+    const canvas = page.locator('[data-tl-canvas]');
+    await canvas.scrollIntoViewIfNeeded();
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.5, box.y + 20);
+    const bubble = page.locator('.tl-hover-preview');
+    await expect(bubble).toBeVisible();
+    await expect(bubble.locator('.tl-hover-time')).not.toBeEmpty();
+    // Moving the pointer moves the bubble (clamped inside the wrap).
+    await page.mouse.move(box.x + box.width * 0.2, box.y + 20);
+    await expect(bubble).toBeVisible();
+    // Leaving the canvas hides it.
+    await page.mouse.move(box.x + box.width * 0.5, box.y - 60);
+    await expect(bubble).toBeHidden();
+  });
+
+  test('fullscreen button expands the whole panel', async ({loggedInPage: page}) => {
+    await page.goto('/Timeline');
+    await page.locator('[data-tl-fs]').click();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => document.fullscreenElement?.classList.contains('tl-shell') ?? false)
+      )
+      .toBe(true);
+    await page.locator('[data-tl-fs]').click();
+    await expect
+      .poll(async () => page.evaluate(() => document.fullscreenElement === null))
+      .toBe(true);
+  });
+
+  test('prev/next event buttons jump the cursor between markers', async ({loggedInPage: page}) => {
+    await page.goto('/Timeline');
+    const resp = await page.waitForResponse(/\/TimelineData\?from=/);
+    const data = await resp.json();
+    const activeId = await page.locator('[data-tl-camera]').inputValue();
+    const cam = data.cameras.find((c: any) => c.id === activeId);
+    test.skip(!cam || cam.events.length === 0, 'no events for the active camera');
+    // TimelineData markers are newest-first.
+    const latest = cam.events.reduce((a: any, b: any) => (Date.parse(a.ts) > Date.parse(b.ts) ? a : b));
+    const expected = await page.evaluate(
+      (ts) => (window as any).HNVR.formatTs(ts),
+      latest.ts
+    );
+    // Cursor starts at the window end (now) → "◀ event" lands on the
+    // latest marker.
+    await page.locator('[data-tl-prev-event]').click();
+    await expect(page.locator('[data-tl-cursor-label]')).toHaveText(expected);
+    // "event ▶" from the latest marker has nowhere to go.
+    await page.locator('[data-tl-next-event]').click();
+    await expect(page.locator('[data-tl-state]')).toContainText('no later event');
+    await expect(page.locator('[data-tl-cursor-label]')).toHaveText(expected);
+  });
+
   test('deep link with t= clamps cursor into the window', async ({loggedInPage: page}) => {
     await page.goto('/Timeline');
     const root = page.locator('[data-timeline]');

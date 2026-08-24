@@ -38,26 +38,25 @@ instance View IndexView where
       [hsx|
         <div class="section-h">Archive timeline</div>
 
-        <div class="card mb-4">
-          <div class="card-body tl-rangebar">
-            <span class="muted text-sm">Range:</span>
-            {presetLink 3600 "1h"}
-            {presetLink (6 * 3600) "6h"}
-            {presetLink (24 * 3600) "24h"}
-            <form method="GET" action="/Timeline" class="tl-custom">
-              <input class="input" type="datetime-local" name="from" data-tz-dt="1" value={dtLocal winFrom} />
-              <span class="muted">→</span>
-              <input class="input" type="datetime-local" name="to" data-tz-dt="1" value={dtLocal winTo} />
-              <button class="btn btn-ghost" type="submit">Apply</button>
-            </form>
-            <span class="tl-cursor-label muted">cursor: <span data-tl-cursor-label>{tzTime cursor}</span></span>
-          </div>
-        </div>
-
-        {playerCard}
-
-        <div class="card mt-4">
-          <div class="card-body">
+        <div class="card mb-4 tl-shell" data-tl-shell>
+          <div class="card-body tl-shell-body">
+            <div class="tl-rangebar">
+              <span class="muted text-sm">Range:</span>
+              {presetLink 3600 "1h"}
+              {presetLink (6 * 3600) "6h"}
+              {presetLink (24 * 3600) "24h"}
+              <form method="GET" action="/Timeline" class="tl-custom">
+                <input class="input" type="datetime-local" name="from" data-tz-dt="1" value={dtLocal winFrom} />
+                <span class="muted">→</span>
+                <input class="input" type="datetime-local" name="to" data-tz-dt="1" value={dtLocal winTo} />
+                <button class="btn btn-ghost" type="submit">Apply</button>
+              </form>
+              <div class="tl-rangebar-end">
+                <span class="tl-cursor-label muted">cursor: <span data-tl-cursor-label>{tzTime cursor}</span></span>
+                <button class="btn btn-ghost btn-sm" data-tl-fs title="Expand player + timeline fullscreen">fullscreen</button>
+              </div>
+            </div>
+            {playerBody}
             <div
               class="tl-canvas-wrap"
               data-timeline
@@ -68,9 +67,9 @@ instance View IndexView where
               <canvas class="tl-canvas" data-tl-canvas></canvas>
             </div>
             <div class="hint mt-2">
-              Pick the camera from the dropdown. Drag the cursor to scrub — the player shows the
-              snapshot nearest the cursor; on release the selected camera plays from the cursor time.
-              Click an event marker to jump to it; shift-click opens its clip.
+              Pick the camera from the dropdown. Hover the timeline to preview a time; drag to scrub —
+              the player shows the snapshot nearest the cursor; on release the selected camera plays
+              from the cursor time. Click an event marker to jump to it; shift-click opens its clip.
             </div>
           </div>
         </div>
@@ -99,28 +98,28 @@ instance View IndexView where
       -- Single archive player: camera dropdown + one video surface.
       -- Exactly one camera streams at a time (N concurrent hls.js
       -- instances was too laggy); timeline.js owns switching.
-      playerCard =
+      playerBody =
         if null cameras
           then mempty
           else
             [hsx|
-              <div class="card mb-4">
-                <div class="card-body tl-player">
-                  <div class="tl-player-bar">
-                    <label class="tl-player-cam text-sm">
-                      <span class="muted">Camera:</span>
-                      <select class="input" data-tl-camera>
-                        {forEach cameras camOption}
-                      </select>
-                    </label>
+              <div class="tl-player">
+                <div class="tl-player-bar">
+                  <label class="tl-player-cam text-sm">
+                    <span class="muted">Camera:</span>
+                    <select class="input" data-tl-camera>
+                      {forEach cameras camOption}
+                    </select>
+                  </label>
                     <span class="muted text-sm" data-tl-state>idle</span>
+                    <button class="btn btn-ghost btn-sm" data-tl-prev-event title="Jump to the previous event">◀ event</button>
+                    <button class="btn btn-ghost btn-sm" data-tl-next-event title="Jump to the next event">event ▶</button>
                     {purgeForm}
-                  </div>
-                  <div class="tl-player-body">
-                    <img data-tl-thumb alt="" hidden />
-                    <div class="tl-player-placeholder" data-tl-placeholder>—</div>
-                    <button class="btn btn-ghost btn-sm zoompan-fs" data-zoompan-fs="1">fullscreen</button>
-                  </div>
+                </div>
+                <div class="tl-player-body">
+                  <img data-tl-thumb alt="" hidden />
+                  <div class="tl-player-placeholder" data-tl-placeholder>—</div>
+                  <button class="btn btn-ghost btn-sm zoompan-fs" data-zoompan-fs="1">fullscreen</button>
                 </div>
               </div>
             |]
