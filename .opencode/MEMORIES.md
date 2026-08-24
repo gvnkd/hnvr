@@ -1,5 +1,18 @@
 # HNVR — Project Memories
 
+> **Timeline panel-fullscreen layout fix (Aug 24 2026, v0.15.0.0
+> cont. 5)**: in fullscreen the timeline strip was pushed off-screen —
+> the flex chain was incomplete (.tl-player never grew; the player body
+> ballooned off the video's intrinsic 4000×3000 and overflow:hidden
+> clipped the canvas). Fullscreen chain is now: .tl-shell flex-col →
+> .tl-shell-body flex-1 min-h-0 → .tl-player flex-1 min-h-0 →
+> .tl-player-body flex-1 min-h-0 max-height-none aspect-ratio-auto, with
+> .tl-canvas-wrap flex:0 0 auto. Rule: EVERY level of a fullscreen flex
+> chain needs min-height:0 or the intrinsic video size wins. e2e
+> fullscreen test now also asserts the canvas box is inside the
+> viewport. 35 green.
+
+
 > **Prev/next event jump buttons (Aug 24 2026, v0.15.0.0 cont. 4)**:
 > player bar gained "◀ event" / "event ▶" ([data-tl-prev-event] /
 > [data-tl-next-event]) → jumpEvent(±1): nearest active-camera marker

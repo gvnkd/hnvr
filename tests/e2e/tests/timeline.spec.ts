@@ -120,6 +120,13 @@ test.describe('Archive timeline', () => {
         page.evaluate(() => document.fullscreenElement?.classList.contains('tl-shell') ?? false)
       )
       .toBe(true);
+    // The timeline strip must stay on screen in fullscreen (the player
+    // grows to fill, the canvas keeps its own height).
+    const canvasBox = await page.locator('[data-tl-canvas]').boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(canvasBox).not.toBeNull();
+    expect(canvasBox!.y).toBeGreaterThanOrEqual(0);
+    expect(canvasBox!.y + canvasBox!.height).toBeLessThanOrEqual(viewport.height + 1);
     await page.locator('[data-tl-fs]').click();
     await expect
       .poll(async () => page.evaluate(() => document.fullscreenElement === null))

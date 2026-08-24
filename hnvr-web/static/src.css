@@ -1166,11 +1166,18 @@
   .tl-shell:fullscreen .tl-shell-body {
     @apply flex-1 min-h-0;
   }
+  .tl-shell:fullscreen .tl-player {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
   .tl-shell:fullscreen .tl-player-body {
     flex: 1 1 auto;
     min-height: 0;
     max-height: none;
     aspect-ratio: auto;
+  }
+  .tl-shell:fullscreen .tl-canvas-wrap {
+    flex: 0 0 auto;
   }
   .tl-rangebar {
     @apply flex flex-wrap items-center gap-2;
