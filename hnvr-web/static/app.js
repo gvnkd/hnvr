@@ -611,6 +611,65 @@
     });
   }
 
+  /* ── Fitted preview grids: pick the column count that maximizes ──
+     tile size for N 16/9 cards, bounded by BOTH the container width
+     and the viewport height (the whole wall should fit one screen).
+     For each candidate column count c the tile width is
+       min( (W-(c-1)g)/c,  ((H-(rows-1)g)/rows - chrome) * 16/9 )
+     and the c giving the widest tile wins (ties → fewer columns).
+     Applied to .cam-grid; CSS keeps an auto-fill fallback for no-JS. */
+  function fitGrid(grid) {
+    var cards = grid.children;
+    var n = cards.length;
+    if (!n) return;
+    var cs = getComputedStyle(grid);
+    var gap = parseFloat(cs.columnGap) || 0;
+    var W = grid.clientWidth;
+    var body = cards[0].querySelector(".cam-body");
+    var chrome = (body ? body.offsetHeight : 0) + 2; // body row + borders
+    var ar = 9 / 16;
+    var absTop = grid.getBoundingClientRect().top + window.scrollY;
+    var H = window.innerHeight - absTop - 16;
+    var bestC = 1;
+    var bestW = -1;
+    for (var c = 1; c <= n; c++) {
+      var rows = Math.ceil(n / c);
+      var wWidth = (W - (c - 1) * gap) / c;
+      var wHeight = ((H - (rows - 1) * gap) / rows - chrome) / ar;
+      var w = Math.min(wWidth, wHeight);
+      if (w > bestW + 0.5) {
+        bestW = w;
+        bestC = c;
+      }
+    }
+    var wFull = (W - (bestC - 1) * gap) / bestC;
+    if (bestW < 260) {
+      // Absurd budget (tiny window): revert to the CSS auto-fill default.
+      grid.style.gridTemplateColumns = "";
+      grid.style.justifyContent = "";
+    } else if (bestW >= wFull - 1) {
+      grid.style.gridTemplateColumns = "repeat(" + bestC + ", 1fr)";
+      grid.style.justifyContent = "";
+    } else {
+      grid.style.gridTemplateColumns =
+        "repeat(" + bestC + ", " + Math.floor(bestW) + "px)";
+      grid.style.justifyContent = "center";
+    }
+  }
+  function initFitGrids() {
+    var grids = Array.prototype.slice.call(document.querySelectorAll(".cam-grid"));
+    if (!grids.length) return;
+    function relayout() {
+      grids.forEach(fitGrid);
+    }
+    var timer = null;
+    window.addEventListener("resize", function () {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(relayout, 120);
+    });
+    relayout();
+  }
+
   /* ── Fullscreen live overlay (FLIP expand from card) ────────── */
   var liveSession = null;
   var livePtz = null;
@@ -1006,6 +1065,7 @@
       if (msg && !window.confirm(msg)) e.preventDefault();
     });
     initLiveFrames();
+    initFitGrids();
     initLiveOverlay();
     initLightbox();
     initClock();

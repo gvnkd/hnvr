@@ -1,5 +1,35 @@
 # HNVR — Project Memories
 
+> **Max-size previews/players + fitted grid layout (Aug 25 2026,
+> v0.15.0.0 cont. 6)**: Sergey: thumbnails + video players must prefer
+> the maximum available size; multi-card pages must CHOOSE the column
+> count that maximizes tile size. (a) app.js `fitGrid(grid)` (init
+> via `initFitGrids`, 120 ms-debounced resize) — for each candidate
+> column count c, tile width = min((W-(c-1)g)/c, ((H-(rows-1)g)/rows -
+> cardChrome) * 16/9) where H = viewport height minus the grid's
+> absolute top; widest tile wins, ties → fewer columns; height-bound
+> results get fixed-px tracks + justify-content center, width-bound get
+> repeat(c, 1fr); <260px result = absurd budget → revert to the CSS
+> auto-fill fallback. Applied to .cam-grid (dashboard live wall).
+> Verified headless: 2 cams 1600×900 → 2×652px one row; 1280×720 →
+> 2×492px. (b) Single players are now viewport-height-bound via CSS
+> only: .video-frame width min(100%, (100dvh - 13rem) * 16/9) centered
+> (the tailwind minifier rewrites it to `100dvh*16/9 - 23.1rem` —
+> same math); .tl-player-body (100dvh - 22rem) * 16/9 replaces the old
+> 50vh max-height cap; .live-overlay-panel (92dvh - 3.5rem) * 16/9
+> replaces min(1400px,100%). FULLSCREEN TRAP: any width:min() on a
+> fullscreen-target wrapper would shrink it INSIDE fullscreen — every
+> :fullscreen rule (.video-frame, .live-overlay-video,
+> .tl-shell:fullscreen .tl-player-body) now sets explicit
+> width:100%/height:100%. (c) Thumbs: .ev-thumb + .tl-hover-preview
+> 168→240px; lightbox img is now intrinsic-size capped by 96vw/84dvh
+> (was fixed max-width 1100px, so 4:3 backyard frames use full height).
+> app.css rebuilt via `tailwindcss -i src.css -o app.css --minify`
+> (tracked file; env-wrap has the CLI). e2e 35 green on :18002
+> (roles-disabled leader, all HNVR_DISABLE_* gates).
+>
+
+
 > **Timeline panel-fullscreen layout fix (Aug 24 2026, v0.15.0.0
 > cont. 5)**: in fullscreen the timeline strip was pushed off-screen —
 > the flex chain was incomplete (.tl-player never grew; the player body
