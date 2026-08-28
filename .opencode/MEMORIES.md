@@ -1,5 +1,21 @@
 # HNVR — Project Memories
 
+> **README refresh + live leader restarted on 0.16.0.0 (Aug 28 2026)**:
+> version bumped 0.15.0.0 → **0.16.0.0** (the max-size layout feature
+> shipped un-bumped). README updated to reality: /Archive route row →
+> /Timeline, +/ShowProfile, archive-browser screenshot row →
+> timeline-playing.png, features gained Archive timeline + fitted live
+> wall + viewer timezones, tests 449 Haskell / 35 e2e / 1 smoke.
+> screenshots.mjs: dropped the 404ing /Archive step, added
+> 'timeline-playing' (LIVE deep link ?from&to&t&active, 9 s settle) and
+> archive-player settle 6 s → 18 s (the moof-probe "indexing…" of a 1 h
+> window needs ~15 s — a 6 s settle shoots "Loading player…"). **Sergey
+> approved restarting the live :18001 leader onto the new build** (killed
+> by PID, restarted via env-wrap `PORT=18001 setsid nohup ./result/bin/
+> hnvr-leader`; /status confirms 0.16.0.0). The 18002 roles-disabled
+> leader was also respawned on the new build for FRESH screenshots.
+>
+
 > **Max-size previews/players + fitted grid layout (Aug 25 2026,
 > v0.15.0.0 cont. 6)**: Sergey: thumbnails + video players must prefer
 > the maximum available size; multi-card pages must CHOOSE the column

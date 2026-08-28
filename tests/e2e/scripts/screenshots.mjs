@@ -102,12 +102,6 @@ await step('events', async () => {
   await shot(page, 'events');
 });
 
-await step('archive', async () => {
-  await page.goto(FRESH + '/Archive');
-  await settle(page, 1500);
-  await shot(page, 'archive');
-});
-
 await step('stats', async () => {
   await page.goto(FRESH + '/Stats');
   await settle(page, 1200);
@@ -155,8 +149,22 @@ await step('rule editor (zone canvas)', async () => {
 
 await step('archive player', async () => {
   await page.goto(LIVE + '/PlayerArchive?cameraId=' + FLOOR);
-  await settle(page, 6000);
+  // The playlist rewrite probes every fragment's moof head up-front
+  // ("indexing…") — a 1 h window needs ~15 s before pixels appear.
+  await settle(page, 18000);
   await shot(page, 'archive-player');
+});
+
+await step('timeline playing (live)', async () => {
+  const t = new Date(Date.now() - 30 * 60 * 1000);
+  const fmt = (d) => d.toISOString().slice(0, 19);
+  const from = new Date(t.getTime() - 3600 * 1000);
+  const to = new Date(t.getTime() + 3600 * 1000);
+  await page.goto(
+    LIVE + '/Timeline?from=' + fmt(from) + '&to=' + fmt(to) + '&t=' + fmt(t) + '&active=' + FLOOR
+  );
+  await settle(page, 9000);
+  await shot(page, 'timeline-playing');
 });
 
 await step('dashboard daylight', async () => {

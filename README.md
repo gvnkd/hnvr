@@ -26,11 +26,26 @@ nodes communicate over NATS.
   holds a single RTSP session per camera no matter how many viewers
   or pipelines attach.
 - Dashboard live wall with per-camera status badges (REC / STARTING /
-  RECONNECTING / FAILED / HOST DOWN), refreshed in-page.
+  RECONNECTING / FAILED / HOST DOWN), refreshed in-page. The wall
+  auto-sizes: the column count (1, 2, 3 … per row) is chosen to
+  maximize tile size while keeping the whole wall on one screen.
 - Fullscreen overlay player, mouse-wheel zoom at cursor, drag-to-pan,
-  double-click fullscreen — on every player in the app.
+  double-click fullscreen — on every player in the app. All players
+  and previews size themselves to the maximum the viewport allows.
 - Dashboard and live view are anonymous-readable (optional kiosk /
   wall-monitor mode); everything else requires login.
+
+**Archive timeline**
+- One canvas timeline per camera fleet: coverage lanes, event markers,
+  drag-to-scrub with hover snapshot previews (YouTube-style), and a
+  single player with a camera switcher — deep-linkable
+  (`/Timeline?from&to&t&active`).
+- Prev/next event jump buttons; marker click seeks, shift-click opens
+  the event clip; whole panel goes fullscreen with the strip intact.
+- Playback is repaired client-side: EXTINF durations are rewritten
+  from real fragment timestamps and legacy audio-clock skew is
+  patched/stripped in the loader, so old recordings play smoothly.
+- Admin window purge with tombstoned (verified) deletion.
 
 **AI / events**
 - YOLOv8 (n-320 or s-640, per-camera selectable) on ONNX Runtime —
@@ -70,6 +85,8 @@ nodes communicate over NATS.
   commands, S3 errors, process RSS), unauthenticated `/healthz` and
   `/status` endpoints.
 - Audit log page: logins, camera/rule changes, purges, assignments.
+- All timestamps render in the viewer's timezone (per-user profile
+  setting, browser-local by default).
 - Two UI themes (Midnight Ops dark / Daylight light), sortable and
   filterable tables throughout.
 - Secrets via sops-nix; camera passwords stored AES-256-GCM
@@ -84,8 +101,8 @@ nodes communicate over NATS.
 | Live WebRTC overlay | PTZ side-drawer with presets |
 | ![Events](docs/screenshots/events.png) | ![Rule editor](docs/screenshots/rule-editor.png) |
 | Event review with thumbnails | Rule editor (zones drawn on the live frame) |
-| ![Archive browser](docs/screenshots/archive.png) | ![Archive player](docs/screenshots/archive-player.png) |
-| Archive browser (filterable, grouped recordings) | Archive player (fMP4/HLS, deep-linkable) |
+| ![Archive timeline](docs/screenshots/timeline-playing.png) | ![Archive player](docs/screenshots/archive-player.png) |
+| Archive timeline: coverage lanes, markers, scrub player | Windowed fMP4/HLS player, deep-linkable |
 | ![Daylight theme](docs/screenshots/dashboard-daylight.png) | ![Hosts](docs/screenshots/hosts.png) |
 | Daylight theme | Host fleet view |
 
@@ -165,7 +182,7 @@ web tier is down, but reassignment stops).
 | | |
 |---|---|
 | Language | Haskell, GHC 9.12.3 |
-| Web | IHP v1.6.0 (WAI + HSX), vanilla JS (`app.js`, `ptz.js`), Tailwind CLI |
+| Web | IHP v1.6.0 (WAI + HSX), vanilla JS (`app.js`, `timeline.js`, `ptz.js`), Tailwind CLI |
 | IPC | NATS (core; JetStream deferred) via vendored `nats-queue` |
 | Capture | ffmpeg 7 subprocesses, fMP4 fragmentation in-process |
 | CV | ONNX Runtime via internal FFI binding; YOLOv8n-320 / YOLOv8s-640; pure-Haskell SORT |
@@ -291,8 +308,8 @@ assets, `LimitNOFILE`, restart policy).
 | `/` (`/Dashboard`) | anonymous | Live wall + host fleet summary |
 | `/ShowLive?cameraId=…` | anonymous | Full-page WebRTC live view |
 | `/Events` | login | Event table: filters, thumbnails, clip replay |
-| `/Archive` | login | Recording browser: camera/time/duration filters, purge |
-| `/PlayerArchive?cameraId=…&from&to&t` | login | fMP4/HLS player, deep-linkable |
+| `/Timeline` | login | Archive timeline: coverage lanes, event markers, scrub player, purge |
+| `/PlayerArchive?cameraId=…&from&to&t` | login | Windowed fMP4/HLS player, deep-linkable |
 | `/PlayerEventClip?clipId=…` | login | Event clip player |
 | `/Cameras`, `/NewCamera`, `/EditCamera`, `/ShowCamera` | login | Camera CRUD, probe, assignment, ONVIF drift |
 | `/Rules`, `/NewRule`, `/EditRule` | login | Rule editor with on-frame geometry canvas |
@@ -300,6 +317,7 @@ assets, `LimitNOFILE`, restart policy).
 | `/Stats` | login | Storage + event statistics |
 | `/Hosts` | login | Fleet status, GPU, liveness |
 | `/AuditLog` | admin | Full audit trail |
+| `/ShowProfile` | login | User profile (timezone) |
 | `/DebugCamera?cameraId=…` | login | Live analysis overlay (bbox + track IDs) |
 | `/healthz`, `/status` | anonymous | Liveness probe / version JSON |
 | `/whep/<slug>` | anonymous | WebRTC signaling proxy to MediaMTX |
@@ -318,7 +336,7 @@ cabal test hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz
 HNVR_TEST_INTEGRATION=1 HNVR_CONFIG=$PWD/hnvr.yaml cabal test hnvr-nats hnvr-storage
 
 cd tests/e2e && npm install && npx playwright install chromium   # one-time
-npm test                                                        # 8 specs
+npm test                                                        # 35 specs
 
 nix build .#checks.x86_64-linux.pre-commit                      # ormolu/hlint/etc
 nix build .#checks.x86_64-linux.hnvr-leader-smoke               # NixOS VM smoke test
@@ -339,22 +357,23 @@ exist in the nix overlay; always `nix build .#hnvr-web`.
 ├── hnvr-web/       IHP app: controllers, views, node/leader roles, migrations
 ├── nix/            NixOS modules (leader, NATS, MediaMTX, secrets template)
 ├── tests/e2e/      Playwright suite + scripts/screenshots.mjs
-├── design_docs/    authoritative design (00-overview … 11)
+├── design_docs/    authoritative design (00-overview … 12)
 ├── vendored/       nats-queue + minio-hs (patched)
 └── docs/screenshots/  README images
 ```
 
 ## Status
 
-Current version **0.10.0.0** (pre-release). Phases 0–5 shipped:
+Current version **0.16.0.0** (pre-release). Phases 0–5 shipped:
 recording, live view, multi-host, CV pipeline, events + clips, ONVIF
-config sync, PTZ. Post-v1 roadmap: leader HA lease, auto-track
+config sync, PTZ — plus the unified archive timeline (canvas scrubbing,
+single switchable player, client-side legacy-recording repair) and the
+auto-sizing live wall. Post-v1 roadmap: leader HA lease, auto-track
 (closed-loop PID), clip export jobs, viewer role. See
 [`design_docs/08-roadmap.md`](./design_docs/08-roadmap.md).
 
-Tests: ~305 Haskell unit/property tests, 34 Playwright specs
-(32 + 2 conditional skips), 1 NixOS VM smoke test. CI: flake check +
-builds on every push, nightly Playwright.
+Tests: 449 Haskell unit/property tests, 35 Playwright specs, 1 NixOS VM
+smoke test. CI: flake check + builds on every push, nightly Playwright.
 
 ## Conventions
 
