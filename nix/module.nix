@@ -222,7 +222,13 @@ in
         ProtectSystem = "strict";
         ProtectHome = true;
         ReadOnlyPaths = "/";
-        ReadWritePaths = [ cfg.dataDir ];
+        # The MediaMTXConfigSyncer writes the mediamtx config (and its
+        # .tmp) next to the mediamtx service's runtime dir; without this
+        # the syncer's initial write fails under ProtectSystem=strict,
+        # which used to kill the whole syncer async silently.
+        ReadWritePaths = [ cfg.dataDir ]
+          ++ lib.optionals config.services.hnvr.mediamtx.enable
+          [ (dirOf config.services.hnvr.mediamtx.configPath) ];
 
         # Raise the FD ceiling above systemd's 1024 default. The leader
         # holds many concurrent sockets: per-camera ffmpeg subprocess

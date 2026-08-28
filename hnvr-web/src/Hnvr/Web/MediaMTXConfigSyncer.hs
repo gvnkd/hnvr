@@ -120,8 +120,14 @@ listenLoop = do
   apiBase <- maybe defaultMediaMtxApi T.pack <$> Env.lookupEnv "HNVR_MEDIAMTX_API"
   cfgPath <- fromMaybe defaultConfigPath <$> Env.lookupEnv "HNVR_MEDIAMTX_CONFIG_PATH"
   -- Initial sync — covers the leader-restart case where cameras
-  -- changed while the leader was down.
+  -- changed while the leader was down. Caught separately from the
+  -- LISTEN loop: a failure here (e.g. the mediamtx config dir not
+  -- writable under ProtectSystem=strict) used to kill the async
+  -- before LISTEN started, silently — no file, no REST push, no
+  -- re-sync on later camera events.
   syncOnce mgr apiBase cfgPath
+    `catch` \(e :: SomeException) ->
+      logError ("MediaMTXConfigSyncer: initial sync failed: " <> T.pack (show e))
   listenWith dbUrl (const $ syncOnce mgr apiBase cfgPath)
     `catch` \(e :: SomeException) ->
       logError ("MediaMTXConfigSyncer: LISTEN loop died: " <> T.pack (show e))
