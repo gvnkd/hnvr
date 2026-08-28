@@ -80,8 +80,14 @@ data OrtTensorRTProviderOptionsV2
 -- | Must match the header the indices were generated from (ORT's ABI
 -- is append-only, so older API versions keep working at runtime — but
 -- the index table is only guaranteed for the pinned header).
+--
+-- 24, not 27: every vtable index used below (max 208, CUDA V2 EP)
+-- predates ORT_API_VERSION 24, and requesting an older version is
+-- served by newer libs too (append-only ABI). Requesting 27 crashes
+-- with a null Api → SEGV against nixpkgs' onnxruntime 1.24.x (CPU
+-- hosts like snp-srv's hnvr-1), which caps at API 24.
 ortApiVersion :: Word32
-ortApiVersion = 27
+ortApiVersion = 24
 
 -- | ORT call failed; payload is the call site + ORT's error message.
 data OrtError = OrtError Text Text
