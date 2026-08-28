@@ -47,6 +47,7 @@ import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
 import Hnvr.Web.DebugStream (debugStreamMiddleware)
 import Hnvr.Web.EventWriter (startEventWriter)
+import Hnvr.Web.FrameCache (startFrameCache)
 import Hnvr.Web.HealthCache (startHealthCache)
 import Hnvr.Web.MediaMTXConfigSyncer (startMediaMTXConfigSyncer)
 import Hnvr.Web.Metrics (ensureMetrics, startGpuPoller, startMetricsServer)
@@ -169,6 +170,8 @@ connectNatsAndStartEventWriter = do
         writeIORef busRegistry (Just bus)
         logInfo ("leader: connected to NATS: " <> cs (uri :: String))
         gated "HNVR_DISABLE_EVENTWRITER" (startEventWriter bus ?modelContext)
+        -- Remote-node frame channel → dashboard wall fallback.
+        gated "HNVR_DISABLE_FRAMECACHE" (startFrameCache bus)
         -- Read once up front: the HealthCache needs it to stamp
         -- is_leader, the node roles need it for the worker identity.
         host <- maybe "hnvr-2" T.pack <$> Env.lookupEnv "HNVR_HOST"

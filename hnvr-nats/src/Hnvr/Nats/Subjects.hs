@@ -13,6 +13,7 @@ module Hnvr.Nats.Subjects
     commandControl,
     commandPtz,
     commandSnapshot,
+    framesCamera,
     health,
     configCameras,
     ptzStatus,
@@ -28,6 +29,13 @@ import Data.Text (Text)
 -- @track_start@, @track_end@, @system@.
 events :: Text
 events = "hnvr.events"
+
+-- | @hnvr.frames.<cameraId>@ — analyzer → leader, throttled JPEG of the
+-- latest analysis frame (body = raw JPEG bytes). Keeps the leader's
+-- dashboard wall (/debug-frame) fed for cameras analyzed on remote
+-- nodes, where the leader has no local analyzer.
+framesCamera :: Text -> Text
+framesCamera camId = "hnvr.frames." <> camId
 
 -- | @hnvr.commands.assign.<cam>@ — leader → all hosts (reassign a camera).
 commandAssign :: Text -> Text

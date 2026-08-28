@@ -134,6 +134,7 @@ library
     Hnvr.Web.ConfigBroadcaster
     Hnvr.Web.DebugStream
     Hnvr.Web.EventWriter
+    Hnvr.Web.FrameCache
     Hnvr.Web.FrontController
     Hnvr.Web.HealthCache
     Hnvr.Web.MediaMTXConfigSyncer

@@ -65,7 +65,7 @@ import Control.Concurrent.STM
     writeTVar,
   )
 import Control.Exception (SomeException, try)
-import Control.Monad (forM, forM_, void)
+import Control.Monad (forM, forM_, void, when)
 import Data.Aeson (object, (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef
@@ -74,6 +74,7 @@ import Data.IORef
     modifyIORef',
     newIORef,
     readIORef,
+    writeIORef,
   )
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
@@ -81,6 +82,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime)
 import Hnvr.Capture.Ffmpeg (AnalysisConfig (..), Transport (..))
 import Hnvr.Capture.FrameSource
   ( FrameSourceConfig (..),
@@ -106,7 +108,7 @@ import Hnvr.Core.Ptz (PresetToken (..))
 import Hnvr.Core.Time (formatYmdHmsMs)
 import Hnvr.Cv.Analyzer (defaultAnalyzerConfig, execProvidersFromEnv)
 import Hnvr.Cv.AnalyzerRunner (runAnalyzer)
-import Hnvr.Cv.DebugRender (renderDebugPng)
+import Hnvr.Cv.DebugRender (renderDebugPng, renderJpeg)
 import Hnvr.Cv.Rules
   ( EngineState,
     Rule,
@@ -157,7 +159,19 @@ data CaptureSupervisor = CaptureSupervisor
     csClipState :: !ClipState,
     -- | Periodic snapshot writer state ('Nothing' when
     -- @HNVR_DISABLE_SNAPSHOTWRITER=1@).
-    csSnapshots :: !(Maybe SnapshotState)
+    csSnapshots :: !(Maybe SnapshotState),
+    -- | Throttled frame-channel publisher ('Nothing' when the bus is
+    -- absent or @HNVR_FRAME_CHANNEL_FPS <= 0@). Feeds the leader's
+    -- dashboard wall for remote-node cameras.
+    csFramePub :: !(Maybe FramePublisher)
+  }
+
+-- | Publishes at most one JPEG per @fpMinInterval@ seconds per camera
+-- on @hnvr.frames.<cameraId>@ (see 'Subjects.framesCamera').
+data FramePublisher = FramePublisher
+  { fpBus :: !Bus,
+    fpMinInterval :: !Double,
+    fpLast :: !(IORef (Map CameraId UTCTime))
   }
 
 -- | One PTZ controller = command loop + idle ticker.
@@ -204,8 +218,14 @@ startCaptureSupervisor cfg = do
   -- supervisor's CaptureConfig (capS3, capBucket, capSpoolDir).
   startSpoolDrainer cfg
   Clip.startClipTicker cfg clipState
+  framePub <- do
+    fps <- fromMaybe 1.0 . (>>= readMaybe) <$> lookupEnv "HNVR_FRAME_CHANNEL_FPS"
+    fpRef <- newIORef Map.empty
+    pure $ case (capBus cfg, fps > 0) of
+      (Just bus, True) -> Just FramePublisher {fpBus = bus, fpMinInterval = 1 / fps, fpLast = fpRef}
+      _ -> Nothing
   logInfo "CaptureSupervisor: started"
-  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csLocks = lRef, csClipState = clipState, csSnapshots = snapshots})
+  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csLocks = lRef, csClipState = clipState, csSnapshots = snapshots, csFramePub = framePub})
 
 -- | Fetch (or create) the per-camera lifecycle lock backing
 -- 'withCameraLock'.
@@ -418,6 +438,7 @@ analysisSink ::
   IO ()
 analysisSink sup snap rules clipRules rulesRef latest frame tracks = do
   atomically (writeTVar latest (Just (frame, tracks)))
+  forM_ sup.csFramePub $ \fp -> publishFrame fp (csId snap) frame
   forM_ sup.csSnapshots $ \st -> SnapWr.maybeSnapshot st sup.csConfig snap frame
   evs <-
     atomicModifyIORef' rulesRef $ \st ->
@@ -430,6 +451,20 @@ analysisSink sup snap rules clipRules rulesRef latest frame tracks = do
       forM_ evs $ \(_rule, track, ev) -> do
         mThumb <- uploadThumbnail sup snap frame track ev
         Bus.publishJson bus Subjects.events (toCvEvent sup snap track ev frame mThumb)
+
+-- | Throttled publish of a JPEG on the frame channel. Single analyzer
+-- thread per camera, so the last-published map needs no lock.
+publishFrame :: FramePublisher -> CameraId -> Frame -> IO ()
+publishFrame fp camId frame = do
+  now <- getCurrentTime
+  lastPub <- readIORef fp.fpLast
+  let due = maybe True (\t -> realToFrac (diffUTCTime now t) >= fp.fpMinInterval) (Map.lookup camId lastPub)
+  when due $ do
+    writeIORef fp.fpLast (Map.insert camId now lastPub)
+    Bus.publish
+      fp.fpBus
+      (Subjects.framesCamera (T.pack (show camId)))
+      (BL.toStrict (renderJpeg 70 frame))
 
 -- | Draw the offending track's bbox on the frame and upload as PNG to
 -- S3 (@<slug>/events/<ts>.png@). Failures degrade to 'Nothing' — the

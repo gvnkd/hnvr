@@ -31,6 +31,7 @@ import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Cv.DebugRender (renderDebugPng)
 import Hnvr.Cv.Tracker.Sort (Track)
 import Hnvr.Node.CaptureSupervisor (latestAnalysis)
+import Hnvr.Web.FrameCache (lookupRemoteFrame)
 import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
 import Network.HTTP.Types (status200, status404, status503)
 import Network.Wai
@@ -51,24 +52,35 @@ debugStreamMiddleware app req respond =
       case UUID.fromText uuidTxt of
         Nothing -> respond (text status404 "malformed camera id")
         Just uuid -> do
-          mSup <- readIORef supervisorRegistry
-          case mSup of
-            Nothing -> respond (text status503 "no capture supervisor on this host")
-            Just sup -> do
-              mLatest <- latestAnalysis sup (CameraId uuid)
-              case mLatest of
-                Nothing -> respond (text status404 "no frame yet")
-                Just (frame, _tracks) -> do
-                  now <- getCurrentTime
-                  if diffUTCTime now (frameTimestamp frame) > maxFrameAgeSeconds
-                    then respond (text status503 "stale frame — camera unavailable")
-                    else
-                      respond
-                        ( responseLBS
-                            status200
-                            [("Content-Type", "image/png"), ("Cache-Control", "no-cache")]
-                            (renderDebugPng frame [])
-                        )
+          now <- getCurrentTime
+          mLocal <-
+            readIORef supervisorRegistry >>= \case
+              Nothing -> pure Nothing
+              Just sup -> latestAnalysis sup (CameraId uuid)
+          let localFresh = case mLocal of
+                Just (frame, _tracks)
+                  | diffUTCTime now (frameTimestamp frame) <= maxFrameAgeSeconds ->
+                      Just (responseLBS status200 [("Content-Type", "image/png"), ("Cache-Control", "no-cache")] (renderDebugPng frame []))
+                _ -> Nothing
+          case localFresh of
+            Just resp -> respond resp
+            Nothing -> do
+              -- Remote-node camera: the leader has no local analyzer
+              -- for it; serve the newest NATS frame-channel JPEG
+              -- ('Hnvr.Web.FrameCache') when it arrived recently.
+              mRemote <- lookupRemoteFrame (CameraId uuid)
+              case mRemote of
+                Just (jpeg, arrived)
+                  | diffUTCTime now arrived <= maxFrameAgeSeconds ->
+                      respond (responseLBS status200 [("Content-Type", "image/jpeg"), ("Cache-Control", "no-cache")] (BL.fromStrict jpeg))
+                _ -> respond $ case mLocal of
+                  -- 404 until the first frame lands; 503 when the cached
+                  -- frame is stale: the analysis TVar is never cleared on
+                  -- ffmpeg death, so without the age check a dead camera
+                  -- kept serving its last frame with a 200 and the
+                  -- dashboard wall showed it as live forever.
+                  Nothing -> text status404 "no frame yet"
+                  Just _ -> text status503 "stale frame — camera unavailable"
 
     -- Frames arrive at analysis_fps (>= 1/s on any sane config); 5 s
     -- without a fresh frame means the source is dead.
