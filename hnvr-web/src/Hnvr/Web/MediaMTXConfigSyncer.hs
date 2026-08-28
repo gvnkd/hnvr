@@ -188,6 +188,7 @@ renderMediaMtxYaml cameras =
       "api: yes",
       "apiAddress: :9997",
       "hls: no",
+      "moq: no",
       "webrtc: yes",
       "webrtcAddress: :8889",
       "webrtcEncryption: no",

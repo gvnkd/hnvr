@@ -22,6 +22,7 @@ let
     api: yes
     apiAddress: :${toString cfg.apiPort}
     hls: no
+    moq: no
     webrtc: yes
     webrtcAddress: :${toString cfg.webrtcPort}
     webrtcEncryption: no
