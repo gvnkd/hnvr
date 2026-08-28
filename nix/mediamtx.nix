@@ -21,10 +21,11 @@ let
   stubConfig = pkgs.writeText "mediamtx-stub.yml" ''
     api: yes
     apiAddress: :${toString cfg.apiPort}
+    hls: no
     webrtc: yes
     webrtcAddress: :${toString cfg.webrtcPort}
     webrtcEncryption: no
-    webrtcAllowOrigin: '*'
+    webrtcAllowOrigins: ['*']
     rtsp: yes
     rtspAddress: :${toString cfg.rtspPort}
   '';

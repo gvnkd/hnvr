@@ -9,7 +9,7 @@ let
 
     jetstream {
       store_dir: ${cfg.dataDir}/jetstream
-      max_memory_store: false
+      max_memory: 0
     }
 
     authorization {
