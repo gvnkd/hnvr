@@ -126,6 +126,12 @@ cameraSnapshotsSql = $(embedFile "migrations/0013-camera-snapshots.sql")
 eventDedupSql :: ByteString
 eventDedupSql = $(embedFile "migrations/0014-event-dedup.sql")
 
+-- | cameras.model_name (per-camera CV model). Column had shipped in
+-- Schema.sql without a runtime migration — already-deployed DBs lacked
+-- it (42703 on every cameras SELECT). See the file header.
+cameraModelNameSql :: ByteString
+cameraModelNameSql = $(embedFile "migrations/0015-camera-model-name.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -201,6 +207,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0014-event-dedup" eventDedupSql) True conn
     handleResult "0014-event-dedup" dedupRes
+    modelRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0015-camera-model-name" cameraModelNameSql) True conn
+    handleResult "0015-camera-model-name" modelRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where
