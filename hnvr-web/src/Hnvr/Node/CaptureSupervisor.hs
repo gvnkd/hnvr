@@ -96,6 +96,7 @@ import Hnvr.Capture.Worker
     CaptureState (..),
     captureWorkerWithStop,
   )
+import Hnvr.Core.AudioProbe (ProbedAudio (..))
 import Hnvr.Core.CameraSnapshot (CameraSnapshot (..), PtzSnapshot (..))
 import qualified Hnvr.Core.CameraSnapshot as Snap
 import Hnvr.Core.Event (CvEvent (..))
@@ -131,6 +132,7 @@ import Hnvr.Onvif.Client (OnvifCreds (..))
 import Hnvr.Ptz.Controller (PtzControllerConfig (..), startPtzController)
 import qualified Hnvr.Ptz.Onvif as Ptz
 import Hnvr.Storage.S3 (putObjectBytes)
+import Hnvr.Web.AudioProbe (probeCameraAudio)
 import qualified Network.HTTP.Client as HC
 import Network.Minio (defaultPutObjectOptions, pooContentType)
 import qualified System.Directory as Dir
@@ -163,7 +165,14 @@ data CaptureSupervisor = CaptureSupervisor
     -- | Throttled frame-channel publisher ('Nothing' when the bus is
     -- absent or @HNVR_FRAME_CHANNEL_FPS <= 0@). Feeds the leader's
     -- dashboard wall for remote-node cameras.
-    csFramePub :: !(Maybe FramePublisher)
+    csFramePub :: !(Maybe FramePublisher),
+    -- | Probed audio input rates ('Hnvr.Web.AudioProbe') for cameras
+    -- whose snapshot arrived without @csAudioInputRateHz@ (leader DB
+    -- audio columns NULL — the Aug 2026 2x-slowed-archive incident).
+    -- Cached per camera for the node's lifetime, successes AND
+    -- failures: the probe reads the relay for ~7 s and runs under the
+    -- camera's lifecycle lock.
+    csAudioProbes :: !(IORef (Map CameraId (Maybe Int)))
   }
 
 -- | Publishes at most one JPEG per @fpMinInterval@ seconds per camera
@@ -224,8 +233,9 @@ startCaptureSupervisor cfg = do
     pure $ case (capBus cfg, fps > 0) of
       (Just bus, True) -> Just FramePublisher {fpBus = bus, fpMinInterval = 1 / fps, fpLast = fpRef}
       _ -> Nothing
+  probesRef <- newIORef Map.empty
   logInfo "CaptureSupervisor: started"
-  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csLocks = lRef, csClipState = clipState, csSnapshots = snapshots, csFramePub = framePub})
+  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csLocks = lRef, csClipState = clipState, csSnapshots = snapshots, csFramePub = framePub, csAudioProbes = probesRef})
 
 -- | Fetch (or create) the per-camera lifecycle lock backing
 -- 'withCameraLock'.
@@ -275,6 +285,41 @@ startCamera :: CaptureSupervisor -> CameraSnapshot -> IO ()
 startCamera sup snap =
   withCameraLock sup (csId snap) (startCameraLocked sup snap)
 
+-- | The @asetrate@ input rate for the recording ffmpeg. The snapshot
+-- value is the leader's DB truth and always wins. When it is absent
+-- (leader DB @audio_sample_rate_khz@\/@audio_encoding@ NULL — every
+-- recording made in that state carries 2x-slowed audio) and the
+-- camera records audio, MEASURE the relay stream once with
+-- "Hnvr.Web.AudioProbe" and cache the result for the node's
+-- lifetime. Cameras that don't record audio never probe.
+resolveAudioRate :: CaptureSupervisor -> CameraSnapshot -> Text -> IO (Maybe Int)
+resolveAudioRate sup snap relayUrl
+  | Just hz <- csAudioInputRateHz snap = pure (Just hz)
+  | not (csRecordAudio snap) = pure Nothing
+  | otherwise = do
+      cached <- Map.lookup (csId snap) <$> readIORef sup.csAudioProbes
+      case cached of
+        Just hz -> pure hz
+        Nothing -> do
+          mpa <- probeCameraAudio relayUrl
+          let hz = mpa >>= paAsetrateHz
+          atomicModifyIORef' sup.csAudioProbes (\m -> (Map.insert (csId snap) hz m, ()))
+          case hz of
+            Just r ->
+              logInfo
+                ( "CaptureSupervisor: probed audio input rate "
+                    <> T.pack (show r)
+                    <> " Hz for "
+                    <> csSlug snap
+                )
+            Nothing ->
+              logWarn
+                ( "CaptureSupervisor: audio rate unknown for "
+                    <> csSlug snap
+                    <> " — recording without asetrate retag"
+                )
+          pure hz
+
 -- | Unlocked start; callers must hold the camera's lifecycle lock.
 startCameraLocked :: CaptureSupervisor -> CameraSnapshot -> IO ()
 startCameraLocked sup snap = do
@@ -289,14 +334,15 @@ startCameraLocked sup snap = do
       Nothing -> pure Nothing
       Just w -> Just <$> Clip.registerBuffer sup.csClipState (csId snap) w
   let relayUrl = "rtsp://" <> T.pack relayHost <> ":" <> T.pack relayPort <> "/" <> csSlug snap
-      camCfg =
+  audioRate <- resolveAudioRate sup snap relayUrl
+  let camCfg =
         CameraConfig
           { ccId = csId snap,
             ccSlug = csSlug snap,
             ccRtspUrl = relayUrl,
             ccTransport = TcpTransport,
             ccRecordAudio = csRecordAudio snap,
-            ccAudioInputRateHz = csAudioInputRateHz snap,
+            ccAudioInputRateHz = audioRate,
             ccClipBuffer = mClipBuf
           }
       shouldStop = readTVarIO stopTVar

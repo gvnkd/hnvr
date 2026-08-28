@@ -9,6 +9,7 @@ library
   exposed-modules:
     Hnvr.Core.ArchiveBrowser
     Hnvr.Core.Assignment
+    Hnvr.Core.AudioProbe
     Hnvr.Core.CameraSnapshot
     Hnvr.Core.CameraStatus
     Hnvr.Core.Clip
@@ -21,6 +22,7 @@ library
     Hnvr.Core.HostClaim
     Hnvr.Core.Id
     Hnvr.Core.Logging
+    Hnvr.Core.MediaMtxLive
     Hnvr.Core.Metrics
     Hnvr.Core.Onvif
     Hnvr.Core.Playlist
@@ -68,6 +70,7 @@ test-suite hnvr-core-test
   other-modules:
     Hnvr.Core.ArchiveBrowserSpec
     Hnvr.Core.AssignmentSpec
+    Hnvr.Core.AudioProbeSpec
     Hnvr.Core.CameraSnapshotSpec
     Hnvr.Core.CameraStatusSpec
     Hnvr.Core.ClipSpec
@@ -79,6 +82,7 @@ test-suite hnvr-core-test
     Hnvr.Core.GeometrySpec
     Hnvr.Core.HostClaimSpec
     Hnvr.Core.IdSpec
+    Hnvr.Core.MediaMtxLiveSpec
     Hnvr.Core.MetricsSpec
     Hnvr.Core.OnvifSpec
     Hnvr.Core.PlaylistSpec

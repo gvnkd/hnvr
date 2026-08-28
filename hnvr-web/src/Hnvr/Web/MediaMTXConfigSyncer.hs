@@ -29,12 +29,13 @@ where
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException, bracket, catch)
 import Control.Monad (forever, void, when)
-import Data.Aeson (Value (..), object, (.=))
+import Data.Aeson (Value)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson.Types
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as BL
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, mapMaybe, maybe)
 import Data.Text (Text)
@@ -44,7 +45,17 @@ import Database.PostgreSQL.Simple (Connection)
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Database.PostgreSQL.Simple.Notification as PG
 import Generated.Types
+import Hnvr.Core.AudioProbe (ProbedAudio (..))
+import Hnvr.Core.CameraSnapshot (audioInputRateHz)
 import Hnvr.Core.Logging (logError, logInfo)
+import Hnvr.Core.MediaMtxLive
+  ( AudioPresence (..),
+    CameraPath (..),
+    LiveAudio (..),
+    pathConfigs,
+    renderPathsYaml,
+  )
+import Hnvr.Web.AudioProbe (probeCameraAudio)
 import IHP.Fetch (fetch)
 import IHP.HaskellSupport ((|>))
 import IHP.ModelSupport (ModelContext)
@@ -119,18 +130,27 @@ listenLoop = do
   mgr <- HC.newManager HC.defaultManagerSettings
   apiBase <- maybe defaultMediaMtxApi T.pack <$> Env.lookupEnv "HNVR_MEDIAMTX_API"
   cfgPath <- fromMaybe defaultConfigPath <$> Env.lookupEnv "HNVR_MEDIAMTX_CONFIG_PATH"
+  relayBase <- maybe defaultRelayRtsp T.pack <$> Env.lookupEnv "HNVR_MEDIAMTX_RTSP_BASE"
+  probeCache <- newIORef Map.empty
   -- Initial sync — covers the leader-restart case where cameras
   -- changed while the leader was down. Caught separately from the
   -- LISTEN loop: a failure here (e.g. the mediamtx config dir not
   -- writable under ProtectSystem=strict) used to kill the async
   -- before LISTEN started, silently — no file, no REST push, no
   -- re-sync on later camera events.
-  syncOnce mgr apiBase cfgPath
+  syncOnce mgr apiBase cfgPath relayBase probeCache
     `catch` \(e :: SomeException) ->
       logError ("MediaMTXConfigSyncer: initial sync failed: " <> T.pack (show e))
-  listenWith dbUrl (const $ syncOnce mgr apiBase cfgPath)
+  listenWith dbUrl (const $ syncOnce mgr apiBase cfgPath relayBase probeCache)
     `catch` \(e :: SomeException) ->
       logError ("MediaMTXConfigSyncer: LISTEN loop died: " <> T.pack (show e))
+
+-- | Base URL of THIS host's mediamtx RTSP server — both the input the
+-- @runOnDemand@ republisher pulls and the endpoint it publishes the
+-- slug-live path to. Override when mediamtx is not co-located
+-- (same rule as @HNVR_MEDIAMTX_API@).
+defaultRelayRtsp :: Text
+defaultRelayRtsp = "rtsp://127.0.0.1:8554"
 
 -- | Default DB URL matches IHP's. Real deployments set DATABASE_URL.
 defaultDbUrl :: String
@@ -148,17 +168,53 @@ listenWith dbUrl onNotif = do
 
 -- | Render the current cameras table to mediamtx.yml, write it
 -- atomically, and push per-path updates to the mediamtx REST API.
-syncOnce :: (?modelContext :: ModelContext) => Manager -> Text -> FilePath -> IO ()
-syncOnce mgr apiBase cfgPath = do
+-- Cameras whose audio columns are unknown get a live probe
+-- ("Hnvr.Web.AudioProbe") before rendering, cached per slug.
+syncOnce :: (?modelContext :: ModelContext) => Manager -> Text -> FilePath -> Text -> IORef (Map.Map Text LiveAudio) -> IO ()
+syncOnce mgr apiBase cfgPath relayBase probeCache = do
   cameras <-
     query @Camera
       |> orderByAsc #slug
       |> fetch
-  let yaml = renderMediaMtxYaml cameras
-  writeAtomic cfgPath yaml
-  pushPaths mgr apiBase cameras
+  paths <- mapM (cameraPath relayBase probeCache) cameras
+  writeAtomic cfgPath (renderPathsYaml relayBase paths)
+  pushPaths mgr apiBase (pathConfigs relayBase paths)
     `catch` \(e :: SomeException) ->
       logError ("MediaMTXConfigSyncer: REST push failed (file still written): " <> T.pack (show e))
+
+cameraPath :: Text -> IORef (Map.Map Text LiveAudio) -> Camera -> IO CameraPath
+cameraPath relayBase probeCache cam = do
+  la <- resolveLiveAudio relayBase probeCache cam
+  pure
+    CameraPath
+      { cpSlug = cam.slug,
+        cpSource = cam.rtspUrl,
+        cpTransport = cam.rtspTransport,
+        cpEnabled = cam.enabled,
+        cpLiveAudio = la
+      }
+
+resolveLiveAudio :: Text -> IORef (Map.Map Text LiveAudio) -> Camera -> IO LiveAudio
+resolveLiveAudio relayBase probeCache cam =
+  case audioInputRateHz cam.audioEncoding cam.audioSampleRateKhz of
+    Just hz -> pure (LiveAudio (Just hz) AudioYes)
+    Nothing -> case cam.audioEncoding of
+      Just enc | enc `notElem` ["G711", "G726"] -> pure (LiveAudio Nothing AudioYes)
+      _ -> probe
+  where
+    slug = cam.slug
+    probe = do
+      cached <- Map.lookup slug <$> readIORef probeCache
+      case cached of
+        Just la -> pure la
+        Nothing -> do
+          mpa <- probeCameraAudio (relayBase <> "/" <> slug)
+          let la = case mpa of
+                Nothing -> LiveAudio Nothing AudioUnknown
+                Just pa -> LiveAudio (paAsetrateHz pa) AudioYes
+          atomicModifyIORef' probeCache (\m -> (Map.insert slug la m, ()))
+          logInfo ("MediaMTXConfigSyncer: probed live audio for " <> slug <> ": " <> T.pack (show la))
+          pure la
 
 -- | Atomic file write: write to @<path>.tmp@ then rename. Avoids mediamtx
 -- reading a partially-written file on SIGHUP/restart.
@@ -171,56 +227,6 @@ writeAtomic path body = do
   where
     dirOf = reverse . dropWhile (/= '/') . reverse
 
--- | Render a minimal mediamtx.yml from the cameras table. Each enabled
--- camera becomes a path keyed by its slug, with @sourceOnDemand: yes@
--- so mediamtx only pulls RTSP when a viewer is watching. The
--- @rtspTransport@ comes from the camera's @rtsp_transport@ column
--- (M1) so cameras that require UDP (e.g. Sergey's cam-196 per pitfall
--- "196 (UDP!)") don't get force-fed TCP by both the CaptureWorker and
--- mediamtx.
---
--- Field-name gotcha (Aug 11 2026): mediamtx's Path config exposes BOTH
--- @sourceProtocol@ and @rtspTransport@. For RTSP @source@ URLs,
--- mediamtx uses @rtspTransport@ (per internal/api/path.go in v1.20.0);
--- @sourceProtocol@ only applies to non-RTSP sources. Setting the
--- wrong field silently leaves the RTSP transport at its default (tcp),
--- which causes immediate teardown on cameras that reject TCP SETUP
--- (cam-196). Pinned by manual verification: after this fix the
--- @read tcp ... connection reset by peer@ errors disappear.
-renderMediaMtxYaml :: [Camera] -> Text
-renderMediaMtxYaml cameras =
-  T.unlines $
-    [ "# Auto-generated by HNVR MediaMTXConfigSyncer. Do not edit.",
-      "api: yes",
-      "apiAddress: :9997",
-      "hls: no",
-      "moq: no",
-      "webrtc: yes",
-      "webrtcAddress: :8889",
-      "webrtcEncryption: no",
-      "webrtcAllowOrigins: ['*']",
-      -- RTSP *server* on :8554 — CaptureWorker pulls from
-      -- rtsp://localhost:8554/<slug> instead of from the camera so
-      -- mediamtx is the single ingestion point. Required for cameras
-      -- with a 1-concurrent-RTSP-session cap (cam-196, cam-198).
-      "rtsp: yes",
-      "rtspAddress: :8554",
-      "paths:"
-    ]
-      <> concatMap pathFor cameras
-  where
-    pathFor cam =
-      let slug = cam.slug
-          src = cam.rtspUrl
-       in if cam.enabled
-            then
-              [ "  " <> slug <> ":",
-                "    source: " <> src,
-                "    rtspTransport: " <> cam.rtspTransport,
-                "    sourceOnDemand: yes"
-              ]
-            else mempty
-
 -- | Compute the per-path add/patch/delete plan and execute it.
 -- mediamtx v1.16+ split the upsert-style @PUT /v2/config/paths/<id>@
 -- into three operations:
@@ -228,13 +234,15 @@ renderMediaMtxYaml cameras =
 --   * @PATCH  /v3/config/paths/patch/<name>@  — patch;   404 if not
 --   * @DELETE /v3/config/paths/delete/<name>@ — delete; 404 if not
 -- We list remote first to decide add-vs-patch per desired path, and
--- to compute the orphan set for deletion. REST methods matter (POST
--- add vs PATCH patch vs DELETE delete) — earlier impl used PUT for
--- everything which 404'd on v1.20.0 (Taiga #467).
-pushPaths :: Manager -> Text -> [Camera] -> IO ()
-pushPaths mgr apiBase cameras = do
+-- to compute the orphan set for deletion (both the ingestion path
+-- and its -live companion are desired entries — see
+-- "Hnvr.Core.MediaMtxLive"). REST methods matter (POST add vs PATCH
+-- patch vs DELETE delete) — earlier impl used PUT for everything
+-- which 404'd on v1.20.0 (Taiga #467).
+pushPaths :: Manager -> Text -> [(Text, Value)] -> IO ()
+pushPaths mgr apiBase desiredCfgs = do
   existing <- listRemotePaths mgr apiBase
-  let desired = Map.fromList [(cam.slug, pathConfig cam) | cam <- cameras, cam.enabled]
+  let desired = Map.fromList desiredCfgs
       toAdd = [(slug, cfg) | (slug, cfg) <- Map.toList desired, slug `notElem` existing]
       toPatch = [(slug, cfg) | (slug, cfg) <- Map.toList desired, slug `elem` existing]
       toDelete = filter (`notElem` Map.keys desired) existing
@@ -265,18 +273,6 @@ listRemotePaths mgr apiBase = do
     parseList = Aeson.withObject "PathList" $ \o -> do
       items <- o Aeson..: "items"
       mapM (Aeson.withObject "PathItem" (Aeson..: "name")) items
-
--- | Per-path source config payload. Matches @renderMediaMtxYaml@ —
--- uses @rtspTransport@ (the field mediamtx actually reads for RTSP
--- sources; setting @sourceProtocol@ instead is a silent no-op that
--- leaves the RTSP stuck on TCP — see Haddock on 'renderMediaMtxYaml').
-pathConfig :: Camera -> Value
-pathConfig cam =
-  object
-    [ "source" .= cam.rtspUrl,
-      "rtspTransport" .= cam.rtspTransport,
-      "sourceOnDemand" .= True
-    ]
 
 addPath :: Manager -> Text -> Text -> Value -> IO ()
 addPath mgr apiBase slug cfg = do

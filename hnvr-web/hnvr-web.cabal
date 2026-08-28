@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:          hnvr-web
-version:       0.16.0.0
+version:       0.17.0.0
 synopsis:
   HNVR leader (IHP web + event writer + MediaMTX sync) and node binaries
 
@@ -125,6 +125,7 @@ library
     Hnvr.Node.SnapshotWriter
     Hnvr.Web
     Hnvr.Web.AssignmentCoordinator
+    Hnvr.Web.AudioProbe
     Hnvr.Web.Audit
     Hnvr.Web.Auth
     Hnvr.Web.BusRegistry

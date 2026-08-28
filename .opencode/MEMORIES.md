@@ -10,7 +10,7 @@ never renumber.
 
 - **HNVR** — Haskell Network Video Recorder. Owner: Sergey (`omgbebebe@gmail.com`).
 - Local path `/home/pion/work/dev/hnvr`; remotes `origin` = gitea@192.168.0.254:omg/hnvr.git, `github` = git@github.com:gvnkd/hnvr.git (push both, branch master).
-- Current version **0.16.0.0** (single source of truth: `hnvr-web/hnvr-web.cabal` `version:` — bump on every feature/fix; `Hnvr.Web.version` re-exports via `Paths_hnvr_web` which MUST be in both `autogen-modules` and `other-modules` or link fails).
+- Current version **0.17.0.0** (single source of truth: `hnvr-web/hnvr-web.cabal` `version:` — bump on every feature/fix; `Hnvr.Web.version` re-exports via `Paths_hnvr_web` which MUST be in both `autogen-modules` and `other-modules` or link fails).
 - Live leader on **:18001** (runs `./result/bin/hnvr-leader` via env-wrap — it is SERGEY'S; never kill it blindly). Test leader on **:18002** (roles-disabled via HNVR_DISABLE_* gates, used for e2e).
 - Tests: ~449 Haskell + 35 Playwright e2e + 1 NixOS smoke.
 - Design docs `design_docs/00–12` are authoritative for architecture; this file is the cheat-sheet.
@@ -54,7 +54,8 @@ Cameras (HNVR slugs: low_ent=198, backyard=196, floor_2_5=197):
 
 - **Leader embeds the full node role** — NEVER run hnvr-node on the leader host with the same HNVR_HOST (double-records every camera; snapshot-claim guard refuses, pitfall #117). hnvr-node is for worker hosts only.
 - Nodes claim their host snapshot BEFORE starting ConfigWatcher (retries 30 s).
-- mediamtx is the single RTSP ingestion point per camera (session caps, pitfall #11); CaptureWorker pulls `rtsp://localhost:8554/<slug>`.
+- mediamtx is the single RTSP ingestion point per camera (session caps, pitfall #11); CaptureWorker pulls `rtsp://localhost:8554/<slug>`. Live view goes through a second per-camera path `<slug>-live` (runOnDemand ffmpeg: relay pull → video copy → Opus with asetrate retag) — raw-relay WHEP can NEVER serve correct G.711 audio (WebRTC honors the declared 8 kHz clock; no browser-side fix exists). `Hnvr.Core.Whep` maps `/whep/<slug>` onto `<slug>-live`.
+- Audio-rate truth chain (Aug 2026 incident): prod DB `audio_sample_rate_khz` was NULL → snapshot `csAudioInputRateHz: null` → recorder ffmpeg without `asetrate` → every recording 2× slowed/low. Fallbacks since 0.17: the node probes the relay when the snapshot lacks the rate (`Hnvr.Web.AudioProbe` + `Hnvr.Core.AudioProbe`, ~7 s, cached per camera per boot), and the leader probes for `-live` path rendering. Probing only retags fixed-clock codecs (pcmu/pcma/g726) — media-time math always reproduces the declared 8000; only payload-bytes-vs-wall-clock-arrival (least-squares slope) carries the true rate.
 - Pure-extraction pattern (pitfall #14): hnvr-web can't be cabal-tested → pure logic lives in `Hnvr.Core.*`, hnvr-web projects IHP records into the pure types at the call site.
 - Migrations: versioned files `hnvr-web/migrations/NNNN-name.sql` wired into `Hnvr.Web.SchemaMigration`; **never edit an applied migration** (checksum mismatch = leader won't boot). Complex partial indexes live ONLY in migrations (schema-compiler can't parse them). After Schema.sql change run `hnvr-web/regen.sh` (pitfalls #32/#123) and hand-add new Generated modules to hnvr-web.cabal (pitfall #51).
 - IHP checkbox forms: absent checkbox params leave fill fields unchanged → explicit `set` after fill (paramOrNothing=="on"); absent Maybe params in fill lists get wiped to NULL — keep no-input fields out of `fill`.
@@ -177,6 +178,8 @@ Cameras (HNVR slugs: low_ent=198, backyard=196, floor_2_5=197):
 119. cam-196: retry ONVIF Sets after ~3 s on ter:ConfigModify.
 121. pg-simple can't express tuple `NOT IN ?`; Camera FK columns codegen as plain UUID (compare with unwrapped UUIDs); hnvr-ptz fixture tests must run from the package dir.
 122. IHP hasql caps tuples at 10 params — wide rows need hand-written FromRow over a one-shot pg-simple connection (`:.` from `Database.PostgreSQL.Simple.Types`). **`hnvr-leader --version`/`--help` BOOTS the app** (stray leader!) — check versions via `strings result/bin/hnvr-leader | grep`.
+124. **Dev DB ≠ prod DB.** The prod leader (192.168.0.254, NATS/S3/mediamtx there) has its own cameras table; never diagnose camera config from the devenv :15432 DB. Probe what the leader actually serves: NATS request-reply on `hnvr.commands.snapshot.<host>` (creds nats/nats; same-host re-claim is the node's own boot path, idempotent).
+125. **GHC 9.12 silent nix-build death**: using an out-of-scope record selector in hnvr-web (NoFieldSelectors env) crashes the compiler's out-of-scope/suggestion machinery with NO diagnostic — `nix build` exits 1 after the last `Compiling` line, and the failing module's `.o` is simply absent from a `--keep-failed` dir. Signature: reproducible, memory flat, no error text. Fix: import the record constructor (`ProbedAudio (..)` etc.). Bisect by neutering function bodies, not by hunting logs.
 
 ## Frontend/player traps
 

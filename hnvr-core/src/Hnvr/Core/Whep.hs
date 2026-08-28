@@ -26,28 +26,40 @@ where
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
-import Data.List (isPrefixOf, stripPrefix)
+import Data.List (isPrefixOf, isSuffixOf, stripPrefix)
 
--- | Translate @/whep/<slug>[@/session/<id>]@ → @/<slug>/whep[@/session/<id>]@.
+-- | Translate @/whep/<slug>[@/session/<id>]@ → @/<slug>-live/whep[…]@.
+--
+-- The browser-facing path maps onto MediaMTX's @<slug>-live@ path —
+-- the runOnDemand ffmpeg republish with the audio-rate fix — not the
+-- raw camera relay (see "Hnvr.Core.MediaMtxLive" for why the raw
+-- relay can never serve correct G.711 audio to WebRTC).
 --
 -- The naive @"/" <> rest <> "/whep"@ appended @/whep@ at the END, which
 -- mangled session callbacks: @/whep/foo/session/123@ became
 -- @/foo/session/123/whep@ (mediamtx 404). Split rest at the first @/@
--- so @/whep@ lands directly after the slug. Uses 'BSC.break' (Char-keyed)
--- since the file already standardises on the Char8 view of ByteStrings.
+-- so @/whep@ lands directly after the path name. Uses 'BSC.break'
+-- (Char-keyed) since the file already standardises on the Char8 view
+-- of ByteStrings.
 translatePath :: BS.ByteString -> BS.ByteString
 translatePath p =
   let rest = BSC.drop (BSC.length "/whep/") p -- "<slug>[/session/<id>]"
       (slug, suffix) = BSC.break (== '/') rest
-   in "/" <> slug <> "/whep" <> suffix
+   in "/" <> slug <> liveSuffix <> "/whep" <> suffix
 
--- | Rewrite MediaMTX's @/<slug>/whep/session/<id>@ Location header back
--- to our public @/whep/<slug>/session/<id>@ form so the browser's next
--- PATCH/DELETE returns to us. Only rewrites Location / Content-Location.
+-- | Must equal @Hnvr.Core.MediaMtxLive.livePathSuffix@ (kept as a
+-- ByteString here to avoid a text <-> bytestring round-trip per
+-- request).
+liveSuffix :: BS.ByteString
+liveSuffix = "-live"
+
+-- | Rewrite MediaMTX's @/<slug>-live/whep/session/<id>@ Location header
+-- back to our public @/whep/<slug>/session/<id>@ form so the browser's
+-- next PATCH/DELETE returns to us. Only rewrites Location / Content-Location.
 --
 -- Inverse of 'translatePath': a MediaMTX-absolute URL like
--- @http://host:8889/<slug>/whep/session/<id>@ or a path-only
--- @/<slug>/whep/session/<id>@ both become
+-- @http://host:8889/<slug>-live/whep/session/<id>@ or a path-only
+-- @/<slug>-live/whep/session/<id>@ both become
 -- @/whep/<slug>/session/<id>@ (path-only, so the browser uses its own
 -- origin).
 translateBack :: BS.ByteString -> BS.ByteString
@@ -66,9 +78,18 @@ translateBack v =
           -- output was @/whep/<slug>/whep/session/<id>@ — a duplicate
           -- "/whep" in the middle of the path that 404'd at MediaMTX
           -- on the browser's PATCH/DELETE. (Pinned by WhepSpec.)
-          BSC.pack ("/whep" <> before <> drop (length ("/whep" :: String)) after)
+          BSC.pack
+            ( "/whep"
+                <> dropLiveSuffix before
+                <> drop (length ("/whep" :: String)) after
+            )
         Nothing -> v
   where
+    dropLiveSuffix p
+      | liveSuffixStr `isSuffixOf` p = take (length p - length liveSuffixStr) p
+      | otherwise = p
+    liveSuffixStr = "-live" :: String
+
     -- Find the trailing "/whep" + remainder in the path.
     findWhepSuffix :: String -> Maybe (String, String)
     findWhepSuffix p =

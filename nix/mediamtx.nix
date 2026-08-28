@@ -106,6 +106,12 @@ in
       after = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];
 
+      # The rendered config's runOnDemand commands (live-view audio
+      # fix: relay pull + video copy + Opus re-encode, see
+      # Hnvr.Core.MediaMtxLive) spawn ffmpeg by name — it must be on
+      # the service PATH.
+      path = [ pkgs.ffmpeg ];
+
       preStart = ''
         # Copy the stub only when the config is absent or still a stub
         # (no leader marker). The leader-rendered config carries an
