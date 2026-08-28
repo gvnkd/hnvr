@@ -203,13 +203,22 @@ readS3Config = do
   mFile <- (>>= AppCfg.acS3) <$> AppCfg.loadAppConfig
   case mFile of
     Nothing -> readS3ConfigFromEnv
-    Just f -> do
-      let base = fromSection f
+    Just section -> do
+      let base = fromSection section
       env <- readS3ConfigFromEnv
-      pure $ Just $ case env of
-        Nothing -> base
-        Just e -> mergeEnv base e
+      mEndpointEnv <- fmap T.pack <$> lookupEnv "HNVR_S3_ENDPOINT"
+      pure . Just $
+        withEndpoint mEndpointEnv $ case env of
+          Just e ->
+            e
+              { s3cPublicEndpoint = s3cPublicEndpoint e <|> s3cPublicEndpoint base,
+                s3cRoAccessKey = s3cRoAccessKey e <|> s3cRoAccessKey base,
+                s3cRoSecretKey = s3cRoSecretKey e <|> s3cRoSecretKey base
+              }
+          Nothing -> base
   where
+    withEndpoint Nothing c = c
+    withEndpoint (Just ep) c = c {s3cEndpoint = ep}
     fromSection s =
       S3Config
         { s3cEndpoint = AppCfg.ssEndpoint s,
@@ -219,18 +228,6 @@ readS3Config = do
           s3cRoAccessKey = AppCfg.ssRoAccessKey s,
           s3cRoSecretKey = AppCfg.ssRoSecretKey s,
           s3cBucket = AppCfg.ssBucket s
-        }
-    -- Per-field: env carries the four required fields when present, the
-    -- file fills every field env leaves unset.
-    mergeEnv f e =
-      f
-        { s3cEndpoint = s3cEndpoint e <|> s3cEndpoint f,
-          s3cPublicEndpoint = s3cPublicEndpoint e <|> s3cPublicEndpoint f,
-          s3cAccessKey = s3cAccessKey e <|> s3cAccessKey f,
-          s3cSecretKey = s3cSecretKey e <|> s3cSecretKey f,
-          s3cRoAccessKey = s3cRoAccessKey e <|> s3cRoAccessKey f,
-          s3cRoSecretKey = s3cRoSecretKey e <|> s3cRoSecretKey f,
-          s3cBucket = s3cBucket e <|> s3cBucket f
         }
 
 -- | Run an S3 operation. Wraps 'runMinio' and throws an 'error' on
