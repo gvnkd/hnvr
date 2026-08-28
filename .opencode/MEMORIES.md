@@ -198,6 +198,7 @@ Cameras (HNVR slugs: low_ent=198, backyard=196, floor_2_5=197):
 
 - `AutoTrack` empty module, `restartCamera` dead export, `Subjects.leader` unused, ConfigBroadcaster→ConfigWatcher config channel is log-only (superseded by snapshot assigns), hnvr-crypto-test exe redundant.
 - `nix/secrets.nix` declares removed hnvr-s3-* keys and never declares hnvr-config (pointing configFile at it = NixOS eval failure).
+- `flake check --no-build` needs devenv-tasks' pinned-nixpkgs source FOD realised (tasks/package.nix does IFD `import source`) → CI warms it via `nix build --no-link .#devShells.x86_64-linux.ci` before flake check (never build `.#devShells.default` on the runner — CUDA stack, disk).
 - Tracked firmware zip at repo root (~7 MB, belongs in ~/hw-backups); untracked ext/, extro/, hnvr-leak-probe.prof, start-shell-telnetd.bin — do NOT commit.
 - hnvr-cv Preprocess property "scaled dims fit the target" flaked once — watch if it recurs.
 - Two-node failover nixosTest still TODO (VMs use per-VM localhost NATS).

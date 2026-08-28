@@ -27,7 +27,15 @@ jobs:
       # Runs AFTER the builds on purpose: `flake check --no-build` on a
       # fresh store cannot realise the callCabal2nix IFD outputs itself
       # ("path '...-cabal2nix-hnvr-core.drv' is not valid"); the builds
-      # above put them in the store, so eval finds them.
+      # above put them in the store, so eval finds them. Same story for
+      # the devShells: devenv's tasks/package.nix does `import` on a
+      # pinned nixpkgs source FOD, which must be realised before
+      # --no-build eval ("path '...-source.drv' is not valid") — building
+      # the ci shell puts it in the store (default shell shares the same
+      # FOD; never build .#devShells.default here, it pulls the ~15 GB
+      # CUDA stack).
+      - name: nix build ci devShell (warms devenv-tasks IFD source)
+        run: nix --accept-flake-config build --no-link .#devShells.x86_64-linux.ci
       - name: nix flake check
         run: nix --accept-flake-config flake check --no-build
 
