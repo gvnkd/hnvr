@@ -193,18 +193,22 @@ readS3ConfigFromEnv = do
 -- | Resolve the effective 'S3Config': the YAML config file
 -- ('Hnvr.Core.Config.loadAppConfig', path from @$HNVR_CONFIG@ or
 -- @.\/hnvr.yaml@) merged with the @HNVR_S3_*@ environment variables.
--- An env var, when set, wins over the file field — the file carries
--- the real credentials, env stays the ad-hoc override for tests and
--- one-off binaries.
+-- An env var, when set, wins over the corresponding file field — per
+-- field, so a node can override just @HNVR_S3_ENDPOINT@ (the file's
+-- @127.0.0.1@ endpoint is leader-local) while credentials stay in the
+-- file. Without a file, the four required env vars must all be set
+-- ('readS3ConfigFromEnv' stays all-or-nothing for that case).
 readS3Config :: IO (Maybe S3Config)
 readS3Config = do
   mFile <- (>>= AppCfg.acS3) <$> AppCfg.loadAppConfig
-  mEnv <- readS3ConfigFromEnv
-  pure $ case (mFile, mEnv) of
-    (Nothing, Nothing) -> Nothing
-    (Just f, Nothing) -> Just (fromSection f)
-    (Nothing, Just e) -> Just e
-    (Just f, Just e) -> Just (mergeEnv (fromSection f) e)
+  case mFile of
+    Nothing -> readS3ConfigFromEnv
+    Just f -> do
+      let base = fromSection f
+      env <- readS3ConfigFromEnv
+      pure $ Just $ case env of
+        Nothing -> base
+        Just e -> mergeEnv base e
   where
     fromSection s =
       S3Config
@@ -216,18 +220,17 @@ readS3Config = do
           s3cRoSecretKey = AppCfg.ssRoSecretKey s,
           s3cBucket = AppCfg.ssBucket s
         }
-    -- 'readS3ConfigFromEnv' is all-or-nothing on the four required
-    -- fields, so a present env config carries them all; the file only
-    -- fills the optional gaps env leaves unset.
+    -- Per-field: env carries the four required fields when present, the
+    -- file fills every field env leaves unset.
     mergeEnv f e =
       f
-        { s3cPublicEndpoint = s3cPublicEndpoint e <|> s3cPublicEndpoint f,
+        { s3cEndpoint = s3cEndpoint e <|> s3cEndpoint f,
+          s3cPublicEndpoint = s3cPublicEndpoint e <|> s3cPublicEndpoint f,
+          s3cAccessKey = s3cAccessKey e <|> s3cAccessKey f,
+          s3cSecretKey = s3cSecretKey e <|> s3cSecretKey f,
           s3cRoAccessKey = s3cRoAccessKey e <|> s3cRoAccessKey f,
           s3cRoSecretKey = s3cRoSecretKey e <|> s3cRoSecretKey f,
-          s3cEndpoint = s3cEndpoint e,
-          s3cAccessKey = s3cAccessKey e,
-          s3cSecretKey = s3cSecretKey e,
-          s3cBucket = s3cBucket e
+          s3cBucket = s3cBucket e <|> s3cBucket f
         }
 
 -- | Run an S3 operation. Wraps 'runMinio' and throws an 'error' on
