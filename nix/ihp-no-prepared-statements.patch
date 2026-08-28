@@ -1,0 +1,26 @@
+diff --git a/IHP/ModelSupport.hs b/IHP/ModelSupport.hs
+index 40a7fb3..012d135 100644
+--- a/IHP/ModelSupport.hs
++++ b/IHP/ModelSupport.hs
+@@ -91,8 +91,20 @@ createModelContext databaseUrl logger = do
+     -- HASQL_IDLE_TIME: seconds before idle connection is closed (default: 600 = 10 min)
+     hasqlPoolSize :: Maybe Int <- envOrNothing "HASQL_POOL_SIZE"
+     hasqlIdleTime :: Maybe Int <- envOrNothing "HASQL_IDLE_TIME"
++    -- hasql 1.10 repairs interrupted sessions (timeout/race/killThread,
++    -- e.g. a killed Warp handler thread) by deallocating the server-side
++    -- prepared statements WITHOUT flushing the client-side statement
++    -- cache, permanently poisoning pooled connections with 26000
++    -- "prepared statement does not exist". hasql-pool 1.4 returns such
++    -- connections to the pool on server errors, so retrying cannot
++    -- recover. Fixed only in the breaking hasql v2. Unnamed statements
++    -- cannot go stale, so this opt-in switch avoids the bug entirely.
++    hasqlDisablePreparedStatements <- envOrDefault "HASQL_DISABLE_PREPARED_STATEMENTS" False
++    let connectionSettings =
++            HasqlSettings.connectionString (cs databaseUrl)
++                <> (if hasqlDisablePreparedStatements then HasqlSettings.noPreparedStatements True else mempty)
+     let hasqlPoolSettings =
+-            [ HasqlPoolConfig.staticConnectionSettings (HasqlSettings.connectionString (cs databaseUrl))
++            [ HasqlPoolConfig.staticConnectionSettings connectionSettings
+             , HasqlPoolConfig.initSession (Hasql.script "SET SESSION timezone TO 'UTC'")
+             ]
+             <> maybe [HasqlPoolConfig.size 20] (\size -> [HasqlPoolConfig.size size]) hasqlPoolSize

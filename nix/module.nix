@@ -189,6 +189,14 @@ in
         # (minutes), later starts load from here. Under dataDir so
         # ProtectSystem=strict allows the write.
         HNVR_TRT_CACHE_DIR = "${cfg.dataDir}/trt-cache";
+        # hasql 1.10 + hasql-pool 1.4: interrupted sessions (killed web
+        # handler threads) deallocate server-side prepared statements but
+        # keep the client-side cache, permanently poisoning pooled
+        # connections with 26000 "prepared statement does not exist"
+        # (surfaced as AssignmentCoordinator reconcile failures). Unnamed
+        # statements can't go stale; HNVR's query volume doesn't need
+        # prepared statements. Patched IHP reads this env var.
+        HASQL_DISABLE_PREPARED_STATEMENTS = "1";
       } // lib.optionalAttrs (cfg.modelPath != null) {
         HNVR_MODEL_PATH = cfg.modelPath;
       } // lib.optionalAttrs (cfg.modelDir != null) {

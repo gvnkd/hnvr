@@ -87,6 +87,25 @@
           }
           { });
 
+        # IHP 1.6 + hasql 1.10.3 + hasql-pool 1.4.2: an interrupted session
+        # (timeout/race/killThread — e.g. a Warp handler thread killed on
+        # client disconnect) makes hasql deallocate the connection's
+        # server-side prepared statements without flushing its client-side
+        # statement cache. Every later session on that pooled connection
+        # then fails with 26000 "prepared statement does not exist" forever:
+        # hasql-pool returns the connection to the pool on server errors,
+        # so IHP's usePoolWithRetry cycles the same poisoned connections.
+        # Fixed only in the breaking hasql v2 (connection closed on
+        # interruption + stale-cache flush). Until IHP moves to hasql v2,
+        # this patch adds the env-gated HASQL_DISABLE_PREPARED_STATEMENTS
+        # switch (unnamed statements, which cannot go stale) to
+        # createModelContext; hnvr's NixOS module sets it.
+        ihp = libHs.dontCheck (prev.ihp.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [
+            ./nix/ihp-no-prepared-statements.patch
+          ];
+        }));
+
         # postgresql-simple-migration 0.1.15.0 (last released 2020) pins
         # bytestring <0.11, text <1.3, time <1.10 — all stale on GHC 9.12.
         # doJailbreak lifts the bounds; the library is otherwise compatible
