@@ -20,12 +20,16 @@ jobs:
         with:
           name: digitallyinduced
           skipPush: true
-      - name: nix flake check
-        run: nix --accept-flake-config flake check --no-build
       - name: nix build .#hnvr-web
         run: nix --accept-flake-config build --no-link .#hnvr-web
       - name: nix build .#hnvr-nats
         run: nix --accept-flake-config build --no-link .#hnvr-nats
+      # Runs AFTER the builds on purpose: `flake check --no-build` on a
+      # fresh store cannot realise the callCabal2nix IFD outputs itself
+      # ("path '...-cabal2nix-hnvr-core.drv' is not valid"); the builds
+      # above put them in the store, so eval finds them.
+      - name: nix flake check
+        run: nix --accept-flake-config flake check --no-build
 
   # Build the 6 non-IHP packages via cabal inside `nix develop` for fast
   # feedback on cabal-side regressions (nix build covers the IHP path).
@@ -53,8 +57,12 @@ jobs:
           name: digitallyinduced
           skipPush: true
       - name: cabal build (non-web packages)
+        # --no-pure-eval: devenv.root must resolve to the workspace (PWD);
+        # in pure mode it falls back to the read-only flake store path and
+        # the shell fails to enter. .#ci skips the CUDA/ultralytics stack
+        # (~15 GB source builds) that blew the runner disk.
         run: |
-          nix develop --command \
+          nix develop --no-pure-eval .#ci --command \
             bash -c 'cabal update && cabal build hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv hnvr-ptz'
 
   # S1 deliverable (design_docs/10-test-plan.md): cabal test runs the pure
@@ -80,7 +88,7 @@ jobs:
           skipPush: true
       - name: cabal test (non-web packages)
         run: |
-          nix develop --command \
+          nix develop --no-pure-eval .#ci --command \
             bash -c 'cabal update && cabal test hnvr-core hnvr-nats hnvr-storage hnvr-capture hnvr-cv'
         # Integration tests in hnvr-nats/hnvr-storage are gated on
         # HNVR_TEST_INTEGRATION=1 and silently skip without it. The
@@ -114,12 +122,15 @@ jobs:
         run: nix build .#hnvr-web --no-link
 
       - name: Boot devenv services (postgres, nats, minio, mediamtx)
+        # --no-pure-eval so devenv.root resolves to GITHUB_WORKSPACE
+        # (PWD) instead of the read-only flake store path — `devenv up`
+        # writes its state under <root>/.devenv.
         run: |
-          nix develop --command bash -c 'devenv up --detach'
+          nix develop --no-pure-eval .#ci --command bash -c 'devenv up --detach'
 
       - name: Start leader in background
         run: |
-          nix develop --command bash -c \
+          nix develop --no-pure-eval .#ci --command bash -c \
             './result/bin/hnvr-leader > leader.log 2>&1 &'
           # Wait for /healthz
           for i in {1..30}; do
@@ -130,11 +141,11 @@ jobs:
       - name: Install Playwright + Chromium
         working-directory: tests/e2e
         run: |
-          nix develop --command bash -c 'npm install && npx playwright install chromium'
+          nix develop --no-pure-eval .#ci --command bash -c 'npm install && npx playwright install chromium'
 
       - name: Run Playwright suite
         working-directory: tests/e2e
-        run: nix develop --command bash -c 'npm test'
+        run: nix develop --no-pure-eval .#ci --command bash -c 'npm test'
 
       - name: Upload JUnit report
         if: always()

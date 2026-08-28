@@ -1,5 +1,28 @@
 # HNVR — Project Memories
 
+> **GitHub Actions CI fixes (Aug 28 2026)**: three failures, three fixes
+> (ci.yml + flake.nix). (a) nix-flake-check: `flake check --no-build` on
+> a fresh store can't realise the callCabal2nix IFD outputs itself
+> ("path '…-cabal2nix-hnvr-core.drv' is not valid") — the two `nix build`
+> steps now run BEFORE `flake check` so the IFD outputs are in the store.
+> (b)+(c) cabal-non-web/cabal-test-non-web "No space left on device":
+> `nix develop` was realising onnxruntimeCuda (TensorRT/cuDNN redists +
+> ~1 h source build, ~15 GB) via HNVR_ONNXRUNTIME_LIB plus the
+> multi-GB ultralytics/torch python env — ubuntu-24.04 runners have
+> ~14 GB. New `devShells.ci` (mkDevShell = ci: …, shared module): no
+> CUDA onnxruntime env (HNVR_ONNXRUNTIME_LIB unset → gated CV smoke
+> tests skip as before, HNVR_EXEC_PROVIDERS=cpu), no ultralytics.
+> ci.yml cabal + e2e jobs use `nix develop --no-pure-eval .#ci`.
+> TRAPS: plain `nix develop` (pure eval) is FATAL in CI — devenv.root
+> falls back to the store path and enterShell dies with "Read-only file
+> system" (task-cache init); always pass --no-pure-eval. `flake check`
+> also evaluates nixosConfigurations toplevels → baseVmConfig gained
+> placeholder fileSystems."/" (/dev/vda) + boot.loader.grub.devices or
+> the NixOS assertions fail eval. Verified: flake check --no-build
+> green locally, ci shell enters with ghc 9.12.3/cabal 3.16/pg_config
+> 18.4 and zero CUDA refs, nix develop works from tests/e2e subdir
+> (nix walks up to flake.nix).
+
 > **README refresh + live leader restarted on 0.16.0.0 (Aug 28 2026)**:
 > version bumped 0.15.0.0 → **0.16.0.0** (the max-size layout feature
 > shipped un-bumped). README updated to reality: /Archive route row →

@@ -211,6 +211,15 @@
           virtualisation.graphics = false;
         };
 
+        # Placeholder boot wiring so `nix flake check` can evaluate the
+        # toplevel derivation (NixOS asserts on a root FS + bootloader).
+        # The .vm build and any real deployment override these.
+        fileSystems."/" = {
+          device = "/dev/vda";
+          fsType = "ext4";
+        };
+        boot.loader.grub.devices = [ "/dev/vda" ];
+
         users.users.root.initialPassword = "root";
 
         # Allow SSH for debugging.
@@ -546,265 +555,283 @@
         # HNVR_CONFIG, DATABASE_URL, etc.) are pre-wired so cabal-built
         # binaries drop straight into a working environment.
         #
-        # `nix develop` MUST be invoked with `--no-pure-eval` (or via
-        # direnv which already does so) — `devenv up` needs to query
-        # the working directory at runtime, which pure eval forbids.
-        # See https://devenv.sh/guides/using-with-flakes/.
-        # -------------------------------------------------------------
-        devShells.default = devenv.lib.mkShell {
-          inherit inputs;
-          pkgs = devenvPkgs;
-          modules = [
-            ({ pkgs, config, lib, ... }: {
-              # devenv auto-detects root via `builtins.getEnv "PWD"`,
-              # which returns "" under pure eval (CI `nix flake check`).
-              # Fall back to the flake's own source path so the shell
-              # evaluates cleanly in pure mode. Under no-pure-eval (real
-              # `nix develop`), PWD wins and points at Sergey's working
-              # tree so state files land in the right place.
-              devenv.root =
-                let pwd = builtins.getEnv "PWD";
-                in if pwd != "" then pwd else inputs.self.outPath;
+        # Dev shells. Two variants share one module:
+        #   * default — full local shell: CUDA+TensorRT onnxruntime
+        #     (source build, ~15 GB) + ultralytics/torch export env.
+        #   * ci — GitHub-Actions variant: same toolchain minus the GPU
+        #     stack. ubuntu-24.04 runners have ~14 GB of disk; realising
+        #     onnxruntimeCuda (TensorRT/cuDNN redists + ~1 h onnxruntime
+        #     source build) plus the multi-GB ultralytics python env
+        #     fills it ("No space left on device" in the cabal jobs).
+        #     hnvr-cv dlopens libonnxruntime at runtime, so cabal
+        #     build/test doesn't need it; the OnnxRuntime smoke tests
+        #     stay gated on HNVR_ONNXRUNTIME_LIB (unset here) and skip.
+        devShells =
+          let
+            mkDevShell = ci: devenv.lib.mkShell {
+              inherit inputs;
+              pkgs = devenvPkgs;
+              modules = [
+                ({ pkgs, config, lib, ... }: {
+                  # devenv auto-detects root via `builtins.getEnv "PWD"`,
+                  # which returns "" under pure eval (CI `nix flake check`).
+                  # Fall back to the flake's own source path so the shell
+                  # evaluates cleanly in pure mode. Under no-pure-eval (real
+                  # `nix develop`), PWD wins and points at Sergey's working
+                  # tree so state files land in the right place.
+                  devenv.root =
+                    let pwd = builtins.getEnv "PWD";
+                    in if pwd != "" then pwd else inputs.self.outPath;
 
-              packages = [
-                devenvHpkgs.ghc
-                devenvHpkgs.cabal-install
-                devenvHpkgs.ghcid
-                devenvHpkgs.hlint
-                pkgs.ormolu
-                devenvHpkgs.cabal-fmt
-                pkgs.nixpkgs-fmt
-                # CSS toolchain — tailwind standalone cli (no npm)
-                pkgs.tailwindcss
-                # ---- Playwright E2E (tests/e2e/) -----------------------
-                # node + npm for the dev-only Playwright UI test suite
-                # (S4 deliverable, design_docs/10-test-plan.md). The
-                # production build is npm-free; this is dev-only.
-                pkgs.nodejs
-                # ---- Runtime deps for local testing --------------------
-                pkgs.ffmpeg_7-full
-                pkgs.onnxruntime
-                # ultralytics CLI (`yolo`) — dev-only, used to export
-                # YOLOv8n-320/YOLOv8s-640 ONNX models for the CV
-                # pipeline (Phase 3). AGPL-3.0: export tool only, never
-                # linked into HNVR binaries or shipped in the NixOS
-                # closure. Pulls in torch — expect a multi-GB closure
-                # on first `nix develop`.
-                #
-                # The top-level `pkgs.ultralytics` wrapper omits the
-                # optional ONNX export deps (`import onnx` fails), so we
-                # build our own python env with onnx + onnxslim (the
-                # 8.4.x simplifier — the old `onnxsim` is gone).
-                (pkgs.python3.withPackages (ps: [
-                  ps.ultralytics
-                  ps.onnx
-                  ps.onnxslim
-                ]))
-                # NOTE: cabal build all needs pg_config for postgresql-libpq-configure.
-                # We currently can't pull postgresql/libpq here without enabling
-                # nix's experimental pipe-operators feature (nixpkgs at our pinned
-                # rev uses `<|` syntax in the postgresql family). cabal build all
-                # is therefore verified in CI only (CI uses Nix 2.35+).
+                  packages = [
+                    devenvHpkgs.ghc
+                    devenvHpkgs.cabal-install
+                    devenvHpkgs.ghcid
+                    devenvHpkgs.hlint
+                    pkgs.ormolu
+                    devenvHpkgs.cabal-fmt
+                    pkgs.nixpkgs-fmt
+                    # CSS toolchain — tailwind standalone cli (no npm)
+                    pkgs.tailwindcss
+                    # ---- Playwright E2E (tests/e2e/) -----------------------
+                    # node + npm for the dev-only Playwright UI test suite
+                    # (S4 deliverable, design_docs/10-test-plan.md). The
+                    # production build is npm-free; this is dev-only.
+                    pkgs.nodejs
+                    # ---- Runtime deps for local testing --------------------
+                    pkgs.ffmpeg_7-full
+                    pkgs.onnxruntime
+                    # NOTE: cabal build all needs pg_config for postgresql-libpq-configure.
+                    # We currently can't pull postgresql/libpq here without enabling
+                    # nix's experimental pipe-operators feature (nixpkgs at our pinned
+                    # rev uses `<|` syntax in the postgresql family). cabal build all
+                    # is therefore verified in CI only (CI uses Nix 2.35+).
 
-                # ---- Utilities -------------------------------------------
-                pkgs.curl
-                pkgs.jq
-                pkgs.direnv
+                    # ---- Utilities -------------------------------------------
+                    pkgs.curl
+                    pkgs.jq
+                    pkgs.direnv
+                  ] ++ lib.optionals (!ci) [
+                    # ultralytics CLI (`yolo`) — dev-only, used to export
+                    # YOLOv8n-320/YOLOv8s-640 ONNX models for the CV
+                    # pipeline (Phase 3). AGPL-3.0: export tool only, never
+                    # linked into HNVR binaries or shipped in the NixOS
+                    # closure. Pulls in torch — expect a multi-GB closure
+                    # on first `nix develop`.
+                    #
+                    # The top-level `pkgs.ultralytics` wrapper omits the
+                    # optional ONNX export deps (`import onnx` fails), so we
+                    # build our own python env with onnx + onnxslim (the
+                    # 8.4.x simplifier — the old `onnxsim` is gone).
+                    (pkgs.python3.withPackages (ps: [
+                      ps.ultralytics
+                      ps.onnx
+                      ps.onnxslim
+                    ]))
+                  ];
+
+                  # ---- Services (managed by `devenv up`) ----------------------
+
+                  # PostgreSQL 18 — matches the design's SaaS PG version.
+                  # IHP needs TCP (not just unix socket) because the leader
+                  # binary may run as a different user than the dev shell.
+                  # Trust auth mirrors the leader VM (nix/module.nix).
+                  #
+                  # Port 15432 (not the default 5432) — Sergey's dev box
+                  # runs a system postgres on :5432 (langfuse / zulip-dicts
+                  # build). Use a non-conflicting port; DATABASE_URL below
+                  # is updated to match.
+                  services.postgres = {
+                    enable = true;
+                    package = pkgs.postgresql_18;
+                    listen_addresses = "127.0.0.1";
+                    port = 15432;
+                    initialDatabases = [{
+                      name = "hnvr";
+                      user = "hnvr";
+                      schema = ./hnvr-web/Application/Schema.sql;
+                    }];
+                    hbaConf = ''
+                      local all all trust
+                      host  all all 127.0.0.1/32 trust
+                      host  all all ::1/128 trust
+                    '';
+                  };
+
+                  # S3 is NOT a devenv service: dev records straight into
+                  # the external SeaweedFS (http://192.168.0.254:8333,
+                  # bucket `hnvr`) via hnvr.yaml — see HNVR_CONFIG below.
+
+                  # NATS — IPC spine. Auth + JetStream on; matches what the
+                  # VM runs (nix/nats-server.nix) and the URI form the binaries
+                  # expect (user:pass@host — pitfall #31).
+                  services.nats = {
+                    enable = true;
+                    port = 4222;
+                    monitoring.enable = true;
+                    monitoring.port = 8222;
+                    authorization = {
+                      enable = true;
+                      user = "nats";
+                      password = "nats";
+                    };
+                    jetstream.enable = true;
+                  };
+
+                  # MediaMTX — RTSP→WebRTC WHEP bridge (leader-only). Not a
+                  # built-in devenv service, so we drive it as a custom
+                  # process. The bootstrap config only enables REST + WebRTC
+                  # listeners; the leader's MediaMTXConfigSyncer pushes
+                  # per-camera path config live via PUT /v2/config/paths/<slug>
+                  # once cameras are added in the IHP UI.
+                  processes.mediamtx.exec =
+                    "${pkgs.mediamtx}/bin/mediamtx ${mediamtxBootstrap}";
+                  # Readiness probe — mediamtx 1.18.2 uses /v3/* API prefix
+                  # (NOT /v2/* — that was 1.7-1.15; HNVR's MediaMTXConfigSyncer
+                  # has a separate bug to migrate). /v3/info is the lightest
+                  # unauthenticated GET (returns version + start time).
+                  processes.mediamtx.ready = {
+                    exec = "${pkgs.curl}/bin/curl -fsS -o /dev/null http://127.0.0.1:9997/v3/info";
+                    initial_delay = 2;
+                    period = 5;
+                    probe_timeout = 3;
+                    failure_threshold = 5;
+                  };
+
+                  # Tailwind CSS watcher — rebuild static/app.css whenever
+                  # HSX markup or src.css changes. Output goes into the
+                  # project's hnvr-web/static/app.css (committed artifact
+                  # so the dev leader binary, which reads APP_STATIC=hnvr-web/static,
+                  # serves the latest CSS without a nix rebuild).
+                  #
+                  # The output path is stringified (toString then concatenated)
+                  # so nix doesn't try to copy app.css into the eval closure —
+                  # the file is a *build output*, not an input, and may not
+                  # exist on a fresh checkout.
+                  processes.tailwind.exec = ''
+                    ${pkgs.tailwindcss}/bin/tailwindcss \
+                      --config ${./hnvr-web/tailwind.config.js} \
+                      --input ${./hnvr-web/static/src.css} \
+                      --output "${toString ./hnvr-web/static/app.css}" \
+                      --watch
+                  '';
+
+                  # ---- Environment variables consumed by HNVR binaries ------
+                  #
+                  # These mirror what the NixOS leader VM sets via the
+                  # systemd Environment= block. Sergey's canonical dev
+                  # commands (./result/bin/hnvr-leader, hnvr-node,
+                  # hnvr-capture-loop, hnvr-s3-upload) read these and just
+                  # work — no manual export needed.
+                  env = {
+                    HNVR_NATS_URI = "nats://nats:nats@localhost:4222";
+                    HNVR_HOST = "hnvr-2";
+                    # S3 (SeaweedFS) credentials live in the gitignored
+                    # hnvr.yaml at the repo root — copy hnvr.example.yaml
+                    # and fill in the keys. HNVR_S3_* env vars still
+                    # override the file when set (integration tests).
+                    HNVR_CONFIG = "${config.devenv.root}/hnvr.yaml";
+                    HNVR_MEDIAMTX_API = "http://127.0.0.1:9997";
+                    HNVR_MEDIAMTX_WEBRTC = "http://127.0.0.1:8889";
+                    # ConfigSyncer writes here in prod (/run/hnvr/mediamtx.yml).
+                    # In dev we point it at DEVENV_STATE so the leader can
+                    # write without root.
+                    HNVR_MEDIAMTX_CONFIG_PATH = "${config.env.DEVENV_STATE}/hnvr-mediamtx.yml";
+                    # IHP reads DATABASE_URL when present. Devenv's PG unix
+                    # socket lives under $DEVENV_RUNTIME/postgres; the TCP
+                    # port matches services.postgres.port (15432 — Sergey's
+                    # system postgres owns :5432).
+                    DATABASE_URL = "postgresql:///hnvr?host=127.0.0.1&port=15432";
+                    # Port 8000 is Taiga on Sergey's box (pitfall #13).
+                    PORT = "18001";
+                    # Bootstrap admin user — leader idempotently INSERTs
+                    # this on boot (ON CONFLICT DO NOTHING). Production
+                    # sources these from sops-nix (Phase 6); dev-only.
+                    INITIAL_ADMIN_EMAIL = "admin@hnvr.local";
+                    INITIAL_ADMIN_PASSWORD = "hnvr-dev";
+                    # AES-256 data key for camera password encryption
+                    # (Hnvr.Core.Crypto via Web.Controller.Support.Crypto).
+                    # Stable so dev DB rows stay decryptable across sessions;
+                    # dev-only — production sources from sops-nix.
+                    HNVR_DATA_KEY = "j1kGE9Y274/RNq1+TJWKeS4RDocw5+Uu05q3KPKm7XM=";
+                    # Spool dir for capture segments when S3 is unreachable
+                    # (NodeMain defaults to /var/lib/hnvr/spool, unwritable
+                    # for the dev user — spool fallback silently failed in
+                    # dev until this was set).
+                    HNVR_SPOOL_DIR = "${config.env.DEVENV_STATE}/spool";
+                    # ---- Phase 3 CV pipeline --------------------------------
+                    # libonnxruntime for the internal FFI binding
+                    # (Hnvr.Cv.OnnxRuntime.Internal, dlopen'd at session
+                    # creation). CUDA+TensorRT build (sm_89): TRT EP wins,
+                    # CUDA is the fallback, CPU the safety net. TRT engines
+                    # are cached in HNVR_TRT_CACHE_DIR (first analyzer start
+                    # builds, ~1 min). Requires /run/opengl-driver/lib on
+                    # LD_LIBRARY_PATH for libcuda.so.1 (wired in enterShell
+                    # below). Model: yolov8n-320 exported into the shared
+                    # model cache (design 04; exported via the devShell's
+                    # ultralytics env, see pitfall #97). NOT set in the ci
+                    # shell — pulling onnxruntimeCuda into the runner disk
+                    # image is what OOM'd the cabal jobs; the gated CV
+                    # smoke tests skip without it.
+                    HNVR_MODEL_PATH = "/home/pion/.local/share/hnvr/model_cache/yolov8/yolov8n-320.onnx";
+                    # Per-camera model resolution (cameras.model_name →
+                    # <dir>/<name>.onnx); holds both yolov8n-320 and
+                    # yolov8s-640 (pitfall #97).
+                    HNVR_MODEL_DIR = "/home/pion/.local/share/hnvr/model_cache/yolov8";
+                    # Per-host EP priority (design 04 §"Per-host EP
+                    # selection"). Dev box is hnvr-2 (RTX 4090): TRT wins,
+                    # CUDA falls back, CPU is the safety net.
+                    HNVR_EXEC_PROVIDERS = if ci then "cpu" else "tensorrt,cuda,cpu";
+                    # TRT engine cache (first analyzer start builds the
+                    # engine, ~1 min; later starts load from cache).
+                    HNVR_TRT_CACHE_DIR = "${config.env.DEVENV_STATE}/trt-cache";
+                    # Prometheus metrics endpoint (Hnvr.Web.Metrics, own
+                    # warp — leader + node). 9102 stays as the dev port
+                    # (9100 was the old devenv MinIO's port; kept to avoid
+                    # churn with running dev processes).
+                    HNVR_METRICS_PORT = "9102";
+                  } // lib.optionalAttrs (!ci) {
+                    HNVR_ONNXRUNTIME_LIB = "${onnxruntimeCuda}/lib/libonnxruntime.so";
+                  };
+
+                  enterShell = preCommit.shellHook + ''
+                    # Extend the system nix-ld library path with chromium's
+                    # runtime deps so Playwright's `npx playwright install`
+                    # binary can launch inside `nix develop`. See the
+                    # `chromiumRuntimeDeps` binding above + tests/e2e/README.md.
+                    if [ -n "''${NIX_LD_LIBRARY_PATH:-}" ]; then
+                      export NIX_LD_LIBRARY_PATH="${chromiumLibPath}:$NIX_LD_LIBRARY_PATH"
+                    else
+                      export NIX_LD_LIBRARY_PATH="${chromiumLibPath}"
+                    fi
+
+                    # CUDA EP needs libcuda.so.1 (the kernel-driver shim),
+                    # which lives outside the nix store. On NixOS the
+                    # driver exposes it via /run/opengl-driver/lib.
+                    if [ -d /run/opengl-driver/lib ]; then
+                      export LD_LIBRARY_PATH="/run/opengl-driver/lib:''${LD_LIBRARY_PATH:-}"
+                    fi
+
+                    echo ""
+                    echo "  HNVR dev shell — $(ghc --version)"
+                    echo "  Build:     cabal build all"
+                    echo "  REPL:      cabal repl"
+                    echo "  Services:  devenv up   (postgres :15432,"
+                    echo "                          nats :4222, mediamtx :9997)"
+                    echo "  S3:        hnvr.yaml → http://192.168.0.254:8333 (bucket hnvr)"
+                    echo "  Health:    curl localhost:8222/healthz         (nats)"
+                    echo "             curl localhost:9997/v2/config/paths  (mediamtx)"
+                    echo "  E2E:       cd tests/e2e && npm install && npx playwright install chromium && npm test"
+                    echo ""
+                  '';
+                })
               ];
-
-              # ---- Services (managed by `devenv up`) ----------------------
-
-              # PostgreSQL 18 — matches the design's SaaS PG version.
-              # IHP needs TCP (not just unix socket) because the leader
-              # binary may run as a different user than the dev shell.
-              # Trust auth mirrors the leader VM (nix/module.nix).
-              #
-              # Port 15432 (not the default 5432) — Sergey's dev box
-              # runs a system postgres on :5432 (langfuse / zulip-dicts
-              # build). Use a non-conflicting port; DATABASE_URL below
-              # is updated to match.
-              services.postgres = {
-                enable = true;
-                package = pkgs.postgresql_18;
-                listen_addresses = "127.0.0.1";
-                port = 15432;
-                initialDatabases = [{
-                  name = "hnvr";
-                  user = "hnvr";
-                  schema = ./hnvr-web/Application/Schema.sql;
-                }];
-                hbaConf = ''
-                  local all all trust
-                  host  all all 127.0.0.1/32 trust
-                  host  all all ::1/128 trust
-                '';
-              };
-
-              # S3 is NOT a devenv service: dev records straight into
-              # the external SeaweedFS (http://192.168.0.254:8333,
-              # bucket `hnvr`) via hnvr.yaml — see HNVR_CONFIG below.
-
-              # NATS — IPC spine. Auth + JetStream on; matches what the
-              # VM runs (nix/nats-server.nix) and the URI form the binaries
-              # expect (user:pass@host — pitfall #31).
-              services.nats = {
-                enable = true;
-                port = 4222;
-                monitoring.enable = true;
-                monitoring.port = 8222;
-                authorization = {
-                  enable = true;
-                  user = "nats";
-                  password = "nats";
-                };
-                jetstream.enable = true;
-              };
-
-              # MediaMTX — RTSP→WebRTC WHEP bridge (leader-only). Not a
-              # built-in devenv service, so we drive it as a custom
-              # process. The bootstrap config only enables REST + WebRTC
-              # listeners; the leader's MediaMTXConfigSyncer pushes
-              # per-camera path config live via PUT /v2/config/paths/<slug>
-              # once cameras are added in the IHP UI.
-              processes.mediamtx.exec =
-                "${pkgs.mediamtx}/bin/mediamtx ${mediamtxBootstrap}";
-              # Readiness probe — mediamtx 1.18.2 uses /v3/* API prefix
-              # (NOT /v2/* — that was 1.7-1.15; HNVR's MediaMTXConfigSyncer
-              # has a separate bug to migrate). /v3/info is the lightest
-              # unauthenticated GET (returns version + start time).
-              processes.mediamtx.ready = {
-                exec = "${pkgs.curl}/bin/curl -fsS -o /dev/null http://127.0.0.1:9997/v3/info";
-                initial_delay = 2;
-                period = 5;
-                probe_timeout = 3;
-                failure_threshold = 5;
-              };
-
-              # Tailwind CSS watcher — rebuild static/app.css whenever
-              # HSX markup or src.css changes. Output goes into the
-              # project's hnvr-web/static/app.css (committed artifact
-              # so the dev leader binary, which reads APP_STATIC=hnvr-web/static,
-              # serves the latest CSS without a nix rebuild).
-              #
-              # The output path is stringified (toString then concatenated)
-              # so nix doesn't try to copy app.css into the eval closure —
-              # the file is a *build output*, not an input, and may not
-              # exist on a fresh checkout.
-              processes.tailwind.exec = ''
-                ${pkgs.tailwindcss}/bin/tailwindcss \
-                  --config ${./hnvr-web/tailwind.config.js} \
-                  --input ${./hnvr-web/static/src.css} \
-                  --output "${toString ./hnvr-web/static/app.css}" \
-                  --watch
-              '';
-
-              # ---- Environment variables consumed by HNVR binaries ------
-              #
-              # These mirror what the NixOS leader VM sets via the
-              # systemd Environment= block. Sergey's canonical dev
-              # commands (./result/bin/hnvr-leader, hnvr-node,
-              # hnvr-capture-loop, hnvr-s3-upload) read these and just
-              # work — no manual export needed.
-              env = {
-                HNVR_NATS_URI = "nats://nats:nats@localhost:4222";
-                HNVR_HOST = "hnvr-2";
-                # S3 (SeaweedFS) credentials live in the gitignored
-                # hnvr.yaml at the repo root — copy hnvr.example.yaml
-                # and fill in the keys. HNVR_S3_* env vars still
-                # override the file when set (integration tests).
-                HNVR_CONFIG = "${config.devenv.root}/hnvr.yaml";
-                HNVR_MEDIAMTX_API = "http://127.0.0.1:9997";
-                HNVR_MEDIAMTX_WEBRTC = "http://127.0.0.1:8889";
-                # ConfigSyncer writes here in prod (/run/hnvr/mediamtx.yml).
-                # In dev we point it at DEVENV_STATE so the leader can
-                # write without root.
-                HNVR_MEDIAMTX_CONFIG_PATH = "${config.env.DEVENV_STATE}/hnvr-mediamtx.yml";
-                # IHP reads DATABASE_URL when present. Devenv's PG unix
-                # socket lives under $DEVENV_RUNTIME/postgres; the TCP
-                # port matches services.postgres.port (15432 — Sergey's
-                # system postgres owns :5432).
-                DATABASE_URL = "postgresql:///hnvr?host=127.0.0.1&port=15432";
-                # Port 8000 is Taiga on Sergey's box (pitfall #13).
-                PORT = "18001";
-                # Bootstrap admin user — leader idempotently INSERTs
-                # this on boot (ON CONFLICT DO NOTHING). Production
-                # sources these from sops-nix (Phase 6); dev-only.
-                INITIAL_ADMIN_EMAIL = "admin@hnvr.local";
-                INITIAL_ADMIN_PASSWORD = "hnvr-dev";
-                # AES-256 data key for camera password encryption
-                # (Hnvr.Core.Crypto via Web.Controller.Support.Crypto).
-                # Stable so dev DB rows stay decryptable across sessions;
-                # dev-only — production sources from sops-nix.
-                HNVR_DATA_KEY = "j1kGE9Y274/RNq1+TJWKeS4RDocw5+Uu05q3KPKm7XM=";
-                # Spool dir for capture segments when S3 is unreachable
-                # (NodeMain defaults to /var/lib/hnvr/spool, unwritable
-                # for the dev user — spool fallback silently failed in
-                # dev until this was set).
-                HNVR_SPOOL_DIR = "${config.env.DEVENV_STATE}/spool";
-                # ---- Phase 3 CV pipeline --------------------------------
-                # libonnxruntime for the internal FFI binding
-                # (Hnvr.Cv.OnnxRuntime.Internal, dlopen'd at session
-                # creation). CUDA+TensorRT build (sm_89): TRT EP wins,
-                # CUDA is the fallback, CPU the safety net. TRT engines
-                # are cached in HNVR_TRT_CACHE_DIR (first analyzer start
-                # builds, ~1 min). Requires /run/opengl-driver/lib on
-                # LD_LIBRARY_PATH for libcuda.so.1 (wired in enterShell
-                # below). Model: yolov8n-320 exported into the shared
-                # model cache (design 04; exported via the devShell's
-                # ultralytics env, see pitfall #97).
-                HNVR_ONNXRUNTIME_LIB = "${onnxruntimeCuda}/lib/libonnxruntime.so";
-                HNVR_MODEL_PATH = "/home/pion/.local/share/hnvr/model_cache/yolov8/yolov8n-320.onnx";
-                # Per-camera model resolution (cameras.model_name →
-                # <dir>/<name>.onnx); holds both yolov8n-320 and
-                # yolov8s-640 (pitfall #97).
-                HNVR_MODEL_DIR = "/home/pion/.local/share/hnvr/model_cache/yolov8";
-                # Per-host EP priority (design 04 §"Per-host EP
-                # selection"). Dev box is hnvr-2 (RTX 4090): TRT wins,
-                # CUDA falls back, CPU is the safety net.
-                HNVR_EXEC_PROVIDERS = "tensorrt,cuda,cpu";
-                # TRT engine cache (first analyzer start builds the
-                # engine, ~1 min; later starts load from cache).
-                HNVR_TRT_CACHE_DIR = "${config.env.DEVENV_STATE}/trt-cache";
-                # Prometheus metrics endpoint (Hnvr.Web.Metrics, own
-                # warp — leader + node). 9102 stays as the dev port
-                # (9100 was the old devenv MinIO's port; kept to avoid
-                # churn with running dev processes).
-                HNVR_METRICS_PORT = "9102";
-              };
-
-              enterShell = preCommit.shellHook + ''
-                # Extend the system nix-ld library path with chromium's
-                # runtime deps so Playwright's `npx playwright install`
-                # binary can launch inside `nix develop`. See the
-                # `chromiumRuntimeDeps` binding above + tests/e2e/README.md.
-                if [ -n "''${NIX_LD_LIBRARY_PATH:-}" ]; then
-                  export NIX_LD_LIBRARY_PATH="${chromiumLibPath}:$NIX_LD_LIBRARY_PATH"
-                else
-                  export NIX_LD_LIBRARY_PATH="${chromiumLibPath}"
-                fi
-
-                # CUDA EP needs libcuda.so.1 (the kernel-driver shim),
-                # which lives outside the nix store. On NixOS the
-                # driver exposes it via /run/opengl-driver/lib.
-                if [ -d /run/opengl-driver/lib ]; then
-                  export LD_LIBRARY_PATH="/run/opengl-driver/lib:''${LD_LIBRARY_PATH:-}"
-                fi
-
-                echo ""
-                echo "  HNVR dev shell — $(ghc --version)"
-                echo "  Build:     cabal build all"
-                echo "  REPL:      cabal repl"
-                echo "  Services:  devenv up   (postgres :15432,"
-                echo "                          nats :4222, mediamtx :9997)"
-                echo "  S3:        hnvr.yaml → http://192.168.0.254:8333 (bucket hnvr)"
-                echo "  Health:    curl localhost:8222/healthz         (nats)"
-                echo "             curl localhost:9997/v2/config/paths  (mediamtx)"
-                echo "  E2E:       cd tests/e2e && npm install && npx playwright install chromium && npm test"
-                echo ""
-              '';
-            })
-          ];
-        };
+            };
+          in
+          {
+            default = mkDevShell false;
+            ci = mkDevShell true;
+          };
 
         # -------------------------------------------------------------
         # NixOS VM smoke test (S5 deliverable, design_docs/10-test-plan.md).
