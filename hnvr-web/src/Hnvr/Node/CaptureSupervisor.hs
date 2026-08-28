@@ -246,9 +246,11 @@ withCameraLock sup camId act = do
 -- The original camera URL (carried in 'csRtspUrl') is preserved in
 -- the worker's log lines for diagnostics but never reaches ffmpeg.
 --
--- The relay port is configurable via @HNVR_MEDIAMTX_RTSP_PORT@ (default
--- 8554) so non-default deployments work. Transport is always TCP —
--- mediamtx is on localhost, no UDP needed.
+-- The relay address is configurable via @HNVR_MEDIAMTX_RTSP_HOST@
+-- (default localhost — the leader's embedded mediamtx) and
+-- @HNVR_MEDIAMTX_RTSP_PORT@ (default 8554) so remote worker nodes
+-- pull from the leader's mediamtx instead of their own localhost.
+-- Transport is always TCP — no UDP needed across the LAN relay.
 startCamera :: CaptureSupervisor -> CameraSnapshot -> IO ()
 startCamera sup snap =
   withCameraLock sup (csId snap) (startCameraLocked sup snap)
@@ -258,6 +260,7 @@ startCameraLocked :: CaptureSupervisor -> CameraSnapshot -> IO ()
 startCameraLocked sup snap = do
   stopCameraLocked sup (csId snap)
   stopTVar <- newTVarIO False
+  relayHost <- fromMaybe "localhost" <$> lookupEnv "HNVR_MEDIAMTX_RTSP_HOST"
   relayPort <- fromMaybe "8554" <$> lookupEnv "HNVR_MEDIAMTX_RTSP_PORT"
   -- Event-clip ring buffer: only when at least one rule on this camera
   -- has clip recording enabled (clip_retention_hours set).
@@ -265,7 +268,7 @@ startCameraLocked sup snap = do
     case Clip.bufferWindowSec (csRules snap) of
       Nothing -> pure Nothing
       Just w -> Just <$> Clip.registerBuffer sup.csClipState (csId snap) w
-  let relayUrl = "rtsp://localhost:" <> T.pack relayPort <> "/" <> csSlug snap
+  let relayUrl = "rtsp://" <> T.pack relayHost <> ":" <> T.pack relayPort <> "/" <> csSlug snap
       camCfg =
         CameraConfig
           { ccId = csId snap,
