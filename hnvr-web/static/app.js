@@ -1337,18 +1337,18 @@
   /* ── Archive playlist repair + legacy detection ────────────────
    * Server playlists declare EXTINF from DB wall-clock segment times,
    * which drift from real media durations (irregular keyframe-cut
-   * fragment lengths); hls.js positions fragments by cumulative EXTINF
-   * so the timeline accumulates holes and overlaps (stalls, bufferFull
-   * churn). This range-GETs every fragment's moof head, diffs video
-   * tfdts for TRUE durations, and detects legacy audio skew (audio tfdt
-   * deltas persistently off the video ratio — 2 consecutive unhealthy
-   * boundaries; an ffmpeg restart jumps both tracks equally and does
-   * not trip it). Legacy windows additionally get the init moov
-   * stripped of its audio trak (+trex) so playback is video-only from
-   * the first append — mid-playback audio loss would stall A/V sync.
-   * Resolves {text, stripAudio}; probe/init failures fall back to the
-   * original playlist text. Fragment/init URLs in the playlist are
-   * absolute presigned S3, so the result is fed to hls.js via Blob URL. */
+    * fragment lengths); hls.js positions fragments by cumulative EXTINF
+    * so the timeline accumulates holes and overlaps (stalls, bufferFull
+    * churn). This range-GETs every fragment's moof head, diffs video
+    * tfdts for TRUE durations, and detects legacy audio skew as an
+    * aggregate audio-time vs video-time slope far from 1 (see the
+    * decision block below for why per-boundary ratios are not enough).
+    * Legacy windows additionally get the init moov
+    * stripped of its audio trak (+trex) so playback is video-only from
+    * the first append — mid-playback audio loss would stall A/V sync.
+    * Resolves {text, stripAudio}; probe/init failures fall back to the
+    * original playlist text. Fragment/init URLs in the playlist are
+    * absolute presigned S3, so the result is fed to hls.js via Blob URL. */
   HNVR.fmp4RewritePlaylist = function (m3u8Text) {
     function fetchRange(url, bytes) {
       return fetch(url, { headers: { Range: "bytes=0-" + bytes } }).then(function (r) {
@@ -1478,7 +1478,19 @@
           });
           var legacy = false;
           if (audio) {
-            var hits = 0;
+            /* Legacy-skew decision by AGGREGATE slope, not per-boundary
+             * hits. Pre-v0.15 windows run audio at a consistent ~0.5x
+             * video rate (G.711 sampled 16k, clocked 8k) — the slope
+             * over the whole window is far from 1. Post-retag (v0.17)
+             * windows play audio at the true rate but their per-
+             * boundary ratios are NOISY (cameras emit non-monotonic
+             * audio DTS; ffmpeg bumps them), which used to trip the
+             * old 2-consecutive-out-of-band rule and strip healthy
+             * audio. Sum dA/dV across all usable boundaries: jitter
+             * cancels, a systematic skew does not. */
+            var sumDV = 0,
+              sumDA = 0,
+              usable = 0;
             for (var k = 1; k < entries.length; k++) {
               var pv = probes[k - 1] && probes[k - 1][video.id];
               var cv = probes[k] && probes[k][video.id];
@@ -1487,15 +1499,14 @@
               if (!pv || !cv || !pa || !ca) continue;
               var dV = (cv.tfdt - pv.tfdt) / video.ts;
               var dA = (ca.tfdt - pa.tfdt) / audio.ts;
-              if (dV <= 0.02) continue;
-              var ratio = dA / dV;
-              if (ratio < 0.75 || ratio > 1.33) {
-                hits++;
-                if (hits >= 2) {
-                  legacy = true;
-                  break;
-                }
-              } else hits = 0;
+              if (dV <= 0.02 || dA < 0) continue;
+              sumDV += dV;
+              sumDA += dA;
+              usable++;
+            }
+            if (usable >= 4 && sumDV > 0) {
+              var slope = sumDA / sumDV;
+              legacy = slope < 0.75 || slope > 1.33;
             }
           }
           if (legacy) {
