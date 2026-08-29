@@ -197,7 +197,7 @@ fetchWindowEvents mAclIds from to = do
         \FROM events e \
         \LEFT JOIN rules r ON r.id = e.rule_id \
         \WHERE e.ts >= ? AND e.ts <= ? \
-        \  AND (?::bool OR e.camera_id = ANY(?)) \
+        \  AND (?::bool OR e.camera_id = ANY(?::uuid[])) \
         \ORDER BY e.ts ASC"
         (from, to, isNothing mAclIds, PGArray (fromMaybe [] mAclIds))
   pure

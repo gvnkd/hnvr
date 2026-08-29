@@ -52,7 +52,7 @@ fetchStats mAclIds = do
         conn
         "SELECT c.slug, COALESCE(SUM(s.bytes), 0)::bigint, COUNT(s.id)::bigint \
         \FROM cameras c LEFT JOIN segments s ON s.camera_id = c.id \
-        \WHERE (?::bool OR c.id = ANY(?)) \
+        \WHERE (?::bool OR c.id = ANY(?::uuid[])) \
         \GROUP BY c.slug ORDER BY c.slug"
         aclParams
     (eventsTotal, events24h) <-
@@ -61,14 +61,14 @@ fetchStats mAclIds = do
           conn
           "SELECT COUNT(*)::bigint, \
           \COUNT(*) FILTER (WHERE ts >= now() - interval '24 hours')::bigint \
-          \FROM events e WHERE (?::bool OR e.camera_id = ANY(?))"
+          \FROM events e WHERE (?::bool OR e.camera_id = ANY(?::uuid[]))"
           aclParams
     kindRows <-
       PG.query
         conn
         "SELECT kind::text, COUNT(*)::bigint FROM events e \
         \WHERE ts >= now() - interval '24 hours' \
-        \  AND (?::bool OR e.camera_id = ANY(?)) \
+        \  AND (?::bool OR e.camera_id = ANY(?::uuid[])) \
         \GROUP BY kind ORDER BY 2 DESC"
         aclParams
     camEventRows <-
@@ -77,7 +77,7 @@ fetchStats mAclIds = do
         "SELECT c.slug, COUNT(e.id)::bigint \
         \FROM cameras c LEFT JOIN events e ON e.camera_id = c.id \
         \  AND e.ts >= now() - interval '24 hours' \
-        \WHERE (?::bool OR c.id = ANY(?)) \
+        \WHERE (?::bool OR c.id = ANY(?::uuid[])) \
         \GROUP BY c.slug ORDER BY 2 DESC"
         aclParams
     rulesEnabled <-
@@ -85,7 +85,7 @@ fetchStats mAclIds = do
         <$> PG.query
           conn
           "SELECT COUNT(*)::bigint FROM rules r \
-          \WHERE r.enabled AND (?::bool OR r.camera_id = ANY(?))"
+          \WHERE r.enabled AND (?::bool OR r.camera_id = ANY(?::uuid[]))"
           aclParams
     pure
       Stats

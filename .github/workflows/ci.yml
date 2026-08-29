@@ -1,9 +1,10 @@
 name: CI
 
+# Disabled 2026-08-29 (Sergey): CI is broken right now — runs fire manually
+# only (Actions tab → CI → Run workflow) until fixed. Was: push to master
+# + pull_request.
 on:
-  push:
-    branches: [master]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   nix-flake-check:

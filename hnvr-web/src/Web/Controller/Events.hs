@@ -122,7 +122,7 @@ fetchEventRows mAclIds mCam mKind mFrom mTo page = do
         \  AND (?::text IS NULL OR e.kind::text = ?) \
         \  AND (?::timestamptz IS NULL OR e.ts >= ?) \
         \  AND (?::timestamptz IS NULL OR e.ts <= ?) \
-        \  AND (?::bool OR e.camera_id = ANY(?)) \
+        \  AND (?::bool OR e.camera_id = ANY(?::uuid[])) \
         \ORDER BY e.ts DESC \
         \LIMIT ? OFFSET ?"
         -- pg-simple caps tuple ToRow at 10 (pitfall #122) — chunk into
