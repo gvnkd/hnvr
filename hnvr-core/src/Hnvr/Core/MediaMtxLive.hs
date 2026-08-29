@@ -175,7 +175,7 @@ renderPathsYaml relayBase cams =
       | not (cpEnabled cam) = mempty
       | otherwise =
           [ "  " <> cpSlug cam <> ":",
-            "    source: '" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam) <> "'",
+            "    source: 'exec:" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam) <> "'",
             "    sourceOnDemand: yes",
             "  " <> livePathName (cpSlug cam) <> ":",
             "    runOnDemand: '"
