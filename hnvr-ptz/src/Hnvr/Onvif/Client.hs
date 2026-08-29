@@ -95,17 +95,32 @@ data OnvifError
 -- | GetCapabilities (Category=All) against the device service and pick
 -- out the Media XAddr. Host/port here are the ONVIF endpoint's (e.g.
 -- @192.168.0.198@ + @8899@), NOT the RTSP port.
+--
+-- The advertised Media XAddr is VERIFIED with a cheap
+-- GetProfiles call before it is trusted: some OEM firmware (ICAMRA)
+-- advertises @\/onvif\/media@ but never answers there, while the
+-- device-service path serves media operations fine. On a transport
+-- failure (or a 4xx) the device-service URL is returned instead.
 discoverMediaXAddr ::
   HC.Manager -> OnvifCreds -> Text -> Int -> IO (Either OnvifError Text)
 discoverMediaXAddr mgr creds host port = do
   let url = "http://" <> host <> ":" <> tshow port <> "/onvif/device_service"
   res <- soapCall mgr creds url "tds" "GetCapabilities" "<tds:Category>All</tds:Category>"
-  pure $ do
-    body <- res
-    caps <- parseServiceXAddrs body
-    case Map.lookup "media" caps of
-      Just x -> Right x
-      Nothing -> Left (OnvifParseError "GetCapabilities: no Media XAddr")
+  case res of
+    Left e -> pure (Left e)
+    Right body ->
+      case parseServiceXAddrs body of
+        Left _ -> pure (Left (OnvifParseError "GetCapabilities: bad capabilities payload"))
+        Right caps ->
+          case Map.lookup "media" caps of
+            Nothing -> pure (Left (OnvifParseError "GetCapabilities: no Media XAddr"))
+            Just x -> do
+              probe <- soapCall mgr creds x "trt" "GetProfiles" ""
+              pure $ case probe of
+                -- Advertised endpoint dead: NoResponseDataReceived etc.
+                Left (OnvifTransportError _) -> Right url
+                Left (OnvifHttpError code _) | code >= 400 && code < 500 -> Right url
+                _ -> Right x
 
 -- | Same discovery for the PTZ service. 'Nothing' (not an error) when
 -- the camera doesn't advertise PTZ at all (fixed cameras — e.g.
