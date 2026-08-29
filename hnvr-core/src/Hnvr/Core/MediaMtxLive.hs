@@ -158,7 +158,7 @@ renderPathsYaml relayBase cams =
       "moq: no",
       "webrtc: yes",
       "webrtcAddress: :8889",
-      "webrtcUDPMuxAddress: :8189",
+      "webrtcLocalUDPAddress: :8189",
       "webrtcEncryption: no",
       "webrtcAllowOrigins: ['*']",
       -- RTSP *server* on :8554 — CaptureWorker pulls from
