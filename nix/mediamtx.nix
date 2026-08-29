@@ -25,6 +25,7 @@ let
     moq: no
     webrtc: yes
     webrtcAddress: :${toString cfg.webrtcPort}
+    webrtcUDPMuxAddress: :${toString cfg.webrtcUdpMuxPort}
     webrtcEncryption: no
     webrtcAllowOrigins: ['*']
     rtsp: yes
@@ -55,6 +56,17 @@ in
       type = lib.types.port;
       default = 8889;
       description = "WebRTC (WHEP/WHIP) HTTP port. /whep/<slug> reverse-proxies here.";
+    };
+
+    webrtcUdpMuxPort = lib.mkOption {
+      type = lib.types.port;
+      default = 8189;
+      description = ''
+        WebRTC ICE/DTLS UDP mux port (webrtcUDPMuxAddress).
+        Signaling rides the TCP webrtcPort, but the media itself is
+        UDP on this port — a WHEP session that signs up fine and then
+        dies on the ICE deadline means this port is firewalled.
+      '';
     };
 
     rtspPort = lib.mkOption {
@@ -92,6 +104,8 @@ in
   config = lib.mkIf cfg.enable {
     networking.firewall.allowedTCPPorts = lib.optionals config.networking.firewall.enable
       [ cfg.apiPort cfg.webrtcPort cfg.rtspPort ];
+    networking.firewall.allowedUDPPorts = lib.optionals config.networking.firewall.enable
+      [ cfg.webrtcUdpMuxPort ];
 
     # Shared runtime directory — owned by hnvr so both hnvr-leader
     # (ConfigSyncer writes the YAML) and mediamtx (reads it) can access.
