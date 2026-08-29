@@ -108,7 +108,9 @@ runOnDemandCmd relayBase slug (LiveAudio mrate presence) =
         "0:v:0"
       ]
         <> audioOpts
-        <> [ "-f",
+        <> [ "-rtsp_transport",
+             "tcp",
+             "-f",
              "rtsp",
              outUrl
            ]
@@ -140,7 +142,8 @@ livePathConfig :: Text -> Text -> LiveAudio -> Value
 livePathConfig relayBase slug la =
   object
     [ "runOnDemand" .= runOnDemandCmd relayBase slug la,
-      "runOnDemandRestart" .= True
+      "runOnDemandRestart" .= True,
+      "runOnDemandStartTimeout" .= ("20s" :: Text)
     ]
 
 -- | Render the full @mediamtx.yml@ body for the given cameras. Same
@@ -177,11 +180,13 @@ renderPathsYaml relayBase cams =
           [ "  " <> cpSlug cam <> ":",
             "    runOnDemand: '" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam) <> "'",
             "    runOnDemandRestart: yes",
+            "    runOnDemandStartTimeout: 20s",
             "  " <> livePathName (cpSlug cam) <> ":",
             "    runOnDemand: '"
               <> runOnDemandCmd relayBase (cpSlug cam) (cpLiveAudio cam)
               <> "'",
-            "    runOnDemandRestart: yes"
+            "    runOnDemandRestart: yes",
+            "    runOnDemandStartTimeout: 20s"
           ]
 
 -- | Ingestion via an ffmpeg republisher instead of a raw RTSP source.
@@ -202,7 +207,7 @@ execSourceCmd slug url transport =
     <> transport
     <> " -i "
     <> url
-    <> " -c copy -f rtsp rtsp://127.0.0.1:8554/"
+    <> " -c copy -rtsp_transport tcp -f rtsp rtsp://127.0.0.1:8554/"
     <> slug
 
 -- | Per-path REST payloads for the enabled cameras: the ingestion
@@ -222,7 +227,8 @@ pathConfigs relayBase cams =
         [ ( cpSlug cam,
             object
               [ "runOnDemand" .= execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam),
-                "runOnDemandRestart" .= True
+                "runOnDemandRestart" .= True,
+                "runOnDemandStartTimeout" .= ("20s" :: Text)
               ]
           ),
           ( livePathName (cpSlug cam),
