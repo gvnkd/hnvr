@@ -175,8 +175,8 @@ renderPathsYaml relayBase cams =
       | not (cpEnabled cam) = mempty
       | otherwise =
           [ "  " <> cpSlug cam <> ":",
-            "    source: 'exec:" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam) <> "'",
-            "    sourceOnDemand: yes",
+            "    runOnDemand: '" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam) <> "'",
+            "    runOnDemandRestart: yes",
             "  " <> livePathName (cpSlug cam) <> ":",
             "    runOnDemand: '"
               <> runOnDemandCmd relayBase (cpSlug cam) (cpLiveAudio cam)
@@ -184,17 +184,18 @@ renderPathsYaml relayBase cams =
             "    runOnDemandRestart: yes"
           ]
 
--- | Ingestion via an ffmpeg republisher instead of a raw RTSP pull.
+-- | Ingestion via an ffmpeg republisher instead of a raw RTSP source.
 --
 -- ICAMRA-OEM cameras emit a malformed SDP after switching to AAC: the
 -- m=audio line keeps static payload type 0 (PCMU) while the rtpmap
 -- overrides it to MPEG4-GENERIC/16000. ffmpeg honors the rtpmap,
--- gortsplib (mediamtx) binds static PT 0 as G.711 — the relay then
--- re-labels AAC payloads as PCMU and every downstream consumer hears
--- noise. Republishing through ffmpeg (-c copy, no transcoding) fixes
--- the announcement: dynamic payload types, correct codec/rate. The
--- command publishes back to the same path (mediamtx exec-source
--- semantics), so session capping and sourceOnDemand keep working.
+-- gortsplib (mediamtx) binds static PT 0 as G.711 — a plain rtsp://
+-- source makes the relay re-label AAC payloads as PCMU, and every
+-- downstream consumer hears noise. mediamtx has no exec: source, but
+-- runOnDemand is the same mechanism: the command publishes to the
+-- path (ffmpeg -c copy, no transcoding) with a correct dynamic-PT
+-- announcement. The recorder ffmpegs are persistent readers, so the
+-- command stays up; single-ingestion-point semantics unchanged.
 execSourceCmd :: Text -> Text -> Text -> Text
 execSourceCmd slug url transport =
   "ffmpeg -loglevel error -rtsp_transport "
@@ -220,8 +221,8 @@ pathConfigs relayBase cams =
     ( \cam ->
         [ ( cpSlug cam,
             object
-              [ "source" .= ("exec:" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam)),
-                "sourceOnDemand" .= True
+              [ "runOnDemand" .= execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam),
+                "runOnDemandRestart" .= True
               ]
           ),
           ( livePathName (cpSlug cam),
