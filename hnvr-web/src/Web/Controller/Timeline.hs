@@ -31,23 +31,26 @@ where
 import Control.Exception (bracket)
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Database.PostgreSQL.Simple as PG
+import Database.PostgreSQL.Simple.Types (PGArray (..))
 import Generated.Types
 import Hnvr.Core.ArchiveBrowser (parseWhen)
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
 import Hnvr.Core.Recording (Span (..))
 import Hnvr.Core.Timeline
 import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (aclCameraIds, aclFilterCameras, ensurePagePerm, ensurePerm, toCameraId)
 import Hnvr.Web.View.Timeline.Index
 import IHP.Controller.Response (respondAndExit)
 import IHP.ControllerPrelude
-import IHP.LoginSupport.Helper.Controller (currentUserOrNothing, ensureIsUser)
+import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 import Network.HTTP.Types (status404)
 import Network.Wai (responseLBS)
 import qualified System.Environment as Env
@@ -77,23 +80,33 @@ instance Controller TimelineController where
   beforeAction = ensureIsUser
 
   action TimelineAction = do
-    cameras <- query @Camera |> orderByAsc #slug |> fetch
+    ensurePagePerm PageArchive
+    cameras <- aclFilterCameras ViewArchive (query @Camera |> orderByAsc #slug) >>= fetch
     (from, to) <- resolveWindow
     let mT = nonemptyParam "t" >>= parseWhen
         cursor = maybe to (min to . max from) mT
-        isAdmin = maybe False (.isAdmin) (currentUserOrNothing @User)
-    render IndexView {cameras, winFrom = from, winTo = to, cursor, isAdmin}
+    render IndexView {cameras, winFrom = from, winTo = to, cursor}
   action TimelineDataAction = do
+    ensurePagePerm PageArchive
     (from, to) <- resolveWindow
-    cameras <- query @Camera |> orderByAsc #slug |> fetch
+    -- The JSON feed leaks as much as the shell: cameras, coverage
+    -- spans and event markers are all scoped to the subject's
+    -- view_archive ACL (design_docs/13 — filter in SQL).
+    mAclIds <- aclCameraIds ViewArchive
+    cameras <- aclFilterCameras ViewArchive (query @Camera |> orderByAsc #slug) >>= fetch
     segments <-
-      query @Segment
-        |> filterWhere (#pendingDeleteAt, Nothing)
-        |> filterWhereGreaterThan (#endTs, from)
-        |> filterWhereLessThanOrEqualTo (#startTs, to)
-        |> orderByAsc #startTs
+      ( case mAclIds of
+          Nothing -> id
+          Just ids -> filterWhereIn (#cameraId, ids)
+      )
+        ( query @Segment
+            |> filterWhere (#pendingDeleteAt, Nothing)
+            |> filterWhereGreaterThan (#endTs, from)
+            |> filterWhereLessThanOrEqualTo (#startTs, to)
+            |> orderByAsc #startTs
+        )
         |> fetch
-    events <- liftIO (fetchWindowEvents from to)
+    events <- liftIO (fetchWindowEvents mAclIds from to)
     let spansByCam = M.fromListWith (++) [(spCameraId s, [s]) | s <- map toSpan segments]
         eventsByCam = M.fromListWith (++) [(cid, [m]) | (cid, m) <- events]
         slugOf c = c.slug
@@ -113,6 +126,7 @@ instance Controller TimelineController where
           ]
     renderJson TimelineResponse {trFrom = from, trTo = to, trCameras = timelines}
   action TimelineThumbAction {cameraId} = do
+    ensurePerm ViewArchive (toCameraId cameraId)
     camera <- fetch cameraId
     case nonemptyParam "t" >>= parseWhen of
       Nothing -> notFound "missing or invalid t"
@@ -160,12 +174,16 @@ resolveWindow = do
 
 -- ---- events query -----------------------------------------------------
 
--- | Events in the window across all cameras as (camera_id, marker)
--- pairs, ascending by ts (bucketMarkers expects ascending). 6-tuple —
--- inside pg-simple's tuple instances, no hand-written FromRow needed.
--- One-shot connection per pitfall #122 pattern.
-fetchWindowEvents :: UTCTime -> UTCTime -> IO [(UUID, TimelineMarker)]
-fetchWindowEvents from to = do
+-- | Events in the window across ACL-visible cameras as (camera_id,
+-- marker) pairs, ascending by ts (bucketMarkers expects ascending).
+-- 6-tuple — inside pg-simple's tuple instances, no hand-written FromRow
+-- needed. One-shot connection per pitfall #122 pattern.
+--
+-- @mAclIds@: 'Nothing' = unrestricted subject (is_admin fallback /
+-- disabled gate / full wildcard), @Just ids@ = the camera whitelist
+-- from 'Hnvr.Web.Authz.aclCameraIds' (@Just []@ returns no rows).
+fetchWindowEvents :: Maybe [UUID] -> UTCTime -> UTCTime -> IO [(UUID, TimelineMarker)]
+fetchWindowEvents mAclIds from to = do
   dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
   rows <-
     bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn ->
@@ -179,8 +197,9 @@ fetchWindowEvents from to = do
         \FROM events e \
         \LEFT JOIN rules r ON r.id = e.rule_id \
         \WHERE e.ts >= ? AND e.ts <= ? \
+        \  AND (?::bool OR e.camera_id = ANY(?)) \
         \ORDER BY e.ts ASC"
-        (from, to)
+        (from, to, isNothing mAclIds, PGArray (fromMaybe [] mAclIds))
   pure
     [ ( camId,
         TimelineMarker

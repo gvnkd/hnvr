@@ -20,16 +20,19 @@ import Data.Time.Clock (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), cameraAllowed)
+import Hnvr.Core.Id (CameraId (..))
+import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.Time (tzTime)
+import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
 data IndexView = IndexView
   { cameras :: [Camera],
     winFrom :: UTCTime,
     winTo :: UTCTime,
-    cursor :: UTCTime,
-    isAdmin :: Bool
+    cursor :: UTCTime
   }
 
 instance View IndexView where
@@ -129,22 +132,26 @@ instance View IndexView where
 
       camIdText camera = tshow (camera |> get #id)
 
-      -- Admin-only: tombstone the SELECTED camera's recordings across
-      -- the CURRENT timeline window. The form carries the first
-      -- camera; timeline.js rewrites action + data-confirm when the
-      -- dropdown changes. Hidden inputs carry UTC ISO; the controller
-      -- redirects back to /Timeline with the window.
+      -- Purge requires the per-camera purge_archive grant
+      -- (design_docs/13; was: is_admin). The form carries the first
+      -- granted camera; timeline.js rewrites action + data-confirm on
+      -- dropdown change and hides the button when the active camera
+      -- isn't in data-purge-cams.
       purgeForm =
-        case (isAdmin, cameras) of
-          (True, firstCam : _) ->
+        case purgeCams of
+          firstCam : _ ->
             [hsx|
               <form method="POST" action={purgeAction firstCam} class="tl-purge-form" data-tl-purge
-                    data-confirm={confirmText firstCam}>
+                    data-confirm={confirmText firstCam} data-purge-cams={purgeCamIds}>
                 <input type="hidden" name="purgeFrom" value={iso winFrom} />
                 <input type="hidden" name="purgeTo" value={iso winTo} />
                 <button type="submit" class="link-button tl-purge-btn" title="Purge recordings in window">purge</button>
               </form>
             |]
-          _ -> mempty
+          [] -> mempty
+      purgeCams = filter (cameraAllowed rs PurgeArchive . camId) cameras
+      purgeCamIds = T.intercalate "," (map camIdText purgeCams)
+      rs = currentRoleSet
+      camId c = case c |> get #id of Id u -> CameraId u
       purgeAction camera = "/PurgeRecording?purgeCameraId=" <> camIdText camera
       confirmText camera = "Purge " <> camera.slug <> " recordings in the current window?"

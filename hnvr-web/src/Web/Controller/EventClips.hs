@@ -19,10 +19,13 @@ import Control.Exception (SomeException, try)
 import Control.Monad (void)
 import Data.List (sort)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..))
 import Hnvr.Core.Clip (clipInitKey, playlistDurations)
+import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Playlist (renderEmptyPlaylist, renderVodPlaylist)
 import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (ensurePerm)
 import Hnvr.Web.RetentionSweeper (purgeClipObjects)
 import Hnvr.Web.View.EventClips.Player
 import IHP.ControllerPrelude
@@ -45,6 +48,7 @@ instance Controller EventClipsController where
 
   action PlayerEventClipAction {clipId} = do
     clip <- fetch clipId
+    ensurePerm ViewArchive (CameraId clip.cameraId)
     -- FK fields are bare UUIDs in this IHP version (same as
     -- Rule.cameraId) — wrap before fetching.
     camera <- fetchOneOrNothing (Id clip.cameraId :: Id Camera)
@@ -53,6 +57,7 @@ instance Controller EventClipsController where
       Just cam -> render ClipPlayerView {clip = clip, camera = cam}
   action PlaylistEventClipAction {playlistClipId} = do
     clip <- fetch playlistClipId
+    ensurePerm ViewArchive (CameraId clip.cameraId)
     m3u8 <- case clip.pendingDeleteAt of
       Just _ -> pure renderEmptyPlaylist
       Nothing -> do
@@ -64,40 +69,39 @@ instance Controller EventClipsController where
     setHeader ("Cache-Control", "private, max-age=0")
     renderPlain (cs m3u8 :: LByteString)
   action PurgeEventClipAction {purgeClipId} = do
-    let isAdmin = maybe False (.isAdmin) (currentUserOrNothing @User)
-    if not isAdmin
-      then setErrorMessage "Clip deletion requires an admin user"
-      else do
-        clip <- fetch purgeClipId
-        -- Tombstone first: the row disappears from every read path
-        -- before the redirect re-renders. Hard DELETE after the S3
-        -- purge verifies empty; the RetentionSweeper resumes stale
-        -- tombstones (90 s grace) if this worker dies mid-purge.
-        _ <-
-          sqlExec
-            "UPDATE event_clips SET pending_delete_at = NOW() \
-            \ WHERE id = ? AND pending_delete_at IS NULL"
-            (Only (case purgeClipId of Id u -> u))
-        let mc = ?modelContext
-            prefix = clip.objectPrefix
-        _ <-
-          liftIO $ Async.async $ do
-            r <- try $ do
-              mS3 <- S3.readS3Config
-              forM_ mS3 $ \cfg -> do
-                failures <- purgeClipObjects cfg prefix
-                when (failures == 0)
-                  $ let ?modelContext = mc
-                     in void
-                          $ sqlExec
-                            "DELETE FROM event_clips WHERE id = ? AND pending_delete_at IS NOT NULL"
-                            (Only (case purgeClipId of Id u -> u))
-            case r of
-              Right _ -> pure ()
-              Left (_ :: SomeException) ->
-                -- Row stays tombstoned; sweeper converges.
-                pure ()
-        setSuccessMessage "Clip deleted"
+    clip <- fetch purgeClipId
+    -- Roles & ACL (design_docs/13): clips are recordings — destructive
+    -- purge needs the per-camera purge_archive grant (was: is_admin).
+    ensurePerm PurgeArchive (CameraId clip.cameraId)
+    -- Tombstone first: the row disappears from every read path
+    -- before the redirect re-renders. Hard DELETE after the S3
+    -- purge verifies empty; the RetentionSweeper resumes stale
+    -- tombstones (90 s grace) if this worker dies mid-purge.
+    _ <-
+      sqlExec
+        "UPDATE event_clips SET pending_delete_at = NOW() \
+        \ WHERE id = ? AND pending_delete_at IS NULL"
+        (Only (case purgeClipId of Id u -> u))
+    let mc = ?modelContext
+        prefix = clip.objectPrefix
+    _ <-
+      liftIO $ Async.async $ do
+        r <- try $ do
+          mS3 <- S3.readS3Config
+          forM_ mS3 $ \cfg -> do
+            failures <- purgeClipObjects cfg prefix
+            when (failures == 0)
+              $ let ?modelContext = mc
+                 in void
+                      $ sqlExec
+                        "DELETE FROM event_clips WHERE id = ? AND pending_delete_at IS NOT NULL"
+                        (Only (case purgeClipId of Id u -> u))
+        case r of
+          Right _ -> pure ()
+          Left (_ :: SomeException) ->
+            -- Row stays tombstoned; sweeper converges.
+            pure ()
+    setSuccessMessage "Clip deleted"
     redirectToPath "/Events"
 
 -- | Presign init.mp4 + every fragment under the clip's prefix and

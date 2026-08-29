@@ -6,6 +6,9 @@
 module Hnvr.Web.View.Cameras.Index (IndexView (..)) where
 
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), cameraAllowed, cameraAllowedAnywhere)
+import Hnvr.Core.Id (CameraId (..))
+import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
@@ -25,20 +28,28 @@ instance View IndexView where
           <div class="subtitle">{nCams} configured · click a row for details</div>
         </div>
         <div class="actions">
-          <a class="btn btn-primary" href="/NewCamera">+ New Camera</a>
+          {newBtn}
         </div>
       </div>
       {renderCameras cameras}
     |]
     where
       nCams = tshow (length cameras) :: Text
+      -- Roles & ACL (design_docs/13): creation needs any edit_config
+      -- grant; per-row toggle/edit need it on that camera.
+      rs = currentRoleSet
+      canCreate = cameraAllowedAnywhere rs EditConfig
+      newBtn =
+        if canCreate
+          then [hsx|<a class="btn btn-primary" href="/NewCamera">+ New Camera</a>|]
+          else mempty
 
       renderCameras [] =
         [hsx|
           <div class="empty">
             <span class="empty-icon">⌖</span>
             No cameras yet.
-            <div class="mt-3"><a class="btn btn-primary" href="/NewCamera">+ New Camera</a></div>
+            <div class="mt-3">{newBtn}</div>
           </div>
         |]
       renderCameras cs =
@@ -75,11 +86,9 @@ instance View IndexView where
             <td class="mono">{fromMaybe "—" camera.assignedHost}</td>
             <td>{syncBadge camera}</td>
             <td class="text-right whitespace-nowrap">
-              <form method="POST" action={toggleUrl} style="display:contents">
-                <button type="submit" class={toggleClass}>{toggleLabel}</button>
-              </form>
+              {toggleBtn camera}
               <a href={showUrl} class="btn btn-ghost btn-sm">Show</a>
-              <a href={editUrl} class="btn btn-ghost btn-sm">Edit</a>
+              {editBtn camera}
             </td>
           </tr>
         |]
@@ -88,6 +97,21 @@ instance View IndexView where
           showUrl = "/ShowCamera?cameraId=" <> cid
           editUrl = "/EditCamera?cameraId=" <> cid
           toggleUrl = "/ToggleCameraEnabled?cameraId=" <> cid
+          canEdit = cameraAllowed rs EditConfig (camIdOf camera)
+          camIdOf c = case c |> get #id of Id u -> CameraId u
+          toggleBtn camera' =
+            if not canEdit
+              then mempty
+              else
+                [hsx|
+                  <form method="POST" action={toggleUrl} style="display:contents">
+                    <button type="submit" class={toggleClass}>{toggleLabel}</button>
+                  </form>
+                |]
+          editBtn camera' =
+            if canEdit
+              then [hsx|<a href={editUrl} class="btn btn-ghost btn-sm">Edit</a>|]
+              else mempty
           enabledBadge =
             if camera.enabled
               then [hsx|<span class="badge badge-ok">ON</span>|]

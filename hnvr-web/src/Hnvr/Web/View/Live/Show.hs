@@ -15,11 +15,15 @@ module Hnvr.Web.View.Live.Show (ShowView (..)) where
 
 import Data.Time.Clock (UTCTime)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), cameraAllowed, cameraAllowedAnywhere)
 import Hnvr.Core.CameraStatus (CameraStatus (..))
+import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.PtzPanel (ptzPanel)
+import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
 data ShowView = ShowView
@@ -44,8 +48,8 @@ instance View ShowView where
         </div>
         <div class="actions">
           {ptzToggle}
-          <a class="btn btn-ghost" href={archiveUrl}>Archive</a>
-          <a class="btn btn-ghost" href="/Cameras">Cameras</a>
+          {archiveBtn}
+          {camerasBtn}
         </div>
       </div>
 
@@ -71,13 +75,25 @@ instance View ShowView where
     |]
     where
       archiveUrl = "/PlayerArchive?cameraId=" <> tshow (camera |> get #id)
+      archiveBtn =
+        if cameraAllowed rs ViewArchive camId
+          then [hsx|<a class="btn btn-ghost" href={archiveUrl}>Archive</a>|]
+          else mempty
+      camerasBtn =
+        if cameraAllowedAnywhere rs ViewConfig
+          then [hsx|<a class="btn btn-ghost" href="/Cameras">Cameras</a>|]
+          else mempty
       camStatus = cameraStatusFor hosts now camera
-      -- PTZ controls are for operators only: /ShowLive is
-      -- anonymous-readable, so the drawer, its toggle and the ptz.js
-      -- bootstrap all stay unrendered without a session (the POST
-      -- endpoints are ensureIsUser-gated regardless).
-      showPtz = camera.ptzEnabled && loggedIn
+      -- PTZ controls need a session AND a ptz_move/ptz_preset grant on
+      -- the camera (design_docs/13): /ShowLive stays anonymous-readable
+      -- under the guest role, so the drawer, its toggle and the ptz.js
+      -- bootstrap all stay unrendered without both.
+      showPtz = camera.ptzEnabled && loggedIn && ptzGranted
+      ptzGranted =
+        cameraAllowed rs PtzMove camId || cameraAllowed rs PtzPresetOp camId
       loggedIn = isJust (currentUserOrNothing :: Maybe User)
+      rs = currentRoleSet
+      camId = case camera |> get #id of Id u -> CameraId u
       -- Initial header LED from the server-known worker state; the WHEP
       -- client takes over once the page's WebRTC session negotiates.
       hdrLedClass = case camStatus of

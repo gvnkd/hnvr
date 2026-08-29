@@ -29,8 +29,10 @@ import qualified Data.Text as Text
 import Data.Time.Clock (getCurrentTime)
 import Data.UUID (UUID)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..))
 import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (aclFilterCameras, ensurePerm, ensurePermAnywhere, toCameraId)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (publishAssignTo, republishAssignAlways)
 import Hnvr.Web.OnvifSync (FormOptions, checkCameraDrift, fetchFormOptions, probePtz, pushCameraConfig, skipReasonFor, targetForCamera)
@@ -111,16 +113,18 @@ instance AutoRoute CamerasController
 instance Controller CamerasController where
   beforeAction = ensureIsUser
   action CamerasAction = do
-    cameras <- query @Camera |> orderByDesc #createdAt |> fetch
+    cameras <- aclFilterCameras ViewConfig (query @Camera |> orderByDesc #createdAt) >>= fetch
     drifts <- query @CameraDrift |> fetch
     render IndexView {..}
   action ShowCameraAction {cameraId} = do
+    ensurePerm ViewConfig (toCameraId cameraId)
     camera <- fetch cameraId
     drifts <- query @CameraDrift |> filterWhere (#cameraId, camUuid camera) |> fetch
     hosts <- query @Host |> fetch
     now <- liftIO getCurrentTime
     render ShowView {..}
   action NewCameraAction = do
+    ensurePermAnywhere EditConfig
     -- newRecord defaults analysisFps to 0, which violates the form's
     -- min="1" and makes HTML5 validation silently block every submit.
     -- Default to the documented 5 fps (design 03 §2b). Same story for
@@ -129,10 +133,12 @@ instance Controller CamerasController where
     let camera = newRecord @Camera |> set #analysisFps 5 |> set #snapshotIntervalSec 60
     render NewView {..}
   action EditCameraAction {cameraId} = do
+    ensurePerm EditConfig (toCameraId cameraId)
     camera <- fetch cameraId
     formOptions <- liftIO (fetchOpts camera)
     render EditView {..}
   action CreateCameraAction = do
+    ensurePermAnywhere EditConfig
     let camera0 =
           newRecord @Camera
             |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours", "snapshotIntervalSec"]
@@ -155,6 +161,7 @@ instance Controller CamerasController where
     where
       checkboxOn name = paramOrNothing @Text name == Just "on"
   action UpdateCameraAction {cameraId} = do
+    ensurePerm EditConfig (toCameraId cameraId)
     camera <- fetch cameraId
     let camera' =
           camera
@@ -203,6 +210,7 @@ instance Controller CamerasController where
     where
       checkboxOn name = paramOrNothing @Text name == Just "on"
   action DeleteCameraAction {cameraId} = do
+    ensurePerm DeleteCamera (toCameraId cameraId)
     camera <- fetch cameraId
     -- Stop the worker on the owning host before the row disappears.
     mBus <- liftIO (readIORef busRegistry)
@@ -225,6 +233,7 @@ instance Controller CamerasController where
   -- @apCamera = Nothing@ and the owning host stops the worker
   -- pair (no more RTSP requests to an offline camera).
   action ToggleCameraEnabledAction {cameraId} = do
+    ensurePerm EditConfig (toCameraId cameraId)
     camera <- fetch cameraId
     now <- liftIO getCurrentTime
     camera' <-
@@ -245,6 +254,7 @@ instance Controller CamerasController where
   -- a flash error; sub-probe failure is logged but does not block main-probe
   -- persistence.
   action ProbeCameraAction {cameraId} = do
+    ensurePerm EditConfig (toCameraId cameraId)
     camera <- fetch cameraId
     mainResult <- liftIO (probe (camera |> get #rtspUrl))
     case mainResult of
@@ -279,6 +289,7 @@ instance Controller CamerasController where
   -- answers but GetStatus returns a nil position (fixed camera whose
   -- firmware accepts PTZ ops as no-ops — e.g. the Hik-OEM turrets).
   action ProbePtzCameraAction {cameraId} = do
+    ensurePerm EditConfig (toCameraId cameraId)
     camera <- fetch cameraId
     eTarget <- liftIO (targetForCamera camera)
     case eTarget of
@@ -315,6 +326,7 @@ instance Controller CamerasController where
   -- override the admin's choice. Empty host param clears the
   -- assignment and the manual pin (back to auto mode).
   action AssignCameraAction {cameraId} = do
+    ensurePerm EditConfig (toCameraId cameraId)
     camera <- fetch cameraId
     let hostParam = paramOrDefault ("" :: Text) "assigned_host"
         cleared = hostParam == ""

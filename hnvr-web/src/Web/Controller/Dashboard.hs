@@ -13,6 +13,8 @@ where
 
 import Data.Time.Clock (getCurrentTime)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
+import Hnvr.Web.Authz (aclFilterCameras, ensurePagePerm)
 import Hnvr.Web.View.Dashboard.Index
 import IHP.ControllerPrelude
 
@@ -24,14 +26,16 @@ instance AutoRoute DashboardController
 
 instance Controller DashboardController where
   action DashboardAction = do
+    -- Anonymous-readable: the guest RoleSet decides what renders
+    -- (design_docs/13 §"Anonymous access").
+    ensurePagePerm PageDashboard
     -- Disabled cameras are excluded entirely — a camera the operator
     -- switched off (offline, decommissioned) must not occupy grid
-    -- space as a permanent "no signal" card.
+    -- space as a permanent "no signal" card. The ACL filter (view_live)
+    -- additionally drops cameras the subject may not see.
     cameras <-
-      query @Camera
-        |> filterWhere (#enabled, True)
-        |> orderByAsc #slug
-        |> fetch
+      aclFilterCameras ViewLive (query @Camera |> filterWhere (#enabled, True) |> orderByAsc #slug)
+        >>= fetch
     hosts <-
       query @Host
         |> orderByAsc #id

@@ -25,10 +25,12 @@ import Data.IORef (readIORef)
 import Data.Text (Text)
 import Data.UUID (UUID)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..))
 import Hnvr.Core.Ptz
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (commandPtz)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (ensurePerm, toCameraId)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.PtzStatusCache (latestPtzStatus)
 import IHP.ControllerPrelude
@@ -56,6 +58,10 @@ instance Controller PtzController where
           Just bus -> case decodeCommand of
             Left err -> renderJson (errJson err)
             Right cmd -> do
+              -- Roles & ACL (design_docs/13): PTZ is split into
+              -- ptz_move (continuous/absolute/stop) and ptz_preset
+              -- (preset recall, home, autotrack-class ops).
+              ensurePerm (commandAction cmd) (toCameraId ptzCameraId)
               let msg =
                     PtzCommandMsg
                       { pcmCommand = cmd,
@@ -75,6 +81,8 @@ instance Controller PtzController where
                   liftIO (Bus.publishJson bus subject msg)
                   renderJson (object ["ok" .= True])
   action PtzStatusCameraAction {ptzCameraId} = do
+    -- Camera telemetry for the live UI: the base read grant covers it.
+    ensurePerm ViewLive (toCameraId ptzCameraId)
     camera <- fetch ptzCameraId
     mStatus <- liftIO (latestPtzStatus camera.slug)
     case mStatus of
@@ -89,6 +97,18 @@ needsReply :: PtzCommand -> Bool
 needsReply CmdSetPreset {} = True
 needsReply CmdGetPresets = True
 needsReply _ = False
+
+-- | ACL class of a command (design_docs/13: PTZ is split
+-- ptz_move / ptz_preset; preset recall, set-home and autotrack toggling
+-- are preset-class).
+commandAction :: PtzCommand -> CameraAction
+commandAction cmd = case cmd of
+  CmdGotoPreset {} -> PtzPresetOp
+  CmdSetPreset {} -> PtzPresetOp
+  CmdRemovePreset {} -> PtzPresetOp
+  CmdGoHome -> PtzPresetOp
+  CmdGetPresets -> PtzPresetOp
+  _ -> PtzMove
 
 uuidText :: UUID -> Text
 uuidText = cs . show

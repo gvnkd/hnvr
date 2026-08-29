@@ -9,8 +9,10 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..), cameraAllowedAnywhere, pageAllowed)
 import Hnvr.Web (version)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (currentRoleSet)
 import IHP.ViewPrelude
 import Network.Wai (rawPathInfo)
 
@@ -43,16 +45,16 @@ renderLayout inner =
         </a>
         <div class="brand-version"><span class="badge badge-mute">v{version}</span></div>
         <div class="nav-section">Monitor</div>
-        {navItem "/" "▦" "Dashboard" (currentPath == "/" || currentPath == "/Dashboard")}
-        {navItem "/Events" "◈" "Events" (isPrefix "/Events")}
-        {navItem "/Timeline" "◷" "Archive" (isPrefix "/Timeline" || isPrefix "/PlayerArchive")}
-        <div class="nav-section">Configure</div>
-        {navItem "/Cameras" "◫" "Cameras" (isPrefix "/Cameras" || isPrefix "/NewCamera" || isPrefix "/EditCamera" || isPrefix "/ShowCamera")}
-        {navItem "/Rules" "⌖" "Rules" (isPrefix "/Rules" || isPrefix "/NewRule" || isPrefix "/EditRule")}
-        <div class="nav-section">System</div>
-        {navItem "/Stats" "▥" "Stats" (isPrefix "/Stats")}
-        {navItem "/Hosts" "⬡" "Hosts" (isPrefix "/Hosts")}
-        {navItem "/AuditLog" "≣" "Audit" (isPrefix "/AuditLog")}
+        {navItemIf (allowPage PageDashboard) "/" "▦" "Dashboard" (currentPath == "/" || currentPath == "/Dashboard")}
+        {navItemIf (allowPage PageEvents) "/Events" "◈" "Events" (isPrefix "/Events")}
+        {navItemIf (allowPage PageArchive) "/Timeline" "◷" "Archive" (isPrefix "/Timeline" || isPrefix "/PlayerArchive")}
+        {navSection "Configure" [allowCam ViewConfig, allowPage PageRules]}
+        {navItemIf (allowCam ViewConfig) "/Cameras" "◫" "Cameras" (isPrefix "/Cameras" || isPrefix "/NewCamera" || isPrefix "/EditCamera" || isPrefix "/ShowCamera")}
+        {navItemIf (allowPage PageRules) "/Rules" "⌖" "Rules" (isPrefix "/Rules" || isPrefix "/NewRule" || isPrefix "/EditRule")}
+        {navSection "System" [allowPage PageSettings, allowPage PageHosts]}
+        {navItemIf (allowPage PageSettings) "/Stats" "▥" "Stats" (isPrefix "/Stats")}
+        {navItemIf (allowPage PageHosts) "/Hosts" "⬡" "Hosts" (isPrefix "/Hosts")}
+        {navItemIf (allowPage PageSettings) "/AuditLog" "≣" "Audit" (isPrefix "/AuditLog")}
         <span class="spacer"></span>
         <div class="sidenav-footer">
           {themeMenu}
@@ -83,6 +85,19 @@ renderLayout inner =
     -- app.js falls back to the browser's zone. Consumed by the topbar
     -- clock and the [data-utc-ts] timestamp rewriting.
     userTzAttr = fromMaybe "" ((currentUserOrNothing :: Maybe User) >>= (.timezone))
+
+    -- Roles & ACL (design_docs/13): nav items render only when the
+    -- subject's RoleSet grants the page (hide, don't 403 — controllers
+    -- still enforce).
+    rs = currentRoleSet
+    allowPage = pageAllowed rs
+    allowCam = cameraAllowedAnywhere rs
+
+    navItemIf granted href glyph label active =
+      if granted then navItem href glyph label active else mempty
+
+    navSection label grants =
+      if or grants then [hsx|<div class="nav-section">{label}</div>|] else mempty
 
     navItem href glyph label active =
       [hsx|

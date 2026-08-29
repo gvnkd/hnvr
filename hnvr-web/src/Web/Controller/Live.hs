@@ -14,6 +14,8 @@ where
 
 import Data.Time.Clock (getCurrentTime)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
+import Hnvr.Web.Authz (ensurePagePerm, ensurePerm, toCameraId)
 import Hnvr.Web.View.Live.Show
 import IHP.ControllerPrelude
 import IHP.ModelSupport (Id' (Id))
@@ -26,6 +28,10 @@ instance AutoRoute LiveController
 
 instance Controller LiveController where
   action ShowLiveAction {cameraId} = do
+    -- Anonymous-readable under the guest role (design_docs/13
+    -- §"Anonymous access"): page grant + per-camera view_live.
+    ensurePagePerm PageLive
+    ensurePerm ViewLive (toCameraId cameraId)
     camera <- fetch cameraId
     hosts <- query @Host |> fetch
     -- PTZ panel preset dropdown (Phase 5); empty when PTZ is off.

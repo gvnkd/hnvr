@@ -43,6 +43,7 @@ import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web (version)
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (authzMiddleware, startAuthzCacheInvalidator)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
 import Hnvr.Web.DebugStream (debugStreamMiddleware)
@@ -58,7 +59,6 @@ import Hnvr.Web.PtzStatusCache (startPtzStatusCache)
 import Hnvr.Web.RetentionSweeper (startRetentionSweeper)
 import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
 import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
-import Hnvr.Web.WhepProxy (whepMiddleware)
 import IHP.AuthSupport.Authentication (hashPassword)
 import IHP.FrameworkConfig
 import IHP.FrameworkConfig.Types (AuthMiddleware (..), FrameworkConfig)
@@ -92,12 +92,20 @@ config = do
   -- `option`s land before the defaults. Calling `option $ CustomMiddleware`
   -- twice silently drops the second one. Compose all custom WAI
   -- middlewares here. Order: debug-frame runs first (most-specific path
-  -- prefix), falls through to whep, /status, /healthz, then IHP.
+  -- prefix), falls through to /status, /healthz, then IHP. The WHEP
+  -- proxy is NOT here — it moved into the AuthMiddleware chain
+  -- ('Hnvr.Web.Authz.authzMiddleware') because CustomMiddleware runs
+  -- before session/auth and the stream endpoint is part of the ACL
+  -- boundary (design_docs/13, M2).
   statusMw <- liftIO mkStatusMiddleware
-  option $ CustomMiddleware (debugStreamMiddleware . whepMiddleware . statusMw . healthzMiddleware)
-  option $ AuthMiddleware (authMiddleware @User)
+  option $ CustomMiddleware (debugStreamMiddleware . statusMw . healthzMiddleware)
+  option $ AuthMiddleware (authMiddleware @User . authzMiddleware)
   addInitializer connectNatsAndStartEventWriter
   addInitializer seedAdminUser
+  -- Roles & ACL cache invalidation (LISTEN roles_events). Gated by the
+  -- same switch as enforcement — when authz is disabled every subject
+  -- resolves to fullRoleSet and the cache is never consulted.
+  liftIO (gated "HNVR_DISABLE_AUTHZ" startAuthzCacheInvalidator)
   -- Metrics store + Prometheus endpoint + GPU poller. Runs outside the
   -- IHP middleware chain (own warp on HNVR_METRICS_PORT) so the node
   -- binary can share the same code path. Best-effort: a port clash

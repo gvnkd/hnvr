@@ -5,10 +5,14 @@
 
 module Hnvr.Web.View.Dashboard.Index (IndexView (..)) where
 
+import qualified Data.List as List
 import Data.Time.Clock (UTCTime)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..), cameraAllowed, pageAllowed)
 import Hnvr.Core.CameraStatus (CameraStatus (..))
+import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.CameraStatus (cameraStatusFor, hostDisplayLive)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.PtzPanel (ptzPanel)
@@ -67,14 +71,23 @@ instance View IndexView where
     where
       nCams = tshow (length cameras) :: Text
       nHosts = tshow (length hosts) :: Text
-      -- PTZ drawer templates only for logged-in operators: the
-      -- dashboard is anonymous-readable and the PTZ POST endpoints
-      -- require a session, so anonymous visitors get no PTZ markup
-      -- at all (app.js also keeps the overlay toggle hidden when no
+      -- PTZ drawer templates only for logged-in operators with a PTZ
+      -- grant on the camera (design_docs/13): the dashboard is
+      -- anonymous-readable and the PTZ POST endpoints are role-gated,
+      -- so visitors without ptz_move/ptz_preset get no PTZ markup at
+      -- all (app.js also keeps the overlay toggle hidden when no
       -- template exists for the opened camera).
       ptzCams
-        | isJust (currentUserOrNothing :: Maybe User) = filter (.ptzEnabled) cameras
+        | isJust (currentUserOrNothing :: Maybe User) =
+            filter ptzAllowed cameras
         | otherwise = []
+      ptzAllowed cam =
+        cam.ptzEnabled
+          && ( cameraAllowed rs PtzMove (camId cam)
+                 || cameraAllowed rs PtzPresetOp (camId cam)
+             )
+      rs = currentRoleSet
+      camId c = case c |> get #id of Id u -> CameraId u
 
       -- Per-PTZ-camera panel templates; app.js clones the matching
       -- template into the overlay's .live-overlay-ptz slot on open.
@@ -138,6 +151,19 @@ instance View IndexView where
           archiveUrl = "/PlayerArchive?cameraId=" <> cid
           debugUrl = "/DebugCamera?cameraId=" <> cid
           hostLabel = fromMaybe "unassigned" cam.assignedHost
+          -- Card links follow the same grants as their targets
+          -- (design_docs/13 — hide, don't 403).
+          canConfig = cameraAllowed rs ViewConfig (camId cam)
+          canArchive = cameraAllowed rs ViewArchive (camId cam)
+          canDebug = pageAllowed rs PageSettings
+          cardLinks = mconcat (List.intersperse linkSep linkItems)
+          linkSep = [hsx|<span class="faint">·</span>|]
+          linkItems =
+            concat
+              [ [[hsx|<a href={showUrl}>config</a>|] | canConfig],
+                [[hsx|<a href={archiveUrl}>archive</a>|] | canArchive],
+                [[hsx|<a href={debugUrl}>debug</a>|] | canDebug]
+              ]
           -- REC only while the assigned host reports this camera's
           -- worker as Running; anything else gets an explicit status
           -- badge (was: unconditional static REC, even for dead
@@ -173,13 +199,7 @@ instance View IndexView where
                 </div>
                 <div class="cam-body">
                   <span class="slug">{cam.slug}</span>
-                  <span class="links">
-                    <a href={showUrl}>config</a>
-                    <span class="faint">·</span>
-                    <a href={archiveUrl}>archive</a>
-                    <span class="faint">·</span>
-                    <a href={debugUrl}>debug</a>
-                  </span>
+                  <span class="links">{cardLinks}</span>
                 </div>
               </div>
             |]

@@ -39,13 +39,15 @@ import Data.Time.Format.ISO8601 (iso8601Show)
 import Data.UUID (UUID)
 import Generated.Types
 import Hnvr.Core.ArchiveBrowser (parseWhen)
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
 import Hnvr.Core.Playlist (renderEmptyPlaylist, renderVodPlaylist)
 import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (ensurePagePerm, ensurePerm, toCameraId)
 import Hnvr.Web.PendingPurge (forkCameraPurge)
 import Hnvr.Web.View.Archive.Player
 import IHP.ControllerPrelude
-import IHP.LoginSupport.Helper.Controller (currentUserOrNothing, ensureIsUser)
+import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 
 data ArchiveController
   = PlayerArchiveAction {cameraId :: !(Id Camera)}
@@ -65,6 +67,8 @@ instance Controller ArchiveController where
   beforeAction = ensureIsUser
 
   action PlayerArchiveAction {cameraId} = do
+    ensurePagePerm PageArchive
+    ensurePerm ViewArchive (toCameraId cameraId)
     camera <- fetch cameraId
     let mFrom = nonemptyParam "from"
         mTo = nonemptyParam "to"
@@ -76,6 +80,7 @@ instance Controller ArchiveController where
           if off > 0 then Just off else Nothing
     render PlayerView {..}
   action PlaylistArchiveAction {cameraId} = do
+    ensurePerm ViewArchive (toCameraId cameraId)
     camera <- fetch cameraId
     let cameraUuid = case cameraId of Id u -> u :: UUID
         mFrom = nonemptyParam "from"
@@ -104,37 +109,36 @@ instance Controller ArchiveController where
         setHeader ("Cache-Control", "private, max-age=0")
         renderPlain (cs m3u8 :: LByteString)
   action PurgeRecordingAction {purgeCameraId} = do
-    let isAdmin = maybe False (.isAdmin) (currentUserOrNothing @User)
-        mFrom = nonemptyParam "purgeFrom" >>= parseWhen
+    -- Roles & ACL (design_docs/13): destructive purge needs the
+    -- per-camera purge_archive grant (was: is_admin boolean).
+    ensurePerm PurgeArchive (toCameraId purgeCameraId)
+    let mFrom = nonemptyParam "purgeFrom" >>= parseWhen
         mTo = nonemptyParam "purgeTo" >>= parseWhen
         -- Back to the timeline at the purged window.
         returnTo = case (mFrom, mTo) of
           (Just f, Just t) -> "/Timeline?from=" <> iso f <> "&to=" <> iso t
           _ -> "/Timeline"
-    if not isAdmin
-      then setErrorMessage "Recording deletion requires an admin user"
-      else do
-        case (mFrom, mTo) of
-          (Just from, Just to) -> do
-            _camera <- fetch purgeCameraId
-            let cameraUuid = case purgeCameraId of Id u -> u :: UUID
-            -- TOMBSTONE, don't delete (migration 0006): stamping
-            -- pending_delete_at synchronously hides the recording from
-            -- every read path before the redirect re-renders. The hard
-            -- DELETE happens in Hnvr.Web.PendingPurge only AFTER the S3
-            -- purge is verified empty; if the leader dies mid-purge, the
-            -- tombstoned rows survive and the 60s sweeper resumes the
-            -- batch. One UPDATE = one round-trip.
-            _ <-
-              sqlExec
-                "UPDATE segments SET pending_delete_at = NOW() \
-                \ WHERE camera_id = ? AND end_ts > ? AND start_ts <= ? \
-                \   AND pending_delete_at IS NULL"
-                (cameraUuid, from, to)
-            liftIO (forkCameraPurge cameraUuid)
-            setSuccessMessage
-              "Recording hidden — DB rows are removed once S3 cleanup is verified"
-          _ -> setErrorMessage "Purge requires valid from/to timestamps"
+    case (mFrom, mTo) of
+      (Just from, Just to) -> do
+        _camera <- fetch purgeCameraId
+        let cameraUuid = case purgeCameraId of Id u -> u :: UUID
+        -- TOMBSTONE, don't delete (migration 0006): stamping
+        -- pending_delete_at synchronously hides the recording from
+        -- every read path before the redirect re-renders. The hard
+        -- DELETE happens in Hnvr.Web.PendingPurge only AFTER the S3
+        -- purge is verified empty; if the leader dies mid-purge, the
+        -- tombstoned rows survive and the 60s sweeper resumes the
+        -- batch. One UPDATE = one round-trip.
+        _ <-
+          sqlExec
+            "UPDATE segments SET pending_delete_at = NOW() \
+            \ WHERE camera_id = ? AND end_ts > ? AND start_ts <= ? \
+            \   AND pending_delete_at IS NULL"
+            (cameraUuid, from, to)
+        liftIO (forkCameraPurge cameraUuid)
+        setSuccessMessage
+          "Recording hidden — DB rows are removed once S3 cleanup is verified"
+      _ -> setErrorMessage "Purge requires valid from/to timestamps"
     redirectToPath returnTo
     where
       iso = T.pack . iso8601Show

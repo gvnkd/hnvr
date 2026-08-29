@@ -29,11 +29,14 @@ import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.UUID (UUID)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..))
+import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Ptz
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (commandPtz)
 import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (ensurePerm, toCameraId)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (republishAssign)
 import Hnvr.Web.View.PtzPresets.Index
@@ -55,10 +58,12 @@ instance Controller PtzPresetsController where
   beforeAction = ensureIsUser
 
   action PtzPresetsAction {ptzCameraId} = do
+    ensurePerm PtzPresetOp (toCameraId ptzCameraId)
     camera <- fetch ptzCameraId
     presets <- query @PtzPreset |> filterWhere (#cameraId, camUuid camera) |> orderBy #name |> fetch
     render IndexView {..}
   action CreatePtzPresetAction {ptzCameraId} = do
+    ensurePerm PtzPresetOp (toCameraId ptzCameraId)
     camera <- fetch ptzCameraId
     let name = param @Text "preset_name"
     mBus <- liftIO (readIORef busRegistry)
@@ -95,6 +100,7 @@ instance Controller PtzPresetsController where
             redirectTo PtzPresetsAction {ptzCameraId}
   action GotoPtzPresetAction {ptzPresetId} = do
     preset <- fetch ptzPresetId
+    ensurePerm PtzPresetOp (CameraId preset.cameraId)
     camera <- fetch (presetCameraId preset)
     case preset.onvifToken of
       Nothing -> setErrorMessage "Preset has no ONVIF token"
@@ -106,6 +112,7 @@ instance Controller PtzPresetsController where
     redirectTo PtzPresetsAction {ptzCameraId = presetCameraId preset}
   action PurgePtzPresetAction {ptzPresetId} = do
     preset <- fetch ptzPresetId
+    ensurePerm PtzPresetOp (CameraId preset.cameraId)
     camera <- fetch (presetCameraId preset)
     forM_ preset.onvifToken $ \token -> do
       mWarn <- publishCmd camera (CmdRemovePreset (PresetToken token)) (uuidText <$> currentUserUuid)
@@ -119,6 +126,7 @@ instance Controller PtzPresetsController where
         redirectTo PtzPresetsAction {ptzCameraId = presetCameraId preset}
   action HomePtzPresetAction {ptzPresetId} = do
     preset <- fetch ptzPresetId
+    ensurePerm PtzPresetOp (CameraId preset.cameraId)
     camera <- fetch (presetCameraId preset)
     siblings <- query @PtzPreset |> filterWhere (#cameraId, preset.cameraId) |> fetch
     forM_ siblings $ \p ->

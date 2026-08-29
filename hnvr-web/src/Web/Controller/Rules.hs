@@ -38,8 +38,11 @@ import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (getCurrentTime)
 import Data.UUID (UUID)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
+import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (aclCameraIds, aclFilterCameras, ensurePagePerm, ensurePerm, toCameraId)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (cameraIdOf, republishAssign)
 import Hnvr.Web.View.Rules.Edit
@@ -65,14 +68,26 @@ instance Controller RulesController where
   beforeAction = ensureIsUser
 
   action RulesAction = do
-    rules <- query @Rule |> orderByDesc #createdAt |> fetch
-    cameras <- query @Camera |> orderBy #slug |> fetch
+    ensurePagePerm PageRules
+    -- Rules name their camera — listing is scoped to the subject's
+    -- manage_events ACL (rules ARE event policy; design_docs/13).
+    mAclIds <- aclCameraIds ManageEvents
+    rules <-
+      ( case mAclIds of
+          Nothing -> id
+          Just ids -> filterWhereIn (#cameraId, ids)
+      )
+        (query @Rule |> orderByDesc #createdAt)
+        |> fetch
+    cameras <- aclFilterCameras ManageEvents (query @Camera |> orderBy #slug) >>= fetch
     render IndexView {..}
   action NewRuleAction {ruleCameraId} = do
+    ensurePerm ManageEvents (toCameraId ruleCameraId)
     camera <- fetch ruleCameraId
     render NewView {..}
   action CreateRuleAction = do
     camera <- fetch (param @(Id Camera) "camera_id")
+    ensurePerm ManageEvents (toCameraId (camera |> get #id))
     let rule = buildRuleFromParams (newRecord @Rule |> set #cameraId (camUuidOf camera))
     rule' <- rule |> createRecord
     audit currentUserUuid "rule.create" "rule" (Just (ruleUuid rule')) (Just (object ["name" .= rule'.name, "camera_slug" .= camera.slug]))
@@ -81,10 +96,12 @@ instance Controller RulesController where
     redirectTo EditRuleAction {ruleId = rule' |> get #id}
   action EditRuleAction {ruleId} = do
     rule <- fetch ruleId
+    ensurePerm ManageEvents (CameraId rule.cameraId)
     camera <- fetch (Id rule.cameraId :: Id Camera)
     render EditView {..}
   action UpdateRuleAction {ruleId} = do
     rule <- fetch ruleId
+    ensurePerm ManageEvents (CameraId rule.cameraId)
     now <- liftIO getCurrentTime
     rule' <- (buildRuleFromParams rule |> set #updatedAt now) |> updateRecord
     audit currentUserUuid "rule.update" "rule" (Just (ruleUuid rule')) (Just (object ["name" .= rule'.name]))
@@ -94,6 +111,7 @@ instance Controller RulesController where
     redirectTo EditRuleAction {ruleId = rule' |> get #id}
   action PurgeRuleAction {ruleId} = do
     rule <- fetch ruleId
+    ensurePerm ManageEvents (CameraId rule.cameraId)
     camera <- fetch (Id rule.cameraId :: Id Camera)
     deleteRecord rule
     audit currentUserUuid "rule.delete" "rule" (Just (ruleUuid rule)) (Just (object ["name" .= rule.name]))

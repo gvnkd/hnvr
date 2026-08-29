@@ -15,8 +15,10 @@ module Web.Controller.Debug
 where
 
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
 import Hnvr.Node.CaptureSupervisor (analysisTVar, latestAnalysis)
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (ensurePagePerm, ensurePerm, toCameraId)
 import Hnvr.Web.CommandTypes (cameraIdOf)
 import Hnvr.Web.DebugStream (debugStreamResponse)
 import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
@@ -36,6 +38,9 @@ instance Controller DebugController where
   beforeAction = ensureIsUser
 
   action DebugCameraAction {cameraId} = do
+    -- Dev tooling: settings-class page grant + per-camera view_config.
+    ensurePagePerm PageSettings
+    ensurePerm ViewConfig (toCameraId cameraId)
     camera <- fetch cameraId
     tracks <- liftIO $ do
       mSup <- readIORef supervisorRegistry
@@ -44,6 +49,8 @@ instance Controller DebugController where
         Just sup -> maybe [] snd <$> latestAnalysis sup (cameraIdOf camera)
     render ShowView {..}
   action StreamDebugCameraAction {cameraId} = do
+    ensurePagePerm PageSettings
+    ensurePerm ViewConfig (toCameraId cameraId)
     camera <- fetch cameraId
     mTVar <- liftIO $ do
       mSup <- readIORef supervisorRegistry

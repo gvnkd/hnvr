@@ -65,6 +65,14 @@
       if (!purgeForm) return;
       var st = stateOf(activeCamId);
       if (!st) return;
+      // Per-camera purge_archive grant (design_docs/13): the view emits
+      // the granted camera ids; hide the button for the rest.
+      var purgeCams = (purgeForm.getAttribute("data-purge-cams") || "").split(",");
+      if (purgeCams.indexOf(st.camId) === -1) {
+        purgeForm.hidden = true;
+        return;
+      }
+      purgeForm.hidden = false;
       purgeForm.setAttribute(
         "action",
         "/PurgeRecording?purgeCameraId=" + encodeURIComponent(st.camId)

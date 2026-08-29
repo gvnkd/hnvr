@@ -7,10 +7,14 @@ module Hnvr.Web.View.Cameras.Show (ShowView (..)) where
 
 import Data.Time.Clock (UTCTime)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..), cameraAllowed, pageAllowed)
 import Hnvr.Core.CameraStatus (CameraStatus (..))
+import Hnvr.Core.Id (CameraId (..))
+import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.Time (tzTime)
+import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
 data ShowView = ShowView
@@ -34,13 +38,11 @@ instance View ShowView where
           <div class="subtitle">{camera.name} · {codecBadge camera.codec}</div>
         </div>
         <div class="actions">
-          <form method="POST" action={toggleUrl} style="display:contents">
-            <button type="submit" class="btn">{toggleLabel}</button>
-          </form>
-          <a class="btn" href={editUrl}>Edit</a>
-          <a class="btn" href={debugUrl}>Debug stream</a>
-          <a class="btn" href={newRuleUrl}>New rule</a>
-          <a class="btn btn-primary" href={archiveUrl}>Watch archive</a>
+          {toggleBtn}
+          {editBtn}
+          {debugBtn}
+          {newRuleBtn}
+          {archiveBtn}
         </div>
       </div>
 
@@ -69,19 +71,7 @@ instance View ShowView where
 
       {renderDrift camera drifts}
 
-      <div class="card mt-4">
-        <div class="card-header">Manual assignment</div>
-        <div class="card-body">
-          <form class="form" method="POST" action={assignUrl}>
-            <div class="field">
-              <label for="assigned_host">Override assigned host (blank = auto)</label>
-              <input class="input" id="assigned_host" name="assigned_host" value={fromMaybe "" camera.assignedHost} placeholder="hnvr-1" />
-              <div class="hint">Setting a host marks the camera as manually assigned; clearing it returns the camera to auto-assignment.</div>
-            </div>
-            <button class="btn btn-primary" type="submit">Save assignment</button>
-          </form>
-        </div>
-        </div>
+      {assignCard}
       |]
     where
       cid = tshow (camera |> get #id)
@@ -92,6 +82,56 @@ instance View ShowView where
       assignUrl = "/AssignCamera?cameraId=" <> cid
       toggleUrl = "/ToggleCameraEnabled?cameraId=" <> cid
       toggleLabel = if camera.enabled then "Disable camera" else "Enable camera"
+
+      -- Roles & ACL (design_docs/13): action buttons render only with
+      -- the matching per-camera grant (controllers enforce anyway).
+      rs = currentRoleSet
+      camId = case camera |> get #id of Id u -> CameraId u
+      canEdit = cameraAllowed rs EditConfig camId
+      toggleBtn =
+        if not canEdit
+          then mempty
+          else
+            [hsx|
+              <form method="POST" action={toggleUrl} style="display:contents">
+                <button type="submit" class="btn">{toggleLabel}</button>
+              </form>
+            |]
+      editBtn =
+        if canEdit
+          then [hsx|<a class="btn" href={editUrl}>Edit</a>|]
+          else mempty
+      debugBtn =
+        if pageAllowed rs PageSettings
+          then [hsx|<a class="btn" href={debugUrl}>Debug stream</a>|]
+          else mempty
+      newRuleBtn =
+        if cameraAllowed rs ManageEvents camId
+          then [hsx|<a class="btn" href={newRuleUrl}>New rule</a>|]
+          else mempty
+      archiveBtn =
+        if cameraAllowed rs ViewArchive camId
+          then [hsx|<a class="btn btn-primary" href={archiveUrl}>Watch archive</a>|]
+          else mempty
+      assignCard =
+        if not canEdit
+          then mempty
+          else
+            [hsx|
+              <div class="card mt-4">
+                <div class="card-header">Manual assignment</div>
+                <div class="card-body">
+                  <form class="form" method="POST" action={assignUrl}>
+                    <div class="field">
+                      <label for="assigned_host">Override assigned host (blank = auto)</label>
+                      <input class="input" id="assigned_host" name="assigned_host" value={fromMaybe "" camera.assignedHost} placeholder="hnvr-1" />
+                      <div class="hint">Setting a host marks the camera as manually assigned; clearing it returns the camera to auto-assignment.</div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Save assignment</button>
+                  </form>
+                </div>
+              </div>
+            |]
 
       kvRow k v =
         [hsx|

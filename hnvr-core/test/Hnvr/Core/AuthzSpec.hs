@@ -22,12 +22,14 @@ import Hnvr.Core.Authz
     cameraActionToText,
     cameraAllowed,
     emptyRoleSet,
+    fullRoleSet,
+    needsAclFilter,
     pageAllowed,
     pageKindFromText,
     pageKindToText,
   )
 import Hnvr.Core.Id (CameraId (..))
-import Test.QuickCheck (Arbitrary (..), Gen, elements, listOf, sublistOf)
+import Test.QuickCheck (Arbitrary (..), Gen, elements, listOf, sublistOf, (==>))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertEqual, testCase)
 import Test.Tasty.QuickCheck (testProperty)
@@ -132,6 +134,22 @@ tests =
                       (Just (head allPageKinds), Just cam, Just (head allCameraActions))
                     ]
             assertEqual "empty" emptyRoleSet rs
+        ],
+      testGroup
+        "needsAclFilter"
+        [ testProperty "fullRoleSet never needs a filter" $ \action ->
+            not (needsAclFilter action fullRoleSet),
+          testProperty "emptyRoleSet always needs a filter" $ \action ->
+            needsAclFilter action emptyRoleSet,
+          testProperty "grant-everywhere RoleSet needs no filter and allows the camera" $ \rs action cam ->
+            let rs' =
+                  rs
+                    { rsCamWildcard = Set.insert action (rsCamWildcard rs),
+                      rsCamPer = Map.map (Set.insert action) (rsCamPer rs)
+                    }
+             in not (needsAclFilter action rs') && cameraAllowed rs' action cam,
+          testProperty "wildcard miss implies filter needed" $ \rs action ->
+            Set.notMember action (rsCamWildcard rs) ==> needsAclFilter action rs
         ],
       testGroup
         "text round-trip"

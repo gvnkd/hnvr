@@ -6,9 +6,13 @@
 module Hnvr.Web.View.Cameras.Edit (EditView (..)) where
 
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), cameraAllowed)
+import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Onvif
+import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.OnvifSync (FormOptions (..), skipReasonFor)
 import Hnvr.Web.View.Layout (renderLayout)
+import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
 data EditView = EditView
@@ -166,20 +170,8 @@ instance View EditView where
             </div>
           </form>
 
-          <div class="card mt-4">
-            <div class="card-header">Danger zone</div>
-            <div class="card-body">
-              <p class="text-sm muted mb-4">
-                Deleting the camera stops its worker immediately, removes ALL its database history
-                (segments, events, snapshots, rules, presets — FK cascade), and purges every stored
-                object under its S3 prefix in the background.
-              </p>
-              <form method="POST" action={deleteUrl camera} data-confirm={"Delete camera " <> camera.slug <> "? All recordings and history are permanently removed."}>
-                <input type="hidden" name="_method" value="DELETE" />
-                <button class="btn btn-danger" type="submit">Delete Camera</button>
-              </form>
-            </div>
-          </div>
+          {dangerZone}
+
           <script>
             document.querySelectorAll("select[data-res-select]").forEach(function (sel) {
               sel.addEventListener("change", function () {
@@ -196,6 +188,30 @@ instance View EditView where
           optsNote = case mOpts of
             Just _ -> [hsx| <span>Dropdowns list values reported by the camera.</span>|]
             Nothing -> [hsx| <span class="t-warn">Camera unreachable or unmanaged — free-text inputs shown; values are validated on push only.</span>|]
+          -- Delete is its own ACL action (design_docs/13): the danger
+          -- zone renders only with the per-camera delete_camera grant.
+          dangerZone =
+            if not (cameraAllowed rs DeleteCamera camId)
+              then [hsx||]
+              else
+                [hsx|
+                  <div class="card mt-4">
+                    <div class="card-header">Danger zone</div>
+                    <div class="card-body">
+                      <p class="text-sm muted mb-4">
+                        Deleting the camera stops its worker immediately, removes ALL its database history
+                        (segments, events, snapshots, rules, presets — FK cascade), and purges every stored
+                        object under its S3 prefix in the background.
+                      </p>
+                      <form method="POST" action={deleteUrl camera} data-confirm={"Delete camera " <> camera.slug <> "? All recordings and history are permanently removed."}>
+                        <input type="hidden" name="_method" value="DELETE" />
+                        <button class="btn btn-danger" type="submit">Delete Camera</button>
+                      </form>
+                    </div>
+                  </div>
+                |]
+          rs = currentRoleSet
+          camId = case camera |> get #id of Id u -> CameraId u
           -- Same predicate the save path uses: a camera whose push is
           -- skipped (port NULL etc.) says so here, not just after a
           -- save that quietly did nothing (2026-08-29 prod incident:

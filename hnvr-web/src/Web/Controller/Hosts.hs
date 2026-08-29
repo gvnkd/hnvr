@@ -12,6 +12,8 @@ where
 
 import Data.Time.Clock (getCurrentTime)
 import Generated.Types
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
+import Hnvr.Web.Authz (aclFilterCameras, ensurePagePerm)
 import Hnvr.Web.View.Hosts.Index
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (ensureIsUser)
@@ -25,13 +27,13 @@ instance AutoRoute HostsController
 instance Controller HostsController where
   beforeAction = ensureIsUser
   action HostsAction = do
+    ensurePagePerm PageHosts
     hosts <-
       query @Host
         |> orderByAsc #id
         |> fetch
     cameras <-
-      query @Camera
-        |> filterWhere (#enabled, True)
-        |> fetch
+      aclFilterCameras ViewConfig (query @Camera |> filterWhere (#enabled, True))
+        >>= fetch
     now <- liftIO getCurrentTime
     render IndexView {..}

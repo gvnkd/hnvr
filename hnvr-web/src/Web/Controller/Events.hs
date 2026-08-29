@@ -20,17 +20,20 @@ import Control.Exception (bracket)
 import Data.Aeson (Value)
 import qualified Data.ByteString.Char8 as BSC
 import Data.Int (Int32)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import qualified Data.Text as T
 import Data.Time.Clock (UTCTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import qualified Database.PostgreSQL.Simple as PG
 import Database.PostgreSQL.Simple.FromRow (FromRow (..), field)
+import Database.PostgreSQL.Simple.Types (PGArray (..), (:.) (..))
 import Generated.Types
 import Hnvr.Core.ArchiveBrowser (parseWhen)
+import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
 import qualified Hnvr.Storage.S3 as S3
 import Hnvr.Web.Auth ()
+import Hnvr.Web.Authz (aclCameraIds, aclFilterCameras, ensurePagePerm, ensurePerm, toCameraId)
 import Hnvr.Web.View.Events.Feed
 import Hnvr.Web.View.Events.Index
 import IHP.ControllerPrelude
@@ -55,7 +58,12 @@ instance Controller EventsController where
   beforeAction = ensureIsUser
 
   action EventsAction = do
-    cameras <- query @Camera |> orderBy #slug |> fetch
+    ensurePagePerm PageEvents
+    -- The dropdown AND the rows are scoped to the subject's
+    -- view_archive ACL (events are historical camera data;
+    -- design_docs/13 — filter in SQL, never post-filter).
+    mAclIds <- aclCameraIds ViewArchive
+    cameras <- aclFilterCameras ViewArchive (query @Camera |> orderBy #slug) >>= fetch
     let fltCamera = nonemptyParam "cameraId"
         fltKind = nonemptyParam "kind"
         fltFrom = nonemptyParam "from"
@@ -63,6 +71,7 @@ instance Controller EventsController where
         page = max 1 (fromMaybe 1 (nonemptyParam "page" >>= readMaybe . T.unpack))
     rows <-
       fetchEventRows
+        mAclIds
         (fltCamera >>= UUID.fromText)
         fltKind
         (fltFrom >>= parseWhen)
@@ -74,21 +83,26 @@ instance Controller EventsController where
     render IndexView {events = zip pageRows thumbs, ..}
   action EventsFeedLiveAction {liveCameraId} = do
     let camUuid = case liveCameraId of Id u -> u
-    rows <- fetchEventRows (Just camUuid) Nothing Nothing Nothing 1
+    ensurePerm ViewArchive (toCameraId liveCameraId)
+    rows <- fetchEventRows (Just [camUuid]) (Just camUuid) Nothing Nothing Nothing 1
     render FeedView {events = take 10 rows}
 
 -- | Page rows: LIMIT pageSize+1 so a full overflow row tells us
 -- whether a next page exists (no COUNT round-trip). One-shot
 -- postgresql-simple connection (like SnapshotResponder) — IHP's
 -- hasql-based sqlQuery has no FromRow instance for 10-tuples.
+--
+-- @mAclIds@ scopes rows to the subject's view_archive cameras
+-- ('Hnvr.Web.Authz.aclCameraIds'); 'Nothing' = unrestricted.
 fetchEventRows ::
+  Maybe [UUID] ->
   Maybe UUID ->
   Maybe Text ->
   Maybe UTCTime ->
   Maybe UTCTime ->
   Int ->
   IO [EventRow]
-fetchEventRows mCam mKind mFrom mTo page = do
+fetchEventRows mAclIds mCam mKind mFrom mTo page = do
   dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
   rows <-
     bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn ->
@@ -108,18 +122,18 @@ fetchEventRows mCam mKind mFrom mTo page = do
         \  AND (?::text IS NULL OR e.kind::text = ?) \
         \  AND (?::timestamptz IS NULL OR e.ts >= ?) \
         \  AND (?::timestamptz IS NULL OR e.ts <= ?) \
+        \  AND (?::bool OR e.camera_id = ANY(?)) \
         \ORDER BY e.ts DESC \
         \LIMIT ? OFFSET ?"
-        ( mCam,
-          mCam,
-          mKind,
-          mKind,
-          mFrom,
-          mFrom,
-          mTo,
-          mTo,
-          pageSize + 1,
-          (page - 1) * pageSize
+        -- pg-simple caps tuple ToRow at 10 (pitfall #122) — chunk into
+        -- 4-tuples joined by ':.'.
+        ( (mCam, mCam, mKind, mKind)
+            :. (mFrom, mFrom, mTo, mTo)
+            :. ( isNothing mAclIds,
+                 PGArray (fromMaybe [] mAclIds),
+                 pageSize + 1,
+                 (page - 1) * pageSize
+               )
         )
   pure (map toRow rows)
   where

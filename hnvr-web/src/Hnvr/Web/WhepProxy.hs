@@ -20,6 +20,8 @@
 -- in @Hnvr.Web.Config@.
 module Hnvr.Web.WhepProxy
   ( whepMiddleware,
+    proxyOne,
+    defaultMediaMtxWebrtc,
   )
 where
 
