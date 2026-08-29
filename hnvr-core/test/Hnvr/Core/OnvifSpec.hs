@@ -2,15 +2,38 @@
 
 module Hnvr.Core.OnvifSpec (tests) where
 
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Hnvr.Core.Onvif
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
   testGroup
     "Hnvr.Core.Onvif"
     [ testGroup
+        "pushSkipReason"
+        [ testCase "NULL management port skips the push (2026-08-29 prod incident: both cameras silently unmanaged)" $
+            case pushSkipReason Nothing (Just "192.168.0.196") (Just "admin") True of
+              Just reason -> "port not set" `T.isInfixOf` reason @?= True
+              Nothing -> assertFailure "expected a skip reason for a NULL port",
+          testCase "usable target → no skip" $
+            pushSkipReason (Just 80) (Just "192.168.0.196") (Just "admin") True @?= Nothing,
+          testCase "no host (column empty, RTSP URL has none) skips" $
+            case pushSkipReason (Just 80) Nothing (Just "admin") True of
+              Just reason -> "no host" `T.isInfixOf` reason @?= True
+              Nothing -> assertFailure "expected a skip reason for a missing host",
+          testCase "missing username skips" $
+            case pushSkipReason (Just 80) (Just "192.168.0.196") Nothing True of
+              Just reason -> "credentials" `T.isInfixOf` reason @?= True
+              Nothing -> assertFailure "expected a skip reason for a missing username",
+          testCase "missing stored password skips" $
+            case pushSkipReason (Just 80) (Just "192.168.0.196") (Just "admin") False of
+              Just reason -> "credentials" `T.isInfixOf` reason @?= True
+              Nothing -> assertFailure "expected a skip reason for a missing password"
+        ],
+      testGroup
         "normalize"
         [ testCase "bitrate bps → kbps (Hikvision 64000)" $
             normalizeBitrateKbps 64000 @?= 64,

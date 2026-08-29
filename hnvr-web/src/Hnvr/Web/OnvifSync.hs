@@ -22,6 +22,7 @@
 module Hnvr.Web.OnvifSync
   ( OnvifTarget (..),
     targetForCamera,
+    skipReasonFor,
     desiredMainVideo,
     desiredSubVideo,
     desiredAudioCfg,
@@ -34,6 +35,7 @@ module Hnvr.Web.OnvifSync
 where
 
 import Data.Either (fromRight)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Generated.Types
@@ -81,6 +83,20 @@ targetForCamera cam = case (cam.onvifPort, mHost) of
       _ -> hostFromRtspUrl cam.rtspUrl
     nonEmpty (Just t) | not (T.null t) = Just t
     nonEmpty _ = Nothing
+
+-- | User-facing reason an encoder push would be skipped for a camera
+-- (Nothing = push will run). Pure projection over the camera row so
+-- the edit form renders the same warning the save path flashes — a
+-- NULL management port used to skip every ONVIF interaction silently.
+skipReasonFor :: Camera -> Maybe Text
+skipReasonFor cam =
+  pushSkipReason cam.onvifPort mHost (nonEmpty' cam.username) (isJust cam.passwordEnc)
+  where
+    mHost = case cam.host of
+      Just h | not (T.null h) -> Just h
+      _ -> hostFromRtspUrl cam.rtspUrl
+    nonEmpty' (Just t) | not (T.null t) = Just t
+    nonEmpty' _ = Nothing
 
 -- | Sparse desired video config for the main stream (Maybe fields come
 -- from the flat cameras columns; NULL = unmanaged).

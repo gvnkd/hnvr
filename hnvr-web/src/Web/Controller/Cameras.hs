@@ -33,7 +33,7 @@ import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (publishAssignTo, republishAssignAlways)
-import Hnvr.Web.OnvifSync (FormOptions, checkCameraDrift, fetchFormOptions, probePtz, pushCameraConfig, targetForCamera)
+import Hnvr.Web.OnvifSync (FormOptions, checkCameraDrift, fetchFormOptions, probePtz, pushCameraConfig, skipReasonFor, targetForCamera)
 import Hnvr.Web.OnvifSyncer (persistDrift)
 import Hnvr.Web.PendingPurge (forkCameraFullPurge)
 import Hnvr.Web.View.Cameras.Edit
@@ -51,16 +51,17 @@ import Web.Controller.Support.Crypto (encryptPassword)
 camUuid :: Camera -> UUID
 camUuid cam = case cam |> get #id of Id u -> u
 
--- | Best-effort ONVIF push after Save Changes: Nothing when the camera
--- is ONVIF-unmanaged (no port/host/creds — plain save), otherwise the
--- push result. On a successful push, re-reads the camera and refreshes
+-- | Best-effort ONVIF push after Save Changes: @Left reason@ when the
+-- camera is management-unmanaged (no port/host/creds — plain save,
+-- reason says why and goes to the user as a warning), @Right result@
+-- otherwise. On a successful push, re-reads the camera and refreshes
 -- its camera_drift rows so the badge reflects the push immediately
 -- rather than at the next OnvifSyncer tick.
-pushOnvif :: Camera -> IO (Maybe (Either Text Text))
+pushOnvif :: Camera -> IO (Either Text (Either Text Text))
 pushOnvif cam = do
   eTarget <- targetForCamera cam
   case eTarget of
-    Left _ -> pure Nothing
+    Left _ -> pure (Left (fromMaybe "unmanaged" (skipReasonFor cam)))
     Right target -> do
       mgr <- HC.newManager HC.defaultManagerSettings
       res <- pushCameraConfig mgr target cam
@@ -71,7 +72,7 @@ pushOnvif cam = do
             Right items -> persistDrift (camUuid cam) items
             Left _ -> pure ()
         Left _ -> pure ()
-      pure (Just res)
+      pure (Right res)
 
 -- | Fetch live ONVIF capabilities for the Edit form dropdowns.
 -- 'Nothing' when the camera is unmanaged or unreachable — the form
@@ -189,10 +190,11 @@ instance Controller CamerasController where
         forM_ mBus $ \bus -> republishAssignAlways bus camera'''
         pushResult <- liftIO (pushOnvif camera''')
         case pushResult of
-          Nothing -> setSuccessMessage "Camera updated"
-          Just (Left err) ->
+          Left skipReason ->
+            setErrorMessage ("Camera saved, but the encoder push is INACTIVE: " <> skipReason)
+          Right (Left err) ->
             setErrorMessage ("Camera saved, but ONVIF push failed: " <> err)
-          Just (Right summary) ->
+          Right (Right summary) ->
             setSuccessMessage ("Camera updated; ONVIF: " <> summary)
         redirectTo ShowCameraAction {cameraId = camera''' |> get #id}
       else do

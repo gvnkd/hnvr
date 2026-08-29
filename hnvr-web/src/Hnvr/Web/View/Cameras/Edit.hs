@@ -7,7 +7,7 @@ module Hnvr.Web.View.Cameras.Edit (EditView (..)) where
 
 import Generated.Types
 import Hnvr.Core.Onvif
-import Hnvr.Web.OnvifSync (FormOptions (..))
+import Hnvr.Web.OnvifSync (FormOptions (..), skipReasonFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
@@ -115,12 +115,13 @@ instance View EditView where
             <div class="card mt-4">
               <div class="card-header">ONVIF encoder settings (desired)</div>
               <div class="card-body">
+                {pushInactiveWarning}
                 <p class="text-sm muted mb-4">
                   Pushed to the camera on Save Changes and drift-checked periodically.
                   Empty fields are unmanaged — left alone on the camera.
                   {optsNote}
                 </p>
-                {intFieldFor "onvifPort" "Management port" camera.onvifPort "ONVIF device-service port (80 Hikvision-OEM, 8899 XM) or DVRIP 34567 for mgmt_proto=dvrip. Empty = unmanaged"}
+                {intFieldFor "onvifPort" "Management port" camera.onvifPort "REQUIRED for any push or drift check: the camera's ONVIF device-service HTTP port (80 for Hikvision-OEM, 8899 for XM) or the DVRIP port (34567) when mgmt_proto=dvrip. Empty = no management at all — saving shows a warning and nothing is ever pushed"}
                 <div class="field">
                   <label>Management protocol</label>
                   <select name="mgmtProto">
@@ -195,6 +196,19 @@ instance View EditView where
           optsNote = case mOpts of
             Just _ -> [hsx| <span>Dropdowns list values reported by the camera.</span>|]
             Nothing -> [hsx| <span class="t-warn">Camera unreachable or unmanaged — free-text inputs shown; values are validated on push only.</span>|]
+          -- Same predicate the save path uses: a camera whose push is
+          -- skipped (port NULL etc.) says so here, not just after a
+          -- save that quietly did nothing (2026-08-29 prod incident:
+          -- both cameras sat unmanaged with no visible hint).
+          pushInactiveWarning = case skipReasonFor camera of
+            Just reason ->
+              [hsx|
+                <div class="alert alert-warn">
+                  <strong>Encoder management is INACTIVE for this camera.</strong><br />
+                  {reason}
+                </div>
+              |]
+            Nothing -> [hsx||]
 
       updateUrl cam = "/UpdateCamera?cameraId=" <> tshow (cam |> get #id)
 

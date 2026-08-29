@@ -40,6 +40,7 @@ module Hnvr.Core.Onvif
     emptyDesiredVideo,
     pickMainSub,
     hostFromRtspUrl,
+    pushSkipReason,
   )
 where
 
@@ -321,3 +322,27 @@ hostFromRtspUrl url =
       hostPort = snd (T.breakOnEnd "@" authority) -- drop userinfo if present
       host = T.takeWhile (/= ':') hostPort
    in if T.null host then Nothing else Just host
+
+-- | Why the encoder push / drift check would be SKIPPED for a camera:
+-- 'Nothing' when the management target is usable. Pure so the edit
+-- form can render the same warning the save path reports — a camera
+-- with @onvif_port = NULL@ used to save with a plain "Camera updated"
+-- and no hint that every ONVIF interaction (push on save AND the
+-- periodic drift check) was being skipped (2026-08-29: both prod
+-- cameras sat in this state unnoticed).
+pushSkipReason ::
+  -- | management port (cameras.onvif_port)
+  Maybe Int ->
+  -- | host (host column, falling back to the RTSP URL's host)
+  Maybe Text ->
+  -- | username
+  Maybe Text ->
+  -- | password available (a stored, decryptable password)
+  Bool ->
+  Maybe Text
+pushSkipReason mPort mHost mUser hasPw
+  | Nothing <- mPort = Just "management port not set — the encoder push on Save and the periodic drift check are both skipped (set the ONVIF device-service port: 80 for Hikvision-OEM, 8899 for XM; 34567 for dvrip)"
+  | Nothing <- mHost = Just "no host configured (host column empty and no host in the RTSP URL) — push and drift check are skipped"
+  | Nothing <- mUser = Just "missing credentials (username) — push and drift check are skipped"
+  | not hasPw = Just "missing credentials (no stored password) — push and drift check are skipped"
+  | otherwise = Nothing
