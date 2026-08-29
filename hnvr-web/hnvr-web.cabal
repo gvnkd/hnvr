@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:          hnvr-web
-version:       0.19.0.0
+version:       0.20.0.0
 synopsis:
   HNVR leader (IHP web + event writer + MediaMTX sync) and node binaries
 
@@ -10,6 +10,7 @@ build-type:    Simple
 library
   exposed-modules:
     Generated.ActualTypes
+    Generated.ActualTypes.AdminAudit
     Generated.ActualTypes.AuditLog
     Generated.ActualTypes.Camera
     Generated.ActualTypes.CameraDrift
@@ -21,9 +22,12 @@ library
     Generated.ActualTypes.PrimaryKeys
     Generated.ActualTypes.PtzAuditLog
     Generated.ActualTypes.PtzPreset
+    Generated.ActualTypes.Role
     Generated.ActualTypes.Rule
     Generated.ActualTypes.Segment
     Generated.ActualTypes.User
+    Generated.AdminAudit
+    Generated.AdminAuditInclude
     Generated.AuditLog
     Generated.AuditLogInclude
     Generated.Camera
@@ -45,11 +49,14 @@ library
     Generated.PtzAuditLogInclude
     Generated.PtzPreset
     Generated.PtzPresetInclude
+    Generated.Role
+    Generated.RoleInclude
     Generated.Rule
     Generated.RuleInclude
     Generated.Segment
     Generated.SegmentInclude
     Generated.Statements
+    Generated.Statements.CreateAdminAudit
     Generated.Statements.CreateAuditLog
     Generated.Statements.CreateCamera
     Generated.Statements.CreateCameraDrift
@@ -58,6 +65,7 @@ library
     Generated.Statements.CreateEventClip
     Generated.Statements.CreateEventClipEvent
     Generated.Statements.CreateHost
+    Generated.Statements.CreateManyAdminAudit
     Generated.Statements.CreateManyAuditLog
     Generated.Statements.CreateManyCamera
     Generated.Statements.CreateManyCameraDrift
@@ -68,14 +76,17 @@ library
     Generated.Statements.CreateManyHost
     Generated.Statements.CreateManyPtzAuditLog
     Generated.Statements.CreateManyPtzPreset
+    Generated.Statements.CreateManyRole
     Generated.Statements.CreateManyRule
     Generated.Statements.CreateManySegment
     Generated.Statements.CreateManyUser
     Generated.Statements.CreatePtzAuditLog
     Generated.Statements.CreatePtzPreset
+    Generated.Statements.CreateRole
     Generated.Statements.CreateRule
     Generated.Statements.CreateSegment
     Generated.Statements.CreateUser
+    Generated.Statements.FetchAdminAudit
     Generated.Statements.FetchAuditLog
     Generated.Statements.FetchCamera
     Generated.Statements.FetchCameraDrift
@@ -86,9 +97,11 @@ library
     Generated.Statements.FetchHost
     Generated.Statements.FetchPtzAuditLog
     Generated.Statements.FetchPtzPreset
+    Generated.Statements.FetchRole
     Generated.Statements.FetchRule
     Generated.Statements.FetchSegment
     Generated.Statements.FetchUser
+    Generated.Statements.RowDecoderAdminAudit
     Generated.Statements.RowDecoderAuditLog
     Generated.Statements.RowDecoderCamera
     Generated.Statements.RowDecoderCameraDrift
@@ -99,9 +112,11 @@ library
     Generated.Statements.RowDecoderHost
     Generated.Statements.RowDecoderPtzAuditLog
     Generated.Statements.RowDecoderPtzPreset
+    Generated.Statements.RowDecoderRole
     Generated.Statements.RowDecoderRule
     Generated.Statements.RowDecoderSegment
     Generated.Statements.RowDecoderUser
+    Generated.Statements.UpdateAdminAudit
     Generated.Statements.UpdateAuditLog
     Generated.Statements.UpdateCamera
     Generated.Statements.UpdateCameraDrift
@@ -112,6 +127,7 @@ library
     Generated.Statements.UpdateHost
     Generated.Statements.UpdatePtzAuditLog
     Generated.Statements.UpdatePtzPreset
+    Generated.Statements.UpdateRole
     Generated.Statements.UpdateRule
     Generated.Statements.UpdateSegment
     Generated.Statements.UpdateUser

@@ -27,6 +27,7 @@ module Hnvr.Core.Authz
     needsAclFilter,
     roleSetQuery,
     roleSetForRoleQuery,
+    superadminMembershipQuery,
     visibleCameraIdsForUserQuery,
     visibleCameraIdsForRoleQuery,
     allCameraActions,
@@ -37,6 +38,9 @@ module Hnvr.Core.Authz
     pageKindFromText,
     superadminRoleId,
     guestRoleId,
+    canDeleteRole,
+    canRemoveSuperadminGrant,
+    canDeleteUser,
   )
 where
 
@@ -210,6 +214,14 @@ visibleCameraIdsForUserQuery =
   \               WHERE p.camera_id IS NULL AND p.action = ?::camera_action) \
   \       AND NOT EXISTS (SELECT 1 FROM my_perms p WHERE p.camera_id = c.id))"
 
+-- | Does the user hold a given role? Parameters: @(userId, roleId)@.
+-- The admin service gates its front door on @superadminRoleId@
+-- membership.
+superadminMembershipQuery :: Text
+superadminMembershipQuery =
+  "SELECT EXISTS (SELECT 1 FROM user_roles \
+  \WHERE user_id = ?::uuid AND role_id = ?::uuid)"
+
 -- | 'visibleCameraIdsForUserQuery' for a bare role (anonymous/guest
 -- subject). Parameters: @(roleId, actionText, actionText)@.
 visibleCameraIdsForRoleQuery :: Text
@@ -229,6 +241,25 @@ visibleCameraIdsForRoleQuery =
 superadminRoleId, guestRoleId :: UUID
 superadminRoleId = wellKnown "00000000-0000-4000-8000-000000000001"
 guestRoleId = wellKnown "00000000-0000-4000-8000-000000000002"
+
+-- ---- Lockout guards (design_docs/13 §"Bootstrap & lockout protection")
+
+-- | @is_system@ roles (superadmin, guest) are immutable via the admin
+-- UI — never deletable.
+canDeleteRole :: Bool -> Bool
+canDeleteRole = not
+
+-- | Removing a superadmin grant (unassign or role-loss via user delete)
+-- is allowed only while more than one holder remains. @holders@ counts
+-- users holding the superadmin role INCLUDING the target.
+canRemoveSuperadminGrant :: Int -> Bool
+canRemoveSuperadminGrant holders = holders > 1
+
+-- | Deleting a user who holds superadmin is allowed only when other
+-- holders remain. Non-holders are always deletable.
+canDeleteUser :: Bool -> Int -> Bool
+canDeleteUser isSuperadminHolder holders =
+  not isSuperadminHolder || canRemoveSuperadminGrant holders
 
 wellKnown :: Text -> UUID
 wellKnown t = fromMaybe (error ("Authz: bad well-known UUID " <> show t)) (UUID.fromText t)

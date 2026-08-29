@@ -1,0 +1,105 @@
+cabal-version: 2.4
+name:          hnvr-admin
+version:       0.1.0.0
+synopsis:
+  HNVR admin service — roles/users/camera management front door
+
+license:       BSD-3-Clause
+build-type:    Simple
+
+-- Dedicated management service (design_docs/13-roles-and-acl.md, M3).
+-- Own binary, own port (HNVR_ADMIN_PORT, dev 18010), bound to
+-- HNVR_ADMIN_LISTEN (default 127.0.0.1), own session cookie
+-- ("hnvr_admin" — an end-user session grants nothing here). Shares the
+-- DB, Generated types and Hnvr.Core.Authz with hnvr-web.
+--
+-- IHP is single-app per binary (FrontController RootApplication is a
+-- global instance): the admin FrontController lives here as an orphan
+-- instance and hnvr-web's Hnvr.Web.FrontController is never imported.
+-- Like hnvr-web, this package is nix-build-only (pitfall #14).
+
+library
+  exposed-modules:
+    AdminWeb.Audit
+    AdminWeb.Bootstrap
+    AdminWeb.Config
+    AdminWeb.FrontController
+    AdminWeb.Grants
+    AdminWeb.Server
+    AdminWeb.View.Layout
+    AdminWeb.View.Overview.Index
+    AdminWeb.View.Roles.Edit
+    AdminWeb.View.Roles.Form
+    AdminWeb.View.Roles.Index
+    AdminWeb.View.Roles.New
+    AdminWeb.View.Users.Edit
+    AdminWeb.View.Users.Index
+    AdminWeb.View.Users.New
+    AdminWeb.View.Users.RoleBoxes
+    Web.Controller.Overview
+    Web.Controller.Roles
+    Web.Controller.Sessions
+    Web.Controller.Users
+
+  build-depends:
+    , aeson
+    , base               >=4.18 && <5
+    , bytestring
+    , containers
+    , cookie
+    , hnvr-core
+    , hnvr-web
+    , http-types
+    , ihp
+    , postgresql-simple
+    , text
+    , time
+    , uuid
+    , vault
+    , wai
+    , wai-app-static
+    , warp
+
+  hs-source-dirs:     src
+  default-language:   Haskell2010
+  default-extensions:
+    BlockArguments
+    ConstraintKinds
+    DataKinds
+    DeriveDataTypeable
+    DerivingStrategies
+    DisambiguateRecordFields
+    DuplicateRecordFields
+    FlexibleContexts
+    FlexibleInstances
+    ImplicitParams
+    InstanceSigs
+    LambdaCase
+    MultiParamTypeClasses
+    NamedFieldPuns
+    NoFieldSelectors
+    OverloadedLabels
+    OverloadedRecordDot
+    OverloadedStrings
+    RecordWildCards
+    ScopedTypeVariables
+    StandaloneDeriving
+    TypeApplications
+    TypeFamilies
+    TypeOperators
+    TypeSynonymInstances
+    UndecidableInstances
+
+executable hnvr-admin
+  main-is:          AdminMain.hs
+  hs-source-dirs:   app
+  build-depends:
+    , base
+    , hnvr-admin
+    , hnvr-core
+    , hnvr-web
+    , ihp
+    , text
+
+  default-language: Haskell2010
+  ghc-options:      -threaded -rtsopts "-with-rtsopts=-N -A16m"

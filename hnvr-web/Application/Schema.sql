@@ -170,6 +170,9 @@ CREATE INDEX rules_camera_idx ON rules (camera_id) WHERE enabled;
 CREATE TYPE event_kind AS ENUM
     ('line_crossed', 'zone_enter', 'zone_exit', 'zone_inside', 'zone_motion');
 
+-- The UNIQUE below is duplicate-publish absorption (migration 0014): one
+-- analyzer emits at most one event per rule+track per frame ts, so an
+-- exact match is a duplicate publish (second EventWriter, redelivery).
 CREATE TABLE events (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     camera_id       UUID NOT NULL,
@@ -185,9 +188,6 @@ CREATE TABLE events (
     host_id         TEXT,
     payload         JSONB,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    -- Duplicate-publish absorption (migration 0014): one analyzer emits
-    -- at most one event per rule+track per frame ts, so an exact match
-    -- is a duplicate publish (second EventWriter, redelivery).
     UNIQUE (camera_id, rule_id, track_id, ts),
     FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE,
     FOREIGN KEY (rule_id) REFERENCES rules(id) ON DELETE SET NULL,
@@ -308,3 +308,30 @@ CREATE TABLE ptz_audit_log (
 );
 
 CREATE INDEX ptz_audit_cam_ts_idx ON ptz_audit_log (camera_id, ts DESC);
+
+-- Roles & ACL (design_docs/13-roles-and-acl.md; runtime DDL is migration
+-- 0016-roles-acl.sql — this file is the codegen source). The grant
+-- mapping tables (user_roles, role_page_perms, role_camera_perms) keep
+-- composite PKs and are deliberately NOT modeled — IHP needs a single
+-- `id` PK per table; admin code manages grants with raw SQL.
+CREATE TABLE roles (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    is_system   BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- admin_audit.id is BIGINT GENERATED ALWAYS AS IDENTITY in migration
+-- 0016; BIGSERIAL here is the codegen-parseable spelling (both accept
+-- INSERT without id).
+CREATE TABLE admin_audit (
+    id          BIGSERIAL PRIMARY KEY,
+    actor_id    UUID,
+    action      TEXT NOT NULL,
+    object_kind TEXT NOT NULL,
+    object_id   TEXT,
+    payload     JSONB,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (actor_id) REFERENCES users(id)
+);

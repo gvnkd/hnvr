@@ -6,6 +6,7 @@ packages:
   ./hnvr-cv
   ./hnvr-ptz
   ./hnvr-web
+  ./hnvr-admin
   ./vendored/nats-queue
   ./vendored/minio-hs
 

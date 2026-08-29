@@ -123,6 +123,7 @@
         hnvr-ptz = libHs.disableLibraryProfiling (final.callCabal2nix "hnvr-ptz" ./hnvr-ptz { });
         hnvr-storage = libHs.disableLibraryProfiling (final.callCabal2nix "hnvr-storage" ./hnvr-storage { });
         hnvr-web = libHs.disableLibraryProfiling (final.callCabal2nix "hnvr-web" ./hnvr-web { });
+        hnvr-admin = libHs.disableLibraryProfiling (final.callCabal2nix "hnvr-admin" ./hnvr-admin { });
       };
 
       # Top-level overlay exposing our packages (so NixOS modules can
@@ -155,7 +156,7 @@
         in
         {
           inherit (hpkgs)
-            hnvr-core hnvr-nats hnvr-capture hnvr-cv hnvr-ptz hnvr-storage hnvr-web;
+            hnvr-core hnvr-nats hnvr-capture hnvr-cv hnvr-ptz hnvr-storage hnvr-web hnvr-admin;
           inherit hnvr-static;
         };
 
@@ -331,7 +332,7 @@
 
         localPkgs = {
           inherit (hpkgs)
-            hnvr-core hnvr-nats hnvr-capture hnvr-cv hnvr-ptz hnvr-storage hnvr-web;
+            hnvr-core hnvr-nats hnvr-capture hnvr-cv hnvr-ptz hnvr-storage hnvr-web hnvr-admin;
           hnvr-static = hnvr-static;
           onnxruntime-cuda = onnxruntimeCuda;
         };

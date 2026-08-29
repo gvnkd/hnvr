@@ -21,6 +21,9 @@ import Hnvr.Core.Authz
     cameraActionFromText,
     cameraActionToText,
     cameraAllowed,
+    canDeleteRole,
+    canDeleteUser,
+    canRemoveSuperadminGrant,
     emptyRoleSet,
     fullRoleSet,
     needsAclFilter,
@@ -165,6 +168,18 @@ tests =
                 pages = map pageKindToText allPageKinds
             assertEqual "actions" (length acts) (Set.size (Set.fromList acts))
             assertEqual "pages" (length pages) (Set.size (Set.fromList pages))
+        ],
+      testGroup
+        "lockout guards"
+        [ testCase "system role is never deletable" $
+            assertBool "system" (not (canDeleteRole True)),
+          testCase "user role is deletable" $
+            assertBool "plain" (canDeleteRole False),
+          testProperty "last superadmin grant is locked" $ \holders ->
+            canRemoveSuperadminGrant holders == (holders > 1),
+          testProperty "user delete only locks on last superadmin holder" $ \isHolder holders ->
+            canDeleteUser isHolder holders
+              == (not isHolder || holders > 1)
         ],
       testCase "seeded UUIDs parse and are distinct" $ do
         let distinct = isJust (UUID.fromText "00000000-0000-4000-8000-000000000001")

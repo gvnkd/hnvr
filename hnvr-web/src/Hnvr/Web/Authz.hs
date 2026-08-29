@@ -36,9 +36,11 @@
 module Hnvr.Web.Authz
   ( authzMiddleware,
     currentRoleSet,
+    currentIsSuperadmin,
     ensurePerm,
     ensurePagePerm,
     ensurePermAnywhere,
+    ensureSuperadmin,
     toCameraId,
     aclFilterCameras,
     aclCameraIds,
@@ -100,11 +102,18 @@ roleSetVaultKey = unsafePerformIO Vault.newKey
 subjectVaultKey :: Vault.Key Subject
 subjectVaultKey = unsafePerformIO Vault.newKey
 
--- | Process-wide RoleSet cache: subject → (fetchedAt, set). 30 s TTL is
--- the backstop; @LISTEN roles_events@ invalidates immediately on admin
--- mutations.
+-- | Whether the subject holds the seeded superadmin role (or is_admin —
+-- same privilege until the M5 backfill). The hnvr-admin service gates
+-- every action on this.
+{-# NOINLINE superVaultKey #-}
+superVaultKey :: Vault.Key Bool
+superVaultKey = unsafePerformIO Vault.newKey
+
+-- | Process-wide RoleSet cache: subject → (fetchedAt, set, isSuperadmin).
+-- 30 s TTL is the backstop; @LISTEN roles_events@ invalidates
+-- immediately on admin mutations.
 {-# NOINLINE cacheRef #-}
-cacheRef :: IORef (Map Subject (UTCTime, RoleSet))
+cacheRef :: IORef (Map Subject (UTCTime, RoleSet, Bool))
 cacheRef = unsafePerformIO (newIORef Map.empty)
 
 cacheTtl :: NominalDiffTime
@@ -116,6 +125,10 @@ cacheTtl = 30
 -- through it).
 currentRoleSet :: (?request :: Wai.Request) => RoleSet
 currentRoleSet = fromMaybe emptyRoleSet (Vault.lookup roleSetVaultKey (Wai.vault ?request))
+
+-- | Whether the current subject is a superadmin (see 'superVaultKey').
+currentIsSuperadmin :: (?request :: Wai.Request) => Bool
+currentIsSuperadmin = fromMaybe False (Vault.lookup superVaultKey (Wai.vault ?request))
 
 -- | Enforce a per-camera action; 403 (early return) on deny.
 ensurePerm :: (?request :: Wai.Request, ?respond :: Respond) => CameraAction -> CameraId -> IO ()
@@ -129,6 +142,10 @@ ensurePagePerm page = accessDeniedUnless (pageAllowed currentRoleSet page)
 -- mutations not tied to a concrete camera (e.g. camera creation).
 ensurePermAnywhere :: (?request :: Wai.Request, ?respond :: Respond) => CameraAction -> IO ()
 ensurePermAnywhere action = accessDeniedUnless (cameraAllowedAnywhere currentRoleSet action)
+
+-- | Enforce superadmin (the hnvr-admin front door); 403 on deny.
+ensureSuperadmin :: (?request :: Wai.Request, ?respond :: Respond) => IO ()
+ensureSuperadmin = accessDeniedUnless currentIsSuperadmin
 
 -- | Helper for 'ensurePerm' call sites holding an IHP 'Id'' — unwrap
 -- without repeating the pitfall-#39 dance everywhere.
@@ -181,61 +198,67 @@ authzMiddleware :: Wai.Middleware
 authzMiddleware app req respond = do
   let ?modelContext = req.modelContext
    in do
-        (subject, rs) <- resolve req
+        (subject, rs, isSuper) <- resolve req
         let vault' =
               Vault.insert roleSetVaultKey rs
-                $ Vault.insert subjectVaultKey subject (Wai.vault req)
+                $ Vault.insert subjectVaultKey subject
+                $ Vault.insert superVaultKey isSuper (Wai.vault req)
             req' = req {Wai.vault = vault'}
         if BSC.isPrefixOf "/whep/" (Wai.rawPathInfo req)
           then whepGuarded rs req' respond
           else app req' respond
 
--- | Subject + RoleSet resolution. 'fullRoleSet' short-circuits the DB
--- fetch (disabled gate / is_admin fallback).
-resolve :: (?modelContext :: ModelContext) => Wai.Request -> IO (Subject, RoleSet)
+-- | Subject + RoleSet + superadmin resolution. 'fullRoleSet'
+-- short-circuits the DB fetch (disabled gate / is_admin fallback — both
+-- are superadmin-equivalent).
+resolve :: (?modelContext :: ModelContext) => Wai.Request -> IO (Subject, RoleSet, Bool)
 resolve req = case lookupAuthVault currentUserVaultKey req of
   Just u
-    | authzDisabled || u.isAdmin -> pure (SubjectUser (userUuid u), fullRoleSet)
+    | authzDisabled || u.isAdmin -> pure (SubjectUser (userUuid u), fullRoleSet, True)
     | otherwise -> do
         let uid = userUuid u
             subject = SubjectUser uid
-        rs <- cached subject (fetchUserRoleSet uid)
-        pure (subject, rs)
+        (rs, isSuper) <- cached subject (fetchUserRoleSet uid)
+        pure (subject, rs, isSuper)
   Nothing
-    | authzDisabled -> pure (SubjectRole guestRoleId, fullRoleSet)
+    | authzDisabled -> pure (SubjectRole guestRoleId, fullRoleSet, True)
     | otherwise -> do
         let subject = SubjectRole guestRoleId
-        rs <- cached subject (fetchRoleRoleSet guestRoleId)
-        pure (subject, rs)
+        (rs, isSuper) <- cached subject (fetchRoleRoleSet guestRoleId)
+        pure (subject, rs, isSuper)
 
 userUuid :: User -> UUID
 userUuid u = case u |> get #id of Id uuid -> uuid
 
 -- | TTL-cached RoleSet fetch. Fail-closed on DB errors.
-cached :: Subject -> IO RoleSet -> IO RoleSet
+cached :: Subject -> IO (RoleSet, Bool) -> IO (RoleSet, Bool)
 cached subject fetch' = do
   now <- getCurrentTime
   cachedMap <- readIORef cacheRef
   case Map.lookup subject cachedMap of
-    Just (fetchedAt, rs)
-      | diffUTCTime now fetchedAt < cacheTtl -> pure rs
+    Just (fetchedAt, rs, isSuper)
+      | diffUTCTime now fetchedAt < cacheTtl -> pure (rs, isSuper)
     _ -> do
-      rs <-
+      (rs, isSuper) <-
         fetch' `E.catch` \(e :: E.SomeException) -> do
           logError ("Authz: RoleSet fetch failed for " <> cs (show subject) <> " (denying): " <> cs (show e))
-          pure emptyRoleSet
-      writeIORef cacheRef (Map.insert subject (now, rs) cachedMap)
-      pure rs
+          pure (emptyRoleSet, False)
+      writeIORef cacheRef (Map.insert subject (now, rs, isSuper) cachedMap)
+      pure (rs, isSuper)
 
-fetchUserRoleSet :: (?modelContext :: ModelContext) => UUID -> IO RoleSet
+fetchUserRoleSet :: (?modelContext :: ModelContext) => UUID -> IO (RoleSet, Bool)
 fetchUserRoleSet uid = do
   rows <- sqlQuery (toQuery roleSetQuery) (uid, uid)
-  pure (buildRoleSet (map projectRow rows))
+  superRows <- sqlQuery (toQuery superadminMembershipQuery) (uid, superadminRoleId)
+  let isSuper = case superRows of
+        [Only b] -> b
+        _ -> False
+  pure (buildRoleSet (map projectRow rows), isSuper)
 
-fetchRoleRoleSet :: (?modelContext :: ModelContext) => UUID -> IO RoleSet
+fetchRoleRoleSet :: (?modelContext :: ModelContext) => UUID -> IO (RoleSet, Bool)
 fetchRoleRoleSet rid = do
   rows <- sqlQuery (toQuery roleSetForRoleQuery) (rid, rid)
-  pure (buildRoleSet (map projectRow rows))
+  pure (buildRoleSet (map projectRow rows), rid == superadminRoleId)
 
 projectRow :: (Maybe Text, Maybe UUID, Maybe Text) -> (Maybe PageKind, Maybe CameraId, Maybe CameraAction)
 projectRow (mp, mcam, ma) =

@@ -64,7 +64,17 @@ module Generated.Statements (
     module Generated.Statements.CreatePtzAuditLog,
     module Generated.Statements.UpdatePtzAuditLog,
     module Generated.Statements.FetchPtzAuditLog,
-    module Generated.Statements.CreateManyPtzAuditLog
+    module Generated.Statements.CreateManyPtzAuditLog,
+    module Generated.Statements.RowDecoderRole,
+    module Generated.Statements.CreateRole,
+    module Generated.Statements.UpdateRole,
+    module Generated.Statements.FetchRole,
+    module Generated.Statements.CreateManyRole,
+    module Generated.Statements.RowDecoderAdminAudit,
+    module Generated.Statements.CreateAdminAudit,
+    module Generated.Statements.UpdateAdminAudit,
+    module Generated.Statements.FetchAdminAudit,
+    module Generated.Statements.CreateManyAdminAudit
 ) where
 import qualified Generated.Statements.RowDecoderHost
 import qualified Generated.Statements.CreateHost
@@ -131,4 +141,14 @@ import qualified Generated.Statements.CreatePtzAuditLog
 import qualified Generated.Statements.UpdatePtzAuditLog
 import qualified Generated.Statements.FetchPtzAuditLog
 import qualified Generated.Statements.CreateManyPtzAuditLog
+import qualified Generated.Statements.RowDecoderRole
+import qualified Generated.Statements.CreateRole
+import qualified Generated.Statements.UpdateRole
+import qualified Generated.Statements.FetchRole
+import qualified Generated.Statements.CreateManyRole
+import qualified Generated.Statements.RowDecoderAdminAudit
+import qualified Generated.Statements.CreateAdminAudit
+import qualified Generated.Statements.UpdateAdminAudit
+import qualified Generated.Statements.FetchAdminAudit
+import qualified Generated.Statements.CreateManyAdminAudit
 

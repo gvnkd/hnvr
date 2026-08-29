@@ -1,7 +1,7 @@
 -- This file is auto generated and will be overriden regulary. Please edit `Application/Schema.sql` to change the Types\n"
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, InstanceSigs, MultiParamTypeClasses, TypeFamilies, DataKinds, TypeOperators, UndecidableInstances, ConstraintKinds, StandaloneDeriving  #-}
-{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches #-}
-module Generated.ActualTypes.PrimaryKeys where
+{-# OPTIONS_GHC -Wno-unused-imports -Wno-dodgy-imports -Wno-unused-matches -Wno-ambiguous-fields #-}
+module Generated.ActualTypes.Role where
 import IHP.HaskellSupport
 import IHP.ModelSupport
 import CorePrelude hiding (id)
@@ -42,33 +42,18 @@ import Hasql.PostgresqlTypes ()
 import Data.Bits ((.&.), (.|.))
 import Control.Monad (unless)
 import Generated.Enums
-type instance PrimaryKey "hosts" = Text
-instance Default (Id' "hosts") where def = Id def
-type instance PrimaryKey "cameras" = UUID
-instance Default (Id' "cameras") where def = Id def
-type instance PrimaryKey "camera_drift" = UUID
-instance Default (Id' "camera_drift") where def = Id def
-type instance PrimaryKey "segments" = UUID
-instance Default (Id' "segments") where def = Id def
-type instance PrimaryKey "users" = UUID
-instance Default (Id' "users") where def = Id def
-type instance PrimaryKey "rules" = UUID
-instance Default (Id' "rules") where def = Id def
-type instance PrimaryKey "events" = UUID
-instance Default (Id' "events") where def = Id def
-type instance PrimaryKey "event_clips" = UUID
-instance Default (Id' "event_clips") where def = Id def
-type instance PrimaryKey "event_clip_events" = UUID
-instance Default (Id' "event_clip_events") where def = Id def
-type instance PrimaryKey "camera_snapshots" = UUID
-instance Default (Id' "camera_snapshots") where def = Id def
-type instance PrimaryKey "audit_log" = Integer
-instance Default (Id' "audit_log") where def = Id def
-type instance PrimaryKey "ptz_presets" = UUID
-instance Default (Id' "ptz_presets") where def = Id def
-type instance PrimaryKey "ptz_audit_log" = Integer
-instance Default (Id' "ptz_audit_log") where def = Id def
-type instance PrimaryKey "roles" = UUID
-instance Default (Id' "roles") where def = Id def
-type instance PrimaryKey "admin_audit" = Integer
-instance Default (Id' "admin_audit") where def = Id def
+import Generated.ActualTypes.PrimaryKeys
+data Role' = Role {id :: (Id' "roles"), name :: Text, description :: Text, isSystem :: Bool, createdAt :: UTCTime, meta :: MetaBag} deriving (Eq, Show)
+
+type Role = Role'
+
+type instance GetTableName (Role') = "roles"
+type instance GetModelByTableName "roles" = Role
+
+
+instance IHP.ModelSupport.Table (Role') where
+    tableName = "roles"
+    columnNames = ["id","name","description","is_system","created_at"]
+    primaryKeyColumnNames = ["id"]
+
+
