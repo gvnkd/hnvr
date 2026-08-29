@@ -175,8 +175,7 @@ renderPathsYaml relayBase cams =
       | not (cpEnabled cam) = mempty
       | otherwise =
           [ "  " <> cpSlug cam <> ":",
-            "    source: " <> cpSource cam,
-            "    rtspTransport: " <> cpTransport cam,
+            "    source: '" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam) <> "'",
             "    sourceOnDemand: yes",
             "  " <> livePathName (cpSlug cam) <> ":",
             "    runOnDemand: '"
@@ -184,6 +183,26 @@ renderPathsYaml relayBase cams =
               <> "'",
             "    runOnDemandRestart: yes"
           ]
+
+-- | Ingestion via an ffmpeg republisher instead of a raw RTSP pull.
+--
+-- ICAMRA-OEM cameras emit a malformed SDP after switching to AAC: the
+-- m=audio line keeps static payload type 0 (PCMU) while the rtpmap
+-- overrides it to MPEG4-GENERIC/16000. ffmpeg honors the rtpmap,
+-- gortsplib (mediamtx) binds static PT 0 as G.711 — the relay then
+-- re-labels AAC payloads as PCMU and every downstream consumer hears
+-- noise. Republishing through ffmpeg (-c copy, no transcoding) fixes
+-- the announcement: dynamic payload types, correct codec/rate. The
+-- command publishes back to the same path (mediamtx exec-source
+-- semantics), so session capping and sourceOnDemand keep working.
+execSourceCmd :: Text -> Text -> Text -> Text
+execSourceCmd slug url transport =
+  "ffmpeg -loglevel error -rtsp_transport "
+    <> transport
+    <> " -i "
+    <> url
+    <> " -c copy -f rtsp rtsp://127.0.0.1:8554/"
+    <> slug
 
 -- | Per-path REST payloads for the enabled cameras: the ingestion
 -- path (unchanged shape) plus the @-live@ transcoded path, as
@@ -201,8 +220,7 @@ pathConfigs relayBase cams =
     ( \cam ->
         [ ( cpSlug cam,
             object
-              [ "source" .= cpSource cam,
-                "rtspTransport" .= cpTransport cam,
+              [ "source" .= ("exec:" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam)),
                 "sourceOnDemand" .= True
               ]
           ),
