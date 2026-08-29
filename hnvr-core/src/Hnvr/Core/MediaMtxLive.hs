@@ -178,9 +178,9 @@ renderPathsYaml relayBase cams =
       | not (cpEnabled cam) = mempty
       | otherwise =
           [ "  " <> cpSlug cam <> ":",
-            "    runOnDemand: '" <> execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam) <> "'",
-            "    runOnDemandRestart: yes",
-            "    runOnDemandStartTimeout: 20s",
+            "    source: " <> cpSource cam,
+            "    rtspTransport: " <> cpTransport cam,
+            "    sourceOnDemand: yes",
             "  " <> livePathName (cpSlug cam) <> ":",
             "    runOnDemand: '"
               <> runOnDemandCmd relayBase (cpSlug cam) (cpLiveAudio cam)
@@ -189,34 +189,14 @@ renderPathsYaml relayBase cams =
             "    runOnDemandStartTimeout: 20s"
           ]
 
--- | Ingestion via an ffmpeg republisher instead of a raw RTSP source.
---
--- ICAMRA-OEM cameras emit a malformed SDP after switching to AAC: the
--- m=audio line keeps static payload type 0 (PCMU) while the rtpmap
--- overrides it to MPEG4-GENERIC/16000. ffmpeg honors the rtpmap,
--- gortsplib (mediamtx) binds static PT 0 as G.711 — a plain rtsp://
--- source makes the relay re-label AAC payloads as PCMU, and every
--- downstream consumer hears noise. mediamtx has no exec: source, but
--- runOnDemand is the same mechanism: the command publishes to the
--- path with a correct dynamic-PT announcement. The recorder ffmpegs
--- are persistent readers, so the command stays up;
--- single-ingestion-point semantics unchanged.
---
--- Audio is TRANSCODED here (-c:a aac, not copy): the camera's AAC
--- also carries a broken AU-header config, which makes downstream
--- ffmpeg audio filtergraphs flap between late-initialize and hang-
--- forever-waiting-for-the-first-audio-frame (zero-output recorder).
--- Decoding once at ingestion normalizes the stream for every
--- consumer. The genpts+igndts+discardcorrupt input flags are load-
--- bearing: without them the audio path stalls outright.
-execSourceCmd :: Text -> Text -> Text -> Text
-execSourceCmd slug url transport =
-  "ffmpeg -loglevel error -fflags +genpts+igndts+discardcorrupt -rtsp_transport "
-    <> transport
-    <> " -i "
-    <> url
-    <> " -c:v copy -af aresample=48000 -c:a aac -b:a 64k -rtsp_transport tcp -f rtsp rtsp://127.0.0.1:8554/"
-    <> slug
+-- | Ingestion stays a plain rtsp:// source (NOT an ffmpeg republisher):
+-- a runOnDemand republisher fights its own readers (mediamtx cycled it
+-- every ~10s with "not needed by anyone" while sessions were attached,
+-- corrupting decode downstream), and transcoding at ingestion only
+-- papers over cameras with broken firmware. ICAMRA AAC is broken at
+-- three levels (static-PT-0 SDP, malformed AU headers, unstable
+-- streams) — such cameras must stay on G.711, which their firmware
+-- signals correctly.
 
 -- | Per-path REST payloads for the enabled cameras: the ingestion
 -- path (unchanged shape) plus the @-live@ transcoded path, as
@@ -234,9 +214,9 @@ pathConfigs relayBase cams =
     ( \cam ->
         [ ( cpSlug cam,
             object
-              [ "runOnDemand" .= execSourceCmd (cpSlug cam) (cpSource cam) (cpTransport cam),
-                "runOnDemandRestart" .= True,
-                "runOnDemandStartTimeout" .= ("20s" :: Text)
+              [ "source" .= cpSource cam,
+                "rtspTransport" .= cpTransport cam,
+                "sourceOnDemand" .= True
               ]
           ),
           ( livePathName (cpSlug cam),
