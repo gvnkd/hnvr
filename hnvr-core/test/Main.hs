@@ -2,6 +2,7 @@ module Main (main) where
 
 import qualified Hnvr.Core.ArchiveBrowserSpec as ArchiveBrowserSpec
 import qualified Hnvr.Core.AssignmentSpec as AssignmentSpec
+import qualified Hnvr.Core.AuthzSpec as AuthzSpec
 import qualified Hnvr.Core.CameraSnapshotSpec as CameraSnapshotSpec
 import qualified Hnvr.Core.CameraStatusSpec as CameraStatusSpec
 import qualified Hnvr.Core.ClipSpec as ClipSpec
@@ -31,6 +32,7 @@ main =
       "hnvr-core"
       [ ArchiveBrowserSpec.tests,
         AssignmentSpec.tests,
+        AuthzSpec.tests,
         CameraSnapshotSpec.tests,
         CameraStatusSpec.tests,
         ClipSpec.tests,

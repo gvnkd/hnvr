@@ -132,6 +132,12 @@ eventDedupSql = $(embedFile "migrations/0014-event-dedup.sql")
 cameraModelNameSql :: ByteString
 cameraModelNameSql = $(embedFile "migrations/0015-camera-model-name.sql")
 
+-- | Roles & ACL: camera_action/page_kind enums, roles + grant tables,
+-- admin_audit, seeded superadmin/guest system roles
+-- (design_docs/13-roles-and-acl.md, M1). See the file header.
+rolesAclSql :: ByteString
+rolesAclSql = $(embedFile "migrations/0016-roles-acl.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -211,6 +217,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0015-camera-model-name" cameraModelNameSql) True conn
     handleResult "0015-camera-model-name" modelRes
+    rolesAclRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0016-roles-acl" rolesAclSql) True conn
+    handleResult "0016-roles-acl" rolesAclRes
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where
