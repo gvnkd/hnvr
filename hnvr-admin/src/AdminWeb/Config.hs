@@ -20,14 +20,18 @@ where
 
 import AdminWeb.Bootstrap (bootstrapFromEnv)
 import qualified Control.Exception as E
+import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Generated.Types
-import Hnvr.Core.Logging (logError)
+import Hnvr.Core.Logging (logError, logInfo)
+import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Web.Auth ()
 import Hnvr.Web.Authz (authzMiddleware)
+import Hnvr.Web.BusRegistry (busRegistry)
 import IHP.FrameworkConfig
 import IHP.LoginSupport.Middleware (authMiddleware)
+import IHP.ModelSupport (ModelContext)
 import IHP.Prelude
 import qualified System.Environment as Env
 import Text.Read (readMaybe)
@@ -41,6 +45,7 @@ config = do
   option $ SessionCookie ((defaultIHPSessionCookie baseUrl) {Cookie.setCookieName = "hnvr_admin"})
   option $ AuthMiddleware (authMiddleware @User . authzMiddleware)
   addInitializer seedBootstrap
+  addInitializer connectNats
   where
     seedBootstrap =
       bootstrapFromEnv `E.catch` \(e :: E.SomeException) ->
@@ -50,3 +55,18 @@ adminPort :: IO Int
 adminPort = do
   mPort <- Env.lookupEnv "HNVR_ADMIN_PORT"
   pure (fromMaybe 18010 (mPort >>= readMaybe))
+
+-- | Admin camera/rule mutations republish assign payloads to the owning
+-- host exactly like the leader's controllers used to (design_docs/13 M4:
+-- "NATS snapshot rebroadcast on admin mutations"). Best-effort: a bus
+-- outage must not take the admin UI down.
+connectNats :: (?context :: FrameworkConfig, ?modelContext :: ModelContext) => IO ()
+connectNats = do
+  uri <- fromMaybe "nats://nats:nats@localhost:4222" <$> Env.lookupEnv "HNVR_NATS_URI"
+  connect' uri `E.catch` \(e :: E.SomeException) ->
+    logError ("hnvr-admin: NATS connect failed (mutations will not rebroadcast): " <> cs (show e))
+  where
+    connect' uri = do
+      bus <- Bus.connect Bus.defaultConfig {Bus.busUri = uri}
+      writeIORef busRegistry (Just bus)
+      logInfo "hnvr-admin: connected to NATS"

@@ -26,18 +26,29 @@ library
     AdminWeb.FrontController
     AdminWeb.Grants
     AdminWeb.Server
+    AdminWeb.View.Cameras.Edit
+    AdminWeb.View.Cameras.Index
+    AdminWeb.View.Cameras.New
+    AdminWeb.View.Cameras.Show
     AdminWeb.View.Layout
     AdminWeb.View.Overview.Index
+    AdminWeb.View.PtzPresets.Index
     AdminWeb.View.Roles.Edit
     AdminWeb.View.Roles.Form
     AdminWeb.View.Roles.Index
     AdminWeb.View.Roles.New
+    AdminWeb.View.Rules.Edit
+    AdminWeb.View.Rules.Index
+    AdminWeb.View.Rules.New
     AdminWeb.View.Users.Edit
     AdminWeb.View.Users.Index
     AdminWeb.View.Users.New
     AdminWeb.View.Users.RoleBoxes
+    Web.Controller.Cameras
     Web.Controller.Overview
+    Web.Controller.PtzPresets
     Web.Controller.Roles
+    Web.Controller.Rules
     Web.Controller.Sessions
     Web.Controller.Users
 
@@ -48,10 +59,14 @@ library
     , containers
     , cookie
     , hnvr-core
+    , hnvr-cv
+    , hnvr-nats
     , hnvr-web
+    , http-client
     , http-types
     , ihp
     , postgresql-simple
+    , scientific
     , text
     , time
     , uuid

@@ -39,6 +39,9 @@ renderAdminLayout inner =
         {navItem "/" "▦" "Overview" (currentPath == "/" || currentPath == "/Overview")}
         {navItem "/Roles" "⚿" "Roles" (isPrefix "/Roles" || isPrefix "/NewRole" || isPrefix "/EditRole")}
         {navItem "/Users" "◍" "Users" (isPrefix "/Users" || isPrefix "/NewUser" || isPrefix "/EditUser")}
+        <div class="nav-section">Topology</div>
+        {navItem "/Cameras" "◫" "Cameras" (isPrefix "/Cameras" || isPrefix "/NewCamera" || isPrefix "/EditCamera" || isPrefix "/ShowCamera")}
+        {navItem "/Rules" "⌖" "Rules" (isPrefix "/Rules" || isPrefix "/NewRule" || isPrefix "/EditRule")}
         <span class="spacer"></span>
         <div class="sidenav-footer">
           {userPill}

@@ -51,7 +51,6 @@ ptzPanel camera presets =
 |]
   where
     cid = tshow (camera |> get #id)
-    presetsUrl = "/PtzPresets?ptzCameraId=" <> cid
     rs = currentRoleSet
     camId = case camera |> get #id of Id u -> CameraId u
     canMove = cameraAllowed rs PtzMove camId
@@ -88,7 +87,6 @@ ptzPanel camera presets =
               <button class="btn btn-ghost" id="ptz-preset-go">go</button>
               <button class="btn btn-ghost" id="ptz-preset-save">save</button>
               <button class="btn btn-ghost" id="ptz-preset-del">delete</button>
-              <a class="btn btn-ghost" href={presetsUrl}>manage</a>
             </div>
             <div class="ptz-row">
               <button class="btn" id="ptz-home">⌂ home</button>

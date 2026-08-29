@@ -90,5 +90,4 @@ instance View IndexView where
                     {forEach ours renderCamLi}
                   </ul>
                 |]
-      renderCamLi c = [hsx|<li><span>{c.slug}</span><a href={showCam c}>config →</a></li>|]
-      showCam c = "/ShowCamera?cameraId=" <> tshow (c |> get #id)
+      renderCamLi c = [hsx|<li><span>{c.slug}</span></li>|]

@@ -7,12 +7,13 @@
 -- | /NewRule — rule creation form with the drawing canvas (Phase 4).
 -- The form markup + JS live in 'ruleForm' so the Edit view can reuse
 -- it with a prefilled rule.
-module Hnvr.Web.View.Rules.New
+module AdminWeb.View.Rules.New
   ( NewView (..),
     ruleForm,
   )
 where
 
+import AdminWeb.View.Layout (renderAdminLayout)
 import Data.Aeson (Value (..), encode)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BL
@@ -23,7 +24,6 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Generated.Types
 import Hnvr.Cv.Decode (cocoClassName)
-import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
 newtype NewView = NewView
@@ -32,7 +32,7 @@ newtype NewView = NewView
 
 instance View NewView where
   html NewView {..} =
-    renderLayout
+    renderAdminLayout
       [hsx|
       <div class="page-header">
         <div>

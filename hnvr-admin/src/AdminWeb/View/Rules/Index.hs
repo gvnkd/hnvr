@@ -5,11 +5,12 @@
 
 -- | /Rules view: rule list with camera, kind, classes, and edit/purge
 -- actions (Phase 4).
-module Hnvr.Web.View.Rules.Index
+module AdminWeb.View.Rules.Index
   ( IndexView (..),
   )
 where
 
+import AdminWeb.View.Layout (renderAdminLayout)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -18,7 +19,6 @@ import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import Generated.Types
 import Hnvr.Cv.Decode (cocoClassName)
-import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
@@ -29,7 +29,7 @@ data IndexView = IndexView
 
 instance View IndexView where
   html IndexView {..} =
-    renderLayout
+    renderAdminLayout
       [hsx|
       <div class="page-header">
         <div>

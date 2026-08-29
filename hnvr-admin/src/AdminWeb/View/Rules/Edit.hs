@@ -4,14 +4,14 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 
 -- | /EditRule — prefilled rule form (shares 'ruleForm' with New).
-module Hnvr.Web.View.Rules.Edit
+module AdminWeb.View.Rules.Edit
   ( EditView (..),
   )
 where
 
+import AdminWeb.View.Layout (renderAdminLayout)
+import AdminWeb.View.Rules.New (ruleForm)
 import Generated.Types
-import Hnvr.Web.View.Layout (renderLayout)
-import Hnvr.Web.View.Rules.New (ruleForm)
 import IHP.ViewPrelude
 
 data EditView = EditView
@@ -21,7 +21,7 @@ data EditView = EditView
 
 instance View EditView where
   html EditView {..} =
-    renderLayout
+    renderAdminLayout
       [hsx|
       <div class="page-header">
         <div>

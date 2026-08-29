@@ -5,13 +5,13 @@
 
 -- | /PtzPresets — per-camera preset list + create/goto/home/delete
 -- forms (Phase 5, design 05 §"Preset management").
-module Hnvr.Web.View.PtzPresets.Index
+module AdminWeb.View.PtzPresets.Index
   ( IndexView (..),
   )
 where
 
+import AdminWeb.View.Layout (renderAdminLayout)
 import Generated.Types
-import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
@@ -22,7 +22,7 @@ data IndexView = IndexView
 
 instance View IndexView where
   html IndexView {..} =
-    renderLayout
+    renderAdminLayout
       [hsx|
       <div class="page-header">
         <div>

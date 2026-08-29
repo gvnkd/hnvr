@@ -3,15 +3,15 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
-module Hnvr.Web.View.Cameras.Edit (EditView (..)) where
+module AdminWeb.View.Cameras.Edit (EditView (..)) where
 
+import AdminWeb.View.Layout (renderAdminLayout)
 import Generated.Types
 import Hnvr.Core.Authz (CameraAction (..), cameraAllowed)
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Onvif
 import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.OnvifSync (FormOptions (..), skipReasonFor)
-import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
@@ -24,7 +24,7 @@ data EditView = EditView
 
 instance View EditView where
   html EditView {..} =
-    renderLayout
+    renderAdminLayout
       [hsx|
       <div class="page-header">
         <div>

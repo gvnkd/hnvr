@@ -33,7 +33,6 @@ instance View PlayerView where
         <div class="actions">
           <a class="btn btn-ghost" href={archiveUrl}>Browse</a>
           <a class="btn btn-ghost" href={liveUrl}>Live</a>
-          <a class="btn btn-ghost" href={editUrl}>Config</a>
         </div>
       </div>
 
@@ -61,7 +60,6 @@ instance View PlayerView where
       cid = tshow (camera |> get #id)
       archiveUrl = "/Timeline"
       liveUrl = "/ShowLive?cameraId=" <> cid
-      editUrl = "/ShowCamera?cameraId=" <> cid
       -- IHP HSX doesn't splice {…} inside <script> tags (treats script
       -- body as pre-escaped text). Build the entire <script> element
       -- in Haskell and inject as a single body-level splice. See pitfall #63.

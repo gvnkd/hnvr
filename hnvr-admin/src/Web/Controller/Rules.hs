@@ -29,6 +29,10 @@ module Web.Controller.Rules
   )
 where
 
+import AdminWeb.Audit (auditAdmin)
+import AdminWeb.View.Rules.Edit
+import AdminWeb.View.Rules.Index
+import AdminWeb.View.Rules.New
 import Data.Aeson (decode, object, (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (readIORef)
@@ -38,16 +42,10 @@ import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (getCurrentTime)
 import Data.UUID (UUID)
 import Generated.Types
-import Hnvr.Core.Authz (CameraAction (..), PageKind (..))
-import Hnvr.Core.Id (CameraId (..))
-import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
-import Hnvr.Web.Authz (aclCameraIds, aclFilterCameras, ensurePagePerm, ensurePerm, toCameraId)
+import Hnvr.Web.Authz (ensureSuperadmin)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (cameraIdOf, republishAssign)
-import Hnvr.Web.View.Rules.Edit
-import Hnvr.Web.View.Rules.Index
-import Hnvr.Web.View.Rules.New
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 import IHP.ModelSupport (Id' (Id))
@@ -68,53 +66,44 @@ instance Controller RulesController where
   beforeAction = ensureIsUser
 
   action RulesAction = do
-    ensurePagePerm PageRules
-    -- Rules name their camera — listing is scoped to the subject's
-    -- manage_events ACL (rules ARE event policy; design_docs/13).
-    mAclIds <- aclCameraIds ManageEvents
-    rules <-
-      ( case mAclIds of
-          Nothing -> id
-          Just ids -> filterWhereIn (#cameraId, ids)
-      )
-        (query @Rule |> orderByDesc #createdAt)
-        |> fetch
-    cameras <- aclFilterCameras ManageEvents (query @Camera |> orderBy #slug) >>= fetch
+    ensureSuperadmin
+    rules <- query @Rule |> orderByDesc #createdAt |> fetch
+    cameras <- query @Camera |> orderBy #slug |> fetch
     render IndexView {..}
   action NewRuleAction {ruleCameraId} = do
-    ensurePerm ManageEvents (toCameraId ruleCameraId)
+    ensureSuperadmin
     camera <- fetch ruleCameraId
     render NewView {..}
   action CreateRuleAction = do
     camera <- fetch (param @(Id Camera) "camera_id")
-    ensurePerm ManageEvents (toCameraId (camera |> get #id))
+    ensureSuperadmin
     let rule = buildRuleFromParams (newRecord @Rule |> set #cameraId (camUuidOf camera))
     rule' <- rule |> createRecord
-    audit currentUserUuid "rule.create" "rule" (Just (ruleUuid rule')) (Just (object ["name" .= rule'.name, "camera_slug" .= camera.slug]))
+    auditAdmin "rule.create" "rule" (Just (tshow (ruleUuid rule'))) (Just (object ["name" .= rule'.name, "camera_slug" .= camera.slug]))
     publishRuleRefresh camera
     setSuccessMessage "Rule created"
     redirectTo EditRuleAction {ruleId = rule' |> get #id}
   action EditRuleAction {ruleId} = do
     rule <- fetch ruleId
-    ensurePerm ManageEvents (CameraId rule.cameraId)
+    ensureSuperadmin
     camera <- fetch (Id rule.cameraId :: Id Camera)
     render EditView {..}
   action UpdateRuleAction {ruleId} = do
     rule <- fetch ruleId
-    ensurePerm ManageEvents (CameraId rule.cameraId)
+    ensureSuperadmin
     now <- liftIO getCurrentTime
     rule' <- (buildRuleFromParams rule |> set #updatedAt now) |> updateRecord
-    audit currentUserUuid "rule.update" "rule" (Just (ruleUuid rule')) (Just (object ["name" .= rule'.name]))
+    auditAdmin "rule.update" "rule" (Just (tshow (ruleUuid rule'))) (Just (object ["name" .= rule'.name]))
     camera <- fetch (Id rule.cameraId :: Id Camera)
     publishRuleRefresh camera
     setSuccessMessage "Rule updated"
     redirectTo EditRuleAction {ruleId = rule' |> get #id}
   action PurgeRuleAction {ruleId} = do
     rule <- fetch ruleId
-    ensurePerm ManageEvents (CameraId rule.cameraId)
+    ensureSuperadmin
     camera <- fetch (Id rule.cameraId :: Id Camera)
     deleteRecord rule
-    audit currentUserUuid "rule.delete" "rule" (Just (ruleUuid rule)) (Just (object ["name" .= rule.name]))
+    auditAdmin "rule.delete" "rule" (Just (tshow (ruleUuid rule))) (Just (object ["name" .= rule.name]))
     publishRuleRefresh camera
     setSuccessMessage "Rule deleted"
     redirectTo RulesAction
@@ -168,10 +157,3 @@ camUuidOf cam = case cam |> get #id of Id u -> u
 
 ruleUuid :: Rule -> UUID
 ruleUuid r = case r |> get #id of Id u -> u
-
--- | Acting user's UUID for audit rows (Nothing when unauthenticated;
--- ensureIsUser gates these actions anyway).
-currentUserUuid :: (?request :: Request) => Maybe UUID
-currentUserUuid = case currentUserOrNothing of
-  Nothing -> Nothing
-  Just u -> case u |> get #id of Id uuid -> Just uuid

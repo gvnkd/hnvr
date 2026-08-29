@@ -9,7 +9,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Generated.Types
-import Hnvr.Core.Authz (CameraAction (..), PageKind (..), cameraAllowedAnywhere, pageAllowed)
+import Hnvr.Core.Authz (PageKind (..), pageAllowed)
 import Hnvr.Web (version)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.Authz (currentRoleSet)
@@ -48,9 +48,6 @@ renderLayout inner =
         {navItemIf (allowPage PageDashboard) "/" "▦" "Dashboard" (currentPath == "/" || currentPath == "/Dashboard")}
         {navItemIf (allowPage PageEvents) "/Events" "◈" "Events" (isPrefix "/Events")}
         {navItemIf (allowPage PageArchive) "/Timeline" "◷" "Archive" (isPrefix "/Timeline" || isPrefix "/PlayerArchive")}
-        {navSection "Configure" [allowCam ViewConfig, allowPage PageRules]}
-        {navItemIf (allowCam ViewConfig) "/Cameras" "◫" "Cameras" (isPrefix "/Cameras" || isPrefix "/NewCamera" || isPrefix "/EditCamera" || isPrefix "/ShowCamera")}
-        {navItemIf (allowPage PageRules) "/Rules" "⌖" "Rules" (isPrefix "/Rules" || isPrefix "/NewRule" || isPrefix "/EditRule")}
         {navSection "System" [allowPage PageSettings, allowPage PageHosts]}
         {navItemIf (allowPage PageSettings) "/Stats" "▥" "Stats" (isPrefix "/Stats")}
         {navItemIf (allowPage PageHosts) "/Hosts" "⬡" "Hosts" (isPrefix "/Hosts")}
@@ -88,10 +85,10 @@ renderLayout inner =
 
     -- Roles & ACL (design_docs/13): nav items render only when the
     -- subject's RoleSet grants the page (hide, don't 403 — controllers
-    -- still enforce).
+    -- still enforce). Camera/rule management moved to hnvr-admin (M4),
+    -- so there is no Configure section here anymore.
     rs = currentRoleSet
     allowPage = pageAllowed rs
-    allowCam = cameraAllowedAnywhere rs
 
     navItemIf granted href glyph label active =
       if granted then navItem href glyph label active else mempty

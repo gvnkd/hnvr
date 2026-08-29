@@ -147,6 +147,11 @@ runLeaderMigrations :: IO ()
 runLeaderMigrations = do
   dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
   conn <- PG.connectPostgreSQL dbUrl
+  -- Serialize concurrent cold boots: hnvr-leader and hnvr-admin both run
+  -- migrations at startup and postgresql-simple-migration's init is not
+  -- concurrency-safe on a fresh DB (duplicate schema_migrations type,
+  -- 23505). A session-level advisory lock makes the loser wait.
+  _ <- PG.query_ conn "SELECT count(*) FROM (SELECT pg_advisory_lock(727272)) t" :: IO [PG.Only Int]
   -- postgresql-simple-migration requires the caller to wrap in a
   -- transaction; we use the connection-level withTransaction so the
   -- initialization + script run commit atomically.
@@ -221,6 +226,7 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0016-roles-acl" rolesAclSql) True conn
     handleResult "0016-roles-acl" rolesAclRes
+  _ <- PG.query_ conn "SELECT count(*) FROM (SELECT pg_advisory_unlock(727272)) t" :: IO [PG.Only Int]
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"
   where

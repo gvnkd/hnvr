@@ -3,10 +3,10 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
-module Hnvr.Web.View.Cameras.New (NewView (..)) where
+module AdminWeb.View.Cameras.New (NewView (..)) where
 
+import AdminWeb.View.Layout (renderAdminLayout)
 import Generated.Types
-import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
 newtype NewView = NewView
@@ -15,7 +15,7 @@ newtype NewView = NewView
 
 instance View NewView where
   html NewView {..} =
-    renderLayout
+    renderAdminLayout
       [hsx|
       <div class="page-header">
         <div>

@@ -35,7 +35,6 @@ instance View ShowView where
           <div class="subtitle">analysis overlay · dev-only</div>
         </div>
         <div class="actions">
-          <a class="btn btn-ghost" href="/Cameras">Cameras</a>
         </div>
       </div>
 

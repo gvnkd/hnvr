@@ -23,23 +23,21 @@ module Web.Controller.PtzPresets
   )
 where
 
+import AdminWeb.Audit (auditAdmin)
+import AdminWeb.View.PtzPresets.Index
 import Data.Aeson (Value (..), object, (.=))
 import Data.IORef (readIORef)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.UUID (UUID)
 import Generated.Types
-import Hnvr.Core.Authz (CameraAction (..))
-import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Core.Ptz
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Nats.Subjects (commandPtz)
-import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
-import Hnvr.Web.Authz (ensurePerm, toCameraId)
+import Hnvr.Web.Authz (ensureSuperadmin)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (republishAssign)
-import Hnvr.Web.View.PtzPresets.Index
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 import IHP.ModelSupport (Id' (Id))
@@ -58,12 +56,12 @@ instance Controller PtzPresetsController where
   beforeAction = ensureIsUser
 
   action PtzPresetsAction {ptzCameraId} = do
-    ensurePerm PtzPresetOp (toCameraId ptzCameraId)
+    ensureSuperadmin
     camera <- fetch ptzCameraId
     presets <- query @PtzPreset |> filterWhere (#cameraId, camUuid camera) |> orderBy #name |> fetch
     render IndexView {..}
   action CreatePtzPresetAction {ptzCameraId} = do
-    ensurePerm PtzPresetOp (toCameraId ptzCameraId)
+    ensureSuperadmin
     camera <- fetch ptzCameraId
     let name = param @Text "preset_name"
     mBus <- liftIO (readIORef busRegistry)
@@ -82,7 +80,7 @@ instance Controller PtzPresetsController where
                 |> set #name name
                 |> set #onvifToken (Just token)
                 |> createRecord
-            audit currentUserUuid "ptz_preset.create" "ptz_preset" (Just (presetUuid preset)) (Just (object ["slug" .= camera.slug, "name" .= name]))
+            auditAdmin "ptz_preset.create" "ptz_preset" (Just (tshow (presetUuid preset))) (Just (object ["slug" .= camera.slug, "name" .= name]))
             if wantsJson
               then renderJson (object ["ok" .= True, "token" .= token, "preset_id" .= uuidText (presetUuid preset)])
               else do
@@ -100,25 +98,25 @@ instance Controller PtzPresetsController where
             redirectTo PtzPresetsAction {ptzCameraId}
   action GotoPtzPresetAction {ptzPresetId} = do
     preset <- fetch ptzPresetId
-    ensurePerm PtzPresetOp (CameraId preset.cameraId)
+    ensureSuperadmin
     camera <- fetch (presetCameraId preset)
     case preset.onvifToken of
       Nothing -> setErrorMessage "Preset has no ONVIF token"
       Just token -> do
         mWarn <- publishCmd camera (CmdGotoPreset (PresetToken token)) (uuidText <$> currentUserUuid)
         forM_ mWarn setErrorMessage
-        audit currentUserUuid "ptz_preset.goto" "ptz_preset" (Just (presetUuid preset)) (Just (object ["slug" .= camera.slug, "name" .= preset.name]))
+        auditAdmin "ptz_preset.goto" "ptz_preset" (Just (tshow (presetUuid preset))) (Just (object ["slug" .= camera.slug, "name" .= preset.name]))
         when (isNothing mWarn) (setSuccessMessage ("Going to preset " <> preset.name))
     redirectTo PtzPresetsAction {ptzCameraId = presetCameraId preset}
   action PurgePtzPresetAction {ptzPresetId} = do
     preset <- fetch ptzPresetId
-    ensurePerm PtzPresetOp (CameraId preset.cameraId)
+    ensureSuperadmin
     camera <- fetch (presetCameraId preset)
     forM_ preset.onvifToken $ \token -> do
       mWarn <- publishCmd camera (CmdRemovePreset (PresetToken token)) (uuidText <$> currentUserUuid)
       forM_ mWarn setErrorMessage
     deleteRecord preset
-    audit currentUserUuid "ptz_preset.delete" "ptz_preset" (Just (presetUuid preset)) (Just (object ["slug" .= camera.slug, "name" .= preset.name]))
+    auditAdmin "ptz_preset.delete" "ptz_preset" (Just (tshow (presetUuid preset))) (Just (object ["slug" .= camera.slug, "name" .= preset.name]))
     if wantsJson
       then renderJson (object ["ok" .= True])
       else do
@@ -126,7 +124,7 @@ instance Controller PtzPresetsController where
         redirectTo PtzPresetsAction {ptzCameraId = presetCameraId preset}
   action HomePtzPresetAction {ptzPresetId} = do
     preset <- fetch ptzPresetId
-    ensurePerm PtzPresetOp (CameraId preset.cameraId)
+    ensureSuperadmin
     camera <- fetch (presetCameraId preset)
     siblings <- query @PtzPreset |> filterWhere (#cameraId, preset.cameraId) |> fetch
     forM_ siblings $ \p ->
@@ -134,7 +132,7 @@ instance Controller PtzPresetsController where
     camera' <- camera |> set #ptzHomePresetId (Just ptzPresetId) |> updateRecord
     mBus <- liftIO (readIORef busRegistry)
     forM_ mBus $ \bus -> republishAssign bus camera'
-    audit currentUserUuid "ptz_preset.home" "ptz_preset" (Just (presetUuid preset)) (Just (object ["slug" .= camera.slug, "name" .= preset.name]))
+    auditAdmin "ptz_preset.home" "ptz_preset" (Just (tshow (presetUuid preset))) (Just (object ["slug" .= camera.slug, "name" .= preset.name]))
     setSuccessMessage ("Home preset: " <> preset.name)
     redirectTo PtzPresetsAction {ptzCameraId = presetCameraId preset}
 

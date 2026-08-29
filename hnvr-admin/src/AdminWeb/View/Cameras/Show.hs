@@ -3,8 +3,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
-module Hnvr.Web.View.Cameras.Show (ShowView (..)) where
+module AdminWeb.View.Cameras.Show (ShowView (..)) where
 
+import AdminWeb.View.Layout (renderAdminLayout)
 import Data.Time.Clock (UTCTime)
 import Generated.Types
 import Hnvr.Core.Authz (CameraAction (..), PageKind (..), cameraAllowed, pageAllowed)
@@ -12,7 +13,6 @@ import Hnvr.Core.CameraStatus (CameraStatus (..))
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.CameraStatus (cameraStatusFor)
-import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.Time (tzTime)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
@@ -26,7 +26,7 @@ data ShowView = ShowView
 
 instance View ShowView where
   html ShowView {..} =
-    renderLayout
+    renderAdminLayout
       [hsx|
       <div class="page-header">
         <div>

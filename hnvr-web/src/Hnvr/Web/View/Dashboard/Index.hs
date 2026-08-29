@@ -136,7 +136,7 @@ instance View IndexView where
       lastHealthHtml Nothing = [hsx|—|]
       lastHealthHtml (Just t) = tzTime t
 
-      renderCameras [] = [hsx|<div class="empty"><span class="empty-icon">⌖</span>No cameras yet. Add some via the Cameras page.</div>|]
+      renderCameras [] = [hsx|<div class="empty"><span class="empty-icon">⌖</span>No cameras yet. Add some via hnvr-admin.</div>|]
       renderCameras cs =
         [hsx|
           <div class="cam-grid">
@@ -147,23 +147,19 @@ instance View IndexView where
         where
           cid = tshow (cam |> get #id)
           frameUrl = "/debug-frame/" <> cid
-          showUrl = "/ShowCamera?cameraId=" <> cid
           archiveUrl = "/PlayerArchive?cameraId=" <> cid
           debugUrl = "/DebugCamera?cameraId=" <> cid
           hostLabel = fromMaybe "unassigned" cam.assignedHost
           -- Card links follow the same grants as their targets
-          -- (design_docs/13 — hide, don't 403).
-          canConfig = cameraAllowed rs ViewConfig (camId cam)
+          -- (design_docs/13 — hide, don't 403). Camera config moved to
+          -- hnvr-admin (M4) — no config link here anymore.
           canArchive = cameraAllowed rs ViewArchive (camId cam)
           canDebug = pageAllowed rs PageSettings
           cardLinks = mconcat (List.intersperse linkSep linkItems)
           linkSep = [hsx|<span class="faint">·</span>|]
           linkItems =
-            concat
-              [ [[hsx|<a href={showUrl}>config</a>|] | canConfig],
-                [[hsx|<a href={archiveUrl}>archive</a>|] | canArchive],
-                [[hsx|<a href={debugUrl}>debug</a>|] | canDebug]
-              ]
+            [[hsx|<a href={archiveUrl}>archive</a>|] | canArchive]
+              ++ [[hsx|<a href={debugUrl}>debug</a>|] | canDebug]
           -- REC only while the assigned host reports this camera's
           -- worker as Running; anything else gets an explicit status
           -- badge (was: unconditional static REC, even for dead

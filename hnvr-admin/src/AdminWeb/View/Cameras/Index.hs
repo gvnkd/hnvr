@@ -3,13 +3,13 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
-module Hnvr.Web.View.Cameras.Index (IndexView (..)) where
+module AdminWeb.View.Cameras.Index (IndexView (..)) where
 
+import AdminWeb.View.Layout (renderAdminLayout)
 import Generated.Types
 import Hnvr.Core.Authz (CameraAction (..), cameraAllowed, cameraAllowedAnywhere)
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Authz (currentRoleSet)
-import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
@@ -20,7 +20,7 @@ data IndexView = IndexView
 
 instance View IndexView where
   html IndexView {..} =
-    renderLayout
+    renderAdminLayout
       [hsx|
       <div class="page-header">
         <div>

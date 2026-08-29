@@ -12,7 +12,6 @@ import IHP.Job.Types (Worker (..))
 import IHP.RouterSupport (FrontController (..), parseRoute, startPage)
 import Web.Controller.Archive (ArchiveController (..))
 import Web.Controller.AuditLog (AuditLogController (..))
-import Web.Controller.Cameras (CamerasController (..))
 import Web.Controller.Dashboard (DashboardController (..))
 import Web.Controller.Debug (DebugController (..))
 import Web.Controller.EventClips (EventClipsController (..))
@@ -21,12 +20,13 @@ import Web.Controller.Hosts (HostsController (..))
 import Web.Controller.Live (LiveController (..))
 import Web.Controller.Profile (ProfileController (..))
 import Web.Controller.Ptz (PtzController (..))
-import Web.Controller.PtzPresets (PtzPresetsController (..))
-import Web.Controller.Rules (RulesController (..))
 import Web.Controller.Sessions (SessionsController (..))
 import Web.Controller.Stats (StatsController (..))
 import Web.Controller.Timeline (TimelineController (..))
 
+-- | The end-user app is read-mostly (design_docs/13, M4): camera/rule/
+-- preset management lives in hnvr-admin — those routes are GONE here,
+-- not just hidden.
 instance FrontController RootApplication where
   controllers =
     [ -- / → DashboardAction (also reachable at /Dashboard via AutoRoute)
@@ -34,16 +34,13 @@ instance FrontController RootApplication where
       parseRoute @SessionsController,
       parseRoute @ProfileController,
       parseRoute @DashboardController,
-      parseRoute @CamerasController,
       parseRoute @HostsController,
       parseRoute @ArchiveController,
       parseRoute @LiveController,
       parseRoute @DebugController,
       parseRoute @EventsController,
       parseRoute @EventClipsController,
-      parseRoute @RulesController,
       parseRoute @PtzController,
-      parseRoute @PtzPresetsController,
       parseRoute @StatsController,
       parseRoute @AuditLogController,
       parseRoute @TimelineController

@@ -14,8 +14,11 @@ import IHP.ControllerSupport (InitControllerContext (..))
 import IHP.FrameworkConfig (RootApplication (..))
 import IHP.Job.Types (Worker (..))
 import IHP.RouterSupport (FrontController (..), parseRoute, startPage)
+import Web.Controller.Cameras (CamerasController (..))
 import Web.Controller.Overview (OverviewController (..))
+import Web.Controller.PtzPresets (PtzPresetsController (..))
 import Web.Controller.Roles (RolesController (..))
+import Web.Controller.Rules (RulesController (..))
 import Web.Controller.Sessions (SessionsController (..))
 import Web.Controller.Users (UsersController (..))
 
@@ -25,7 +28,10 @@ instance FrontController RootApplication where
       parseRoute @SessionsController,
       parseRoute @OverviewController,
       parseRoute @RolesController,
-      parseRoute @UsersController
+      parseRoute @UsersController,
+      parseRoute @CamerasController,
+      parseRoute @RulesController,
+      parseRoute @PtzPresetsController
     ]
 
 instance Worker RootApplication where

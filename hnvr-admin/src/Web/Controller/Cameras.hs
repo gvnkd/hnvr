@@ -22,6 +22,11 @@ module Web.Controller.Cameras
   )
 where
 
+import AdminWeb.Audit (auditAdmin)
+import AdminWeb.View.Cameras.Edit
+import AdminWeb.View.Cameras.Index
+import AdminWeb.View.Cameras.New
+import AdminWeb.View.Cameras.Show
 import Data.Aeson (object, (.=))
 import Data.IORef (readIORef)
 import Data.Text (Text)
@@ -29,19 +34,13 @@ import qualified Data.Text as Text
 import Data.Time.Clock (getCurrentTime)
 import Data.UUID (UUID)
 import Generated.Types
-import Hnvr.Core.Authz (CameraAction (..))
-import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
-import Hnvr.Web.Authz (aclFilterCameras, ensurePerm, ensurePermAnywhere, toCameraId)
+import Hnvr.Web.Authz (ensureSuperadmin)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.CommandTypes (publishAssignTo, republishAssignAlways)
 import Hnvr.Web.OnvifSync (FormOptions, checkCameraDrift, fetchFormOptions, probePtz, pushCameraConfig, skipReasonFor, targetForCamera)
 import Hnvr.Web.OnvifSyncer (persistDrift)
 import Hnvr.Web.PendingPurge (forkCameraFullPurge)
-import Hnvr.Web.View.Cameras.Edit
-import Hnvr.Web.View.Cameras.Index
-import Hnvr.Web.View.Cameras.New
-import Hnvr.Web.View.Cameras.Show
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (ensureIsUser)
 import IHP.ModelSupport (Id' (Id))
@@ -88,12 +87,6 @@ fetchOpts cam = do
       mgr <- HC.newManager HC.defaultManagerSettings
       Just <$> fetchFormOptions mgr target
 
--- | Acting user's UUID for audit rows.
-currentUserUuid :: (?request :: Request) => Maybe UUID
-currentUserUuid = case currentUserOrNothing of
-  Nothing -> Nothing
-  Just u -> case u |> get #id of Id uuid -> Just uuid
-
 data CamerasController
   = CamerasAction
   | ShowCameraAction {cameraId :: !(Id Camera)}
@@ -113,18 +106,19 @@ instance AutoRoute CamerasController
 instance Controller CamerasController where
   beforeAction = ensureIsUser
   action CamerasAction = do
-    cameras <- aclFilterCameras ViewConfig (query @Camera |> orderByDesc #createdAt) >>= fetch
+    ensureSuperadmin
+    cameras <- query @Camera |> orderByDesc #createdAt |> fetch
     drifts <- query @CameraDrift |> fetch
     render IndexView {..}
   action ShowCameraAction {cameraId} = do
-    ensurePerm ViewConfig (toCameraId cameraId)
+    ensureSuperadmin
     camera <- fetch cameraId
     drifts <- query @CameraDrift |> filterWhere (#cameraId, camUuid camera) |> fetch
     hosts <- query @Host |> fetch
     now <- liftIO getCurrentTime
     render ShowView {..}
   action NewCameraAction = do
-    ensurePermAnywhere EditConfig
+    ensureSuperadmin
     -- newRecord defaults analysisFps to 0, which violates the form's
     -- min="1" and makes HTML5 validation silently block every submit.
     -- Default to the documented 5 fps (design 03 §2b). Same story for
@@ -133,12 +127,12 @@ instance Controller CamerasController where
     let camera = newRecord @Camera |> set #analysisFps 5 |> set #snapshotIntervalSec 60
     render NewView {..}
   action EditCameraAction {cameraId} = do
-    ensurePerm EditConfig (toCameraId cameraId)
+    ensureSuperadmin
     camera <- fetch cameraId
     formOptions <- liftIO (fetchOpts camera)
     render EditView {..}
   action CreateCameraAction = do
-    ensurePermAnywhere EditConfig
+    ensureSuperadmin
     let camera0 =
           newRecord @Camera
             |> fill @'["slug", "name", "rtspUrl", "rtspTransport", "host", "username", "rtspSubUrl", "analysisFps", "modelName", "retentionHours", "snapshotIntervalSec"]
@@ -154,14 +148,14 @@ instance Controller CamerasController where
     if camera |> isValid
       then do
         camera <- camera |> createRecord
-        audit currentUserUuid "camera.create" "camera" (Just (camUuid camera)) (Just (object ["slug" .= camera.slug]))
+        auditAdmin "camera.create" "camera" (Just (tshow (camUuid camera))) (Just (object ["slug" .= camera.slug]))
         setSuccessMessage "Camera created"
         redirectTo ShowCameraAction {cameraId = camera |> get #id}
       else render NewView {..}
     where
       checkboxOn name = paramOrNothing @Text name == Just "on"
   action UpdateCameraAction {cameraId} = do
-    ensurePerm EditConfig (toCameraId cameraId)
+    ensureSuperadmin
     camera <- fetch cameraId
     let camera' =
           camera
@@ -189,7 +183,7 @@ instance Controller CamerasController where
     if camera2 |> isValid
       then do
         camera''' <- camera2 |> updateRecord
-        audit currentUserUuid "camera.update" "camera" (Just (camUuid camera''')) (Just (object ["slug" .= camera'''.slug]))
+        auditAdmin "camera.update" "camera" (Just (tshow (camUuid camera'''))) (Just (object ["slug" .= camera'''.slug]))
         -- Tell the owning host immediately: enabled=False publishes
         -- apCamera=Nothing (stop directive); any other edit restarts
         -- the worker pair with fresh config.
@@ -210,7 +204,7 @@ instance Controller CamerasController where
     where
       checkboxOn name = paramOrNothing @Text name == Just "on"
   action DeleteCameraAction {cameraId} = do
-    ensurePerm DeleteCamera (toCameraId cameraId)
+    ensureSuperadmin
     camera <- fetch cameraId
     -- Stop the worker on the owning host before the row disappears.
     mBus <- liftIO (readIORef busRegistry)
@@ -223,7 +217,7 @@ instance Controller CamerasController where
     -- doesn't fill with orphans (forkCameraFullPurge snapshots the key
     -- set first — a same-slug recreation mid-purge is safe).
     liftIO (forkCameraFullPurge camera.slug)
-    audit currentUserUuid "camera.delete" "camera" (Just (camUuid camera)) (Just (object ["slug" .= camera.slug]))
+    auditAdmin "camera.delete" "camera" (Just (tshow (camUuid camera))) (Just (object ["slug" .= camera.slug]))
     setSuccessMessage "Camera deleted — recordings purge from storage in the background"
     redirectTo CamerasAction
 
@@ -233,7 +227,7 @@ instance Controller CamerasController where
   -- @apCamera = Nothing@ and the owning host stops the worker
   -- pair (no more RTSP requests to an offline camera).
   action ToggleCameraEnabledAction {cameraId} = do
-    ensurePerm EditConfig (toCameraId cameraId)
+    ensureSuperadmin
     camera <- fetch cameraId
     now <- liftIO getCurrentTime
     camera' <-
@@ -242,7 +236,7 @@ instance Controller CamerasController where
         |> set #updatedAt now
         |> updateRecord
     let what = if camera'.enabled then "camera.enable" else "camera.disable"
-    audit currentUserUuid what "camera" (Just (camUuid camera')) (Just (object ["slug" .= camera'.slug]))
+    auditAdmin what "camera" (Just (tshow (camUuid camera'))) (Just (object ["slug" .= camera'.slug]))
     mBus <- liftIO (readIORef busRegistry)
     forM_ mBus $ \bus -> republishAssignAlways bus camera'
     setSuccessMessage (if camera'.enabled then "Camera enabled" else "Camera disabled — host notified")
@@ -254,7 +248,7 @@ instance Controller CamerasController where
   -- a flash error; sub-probe failure is logged but does not block main-probe
   -- persistence.
   action ProbeCameraAction {cameraId} = do
-    ensurePerm EditConfig (toCameraId cameraId)
+    ensureSuperadmin
     camera <- fetch cameraId
     mainResult <- liftIO (probe (camera |> get #rtspUrl))
     case mainResult of
@@ -289,7 +283,7 @@ instance Controller CamerasController where
   -- answers but GetStatus returns a nil position (fixed camera whose
   -- firmware accepts PTZ ops as no-ops — e.g. the Hik-OEM turrets).
   action ProbePtzCameraAction {cameraId} = do
-    ensurePerm EditConfig (toCameraId cameraId)
+    ensureSuperadmin
     camera <- fetch cameraId
     eTarget <- liftIO (targetForCamera camera)
     case eTarget of
@@ -309,7 +303,7 @@ instance Controller CamerasController where
                 |> set #ptzProfileToken (Just profileToken)
                 |> set #ptzEnabled True
                 |> updateRecord
-            audit currentUserUuid "camera.probe_ptz" "camera" (Just (camUuid camera')) (Just (object ["slug" .= camera'.slug, "profile_token" .= profileToken]))
+            auditAdmin "camera.probe_ptz" "camera" (Just (tshow (camUuid camera'))) (Just (object ["slug" .= camera'.slug, "profile_token" .= profileToken]))
             case mPos of
               Just _ -> setSuccessMessage ("PTZ OK: service found, profile token " <> profileToken)
               Nothing ->
@@ -326,7 +320,7 @@ instance Controller CamerasController where
   -- override the admin's choice. Empty host param clears the
   -- assignment and the manual pin (back to auto mode).
   action AssignCameraAction {cameraId} = do
-    ensurePerm EditConfig (toCameraId cameraId)
+    ensureSuperadmin
     camera <- fetch cameraId
     let hostParam = paramOrDefault ("" :: Text) "assigned_host"
         cleared = hostParam == ""
@@ -336,7 +330,7 @@ instance Controller CamerasController where
               then set #assignedHost Nothing . set #manualAssign False
               else set #assignedHost (Just hostParam) . set #manualAssign True
     camera'' <- camera' |> updateRecord
-    audit currentUserUuid "camera.assign" "camera" (Just (camUuid camera'')) (Just (object ["slug" .= camera''.slug, "assigned_host" .= hostParam]))
+    auditAdmin "camera.assign" "camera" (Just (tshow (camUuid camera''))) (Just (object ["slug" .= camera''.slug, "assigned_host" .= hostParam]))
     setSuccessMessage
       $ if cleared
         then "Assignment cleared (auto mode)"

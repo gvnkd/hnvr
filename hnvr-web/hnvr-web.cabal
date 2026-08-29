@@ -1,6 +1,6 @@
 cabal-version: 2.4
 name:          hnvr-web
-version:       0.20.0.0
+version:       0.21.0.0
 synopsis:
   HNVR leader (IHP web + event writer + MediaMTX sync) and node binaries
 
@@ -168,10 +168,6 @@ library
     Hnvr.Web.SupervisorRegistry
     Hnvr.Web.View.Archive.Player
     Hnvr.Web.View.AuditLog.Index
-    Hnvr.Web.View.Cameras.Edit
-    Hnvr.Web.View.Cameras.Index
-    Hnvr.Web.View.Cameras.New
-    Hnvr.Web.View.Cameras.Show
     Hnvr.Web.View.Dashboard.Index
     Hnvr.Web.View.Debug.Show
     Hnvr.Web.View.EventClips.Player
@@ -182,10 +178,6 @@ library
     Hnvr.Web.View.Live.Show
     Hnvr.Web.View.Profile.Show
     Hnvr.Web.View.PtzPanel
-    Hnvr.Web.View.PtzPresets.Index
-    Hnvr.Web.View.Rules.Edit
-    Hnvr.Web.View.Rules.Index
-    Hnvr.Web.View.Rules.New
     Hnvr.Web.View.Sessions.New
     Hnvr.Web.View.Stats.Index
     Hnvr.Web.View.Time
@@ -193,7 +185,6 @@ library
     Hnvr.Web.WhepProxy
     Web.Controller.Archive
     Web.Controller.AuditLog
-    Web.Controller.Cameras
     Web.Controller.Cameras.Probe
     Web.Controller.Dashboard
     Web.Controller.Debug
@@ -203,8 +194,6 @@ library
     Web.Controller.Live
     Web.Controller.Profile
     Web.Controller.Ptz
-    Web.Controller.PtzPresets
-    Web.Controller.Rules
     Web.Controller.Sessions
     Web.Controller.Stats
     Web.Controller.Support.Crypto

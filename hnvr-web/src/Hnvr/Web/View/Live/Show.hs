@@ -15,7 +15,7 @@ module Hnvr.Web.View.Live.Show (ShowView (..)) where
 
 import Data.Time.Clock (UTCTime)
 import Generated.Types
-import Hnvr.Core.Authz (CameraAction (..), cameraAllowed, cameraAllowedAnywhere)
+import Hnvr.Core.Authz (CameraAction (..), cameraAllowed)
 import Hnvr.Core.CameraStatus (CameraStatus (..))
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Auth ()
@@ -49,7 +49,6 @@ instance View ShowView where
         <div class="actions">
           {ptzToggle}
           {archiveBtn}
-          {camerasBtn}
         </div>
       </div>
 
@@ -78,10 +77,6 @@ instance View ShowView where
       archiveBtn =
         if cameraAllowed rs ViewArchive camId
           then [hsx|<a class="btn btn-ghost" href={archiveUrl}>Archive</a>|]
-          else mempty
-      camerasBtn =
-        if cameraAllowedAnywhere rs ViewConfig
-          then [hsx|<a class="btn btn-ghost" href="/Cameras">Cameras</a>|]
           else mempty
       camStatus = cameraStatusFor hosts now camera
       -- PTZ controls need a session AND a ptz_move/ptz_preset grant on
