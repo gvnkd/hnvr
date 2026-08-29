@@ -196,6 +196,27 @@ tokenEl :: Maybe Text -> Text
 tokenEl Nothing = ""
 tokenEl (Just t) = "<trt:ConfigurationToken>" <> esc t <> "</trt:ConfigurationToken>"
 
+-- | Device-service URL for an advertised service XAddr: same scheme/
+-- host/port, path forced to @\/onvif\/device_service@. ICAMRA-OEM
+-- media endpoints serve READS but drop the connection on SETs — the
+-- device-service path accepts both.
+deviceServiceFallback :: Text -> Text
+deviceServiceFallback x =
+  case T.splitOn "/" x of
+    (scheme : "" : hostport : _) -> scheme <> "//" <> hostport <> "/onvif/device_service"
+    _ -> x
+
+-- | Run a media soapCall, retrying once against the device-service
+-- path when the advertised endpoint dies on the wire (no response).
+setWithFallback :: HC.Manager -> OnvifCreds -> Text -> Text -> Text -> Text -> IO (Either OnvifError ByteString)
+setWithFallback mgr creds url ns op body = do
+  res <- soapCall mgr creds url ns op body
+  case res of
+    Left (OnvifTransportError _) | fallback /= url -> soapCall mgr creds fallback ns op body
+    _ -> pure res
+  where
+    fallback = deviceServiceFallback url
+
 -- | SETs ---------------------------------------------------------------
 
 -- | Push one audio config (already clamped by 'Hnvr.Core.Onvif.clampAudio').
@@ -213,16 +234,16 @@ setAudioConfig mgr creds media a = do
           <> el "SampleRate" (tshow (acSampleRateKhz a))
           <> "</trt:Configuration>"
           <> "<trt:ForcePersistence>true</trt:ForcePersistence>"
-  res <- soapCall mgr creds media "trt" "SetAudioEncoderConfiguration" body
+  res <- setWithFallback mgr creds media "trt" "SetAudioEncoderConfiguration" body
   pure (void' res)
 
 setVideoConfig :: HC.Manager -> OnvifCreds -> Text -> VideoConfig -> IO (Either OnvifError ())
 setVideoConfig mgr creds media v = do
-  res <- soapCall mgr creds media "trt" "SetVideoEncoderConfiguration" (videoBody "trt")
+  res <- setWithFallback mgr creds media "trt" "SetVideoEncoderConfiguration" (videoBody "trt")
   case res of
     Left e
       | isUnknownAction e ->
-          void' <$> soapCall mgr creds media "tr2" "SetVideoEncoderConfiguration" (videoBody "tr2")
+          void' <$> setWithFallback mgr creds media "tr2" "SetVideoEncoderConfiguration" (videoBody "tr2")
     _ -> pure (void' res)
   where
     codecSection = case vcEncoding v of
