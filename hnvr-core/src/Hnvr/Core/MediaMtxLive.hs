@@ -198,16 +198,24 @@ renderPathsYaml relayBase cams =
 -- source makes the relay re-label AAC payloads as PCMU, and every
 -- downstream consumer hears noise. mediamtx has no exec: source, but
 -- runOnDemand is the same mechanism: the command publishes to the
--- path (ffmpeg -c copy, no transcoding) with a correct dynamic-PT
--- announcement. The recorder ffmpegs are persistent readers, so the
--- command stays up; single-ingestion-point semantics unchanged.
+-- path with a correct dynamic-PT announcement. The recorder ffmpegs
+-- are persistent readers, so the command stays up;
+-- single-ingestion-point semantics unchanged.
+--
+-- Audio is TRANSCODED here (-c:a aac, not copy): the camera's AAC
+-- also carries a broken AU-header config, which makes downstream
+-- ffmpeg audio filtergraphs flap between late-initialize and hang-
+-- forever-waiting-for-the-first-audio-frame (zero-output recorder).
+-- Decoding once at ingestion normalizes the stream for every
+-- consumer. The genpts+igndts+discardcorrupt input flags are load-
+-- bearing: without them the audio path stalls outright.
 execSourceCmd :: Text -> Text -> Text -> Text
 execSourceCmd slug url transport =
-  "ffmpeg -loglevel error -rtsp_transport "
+  "ffmpeg -loglevel error -fflags +genpts+igndts+discardcorrupt -rtsp_transport "
     <> transport
     <> " -i "
     <> url
-    <> " -c copy -rtsp_transport tcp -f rtsp rtsp://127.0.0.1:8554/"
+    <> " -c:v copy -af aresample=48000 -c:a aac -b:a 64k -rtsp_transport tcp -f rtsp rtsp://127.0.0.1:8554/"
     <> slug
 
 -- | Per-path REST payloads for the enabled cameras: the ingestion
