@@ -15,6 +15,11 @@ devenv up
 nix build .#hnvr-web
 ./result/bin/hnvr-leader      # serves on PORT=18001
 
+# 2b. Management specs (cameras-crud, rules, roles) also need hnvr-admin
+#     (M4 cutover — /Cameras & /Rules live there now):
+nix build .#hnvr-admin
+./result-admin/bin/hnvr-admin  # 127.0.0.1:18010 (HNVR_ADMIN_PORT/LISTEN)
+
 # 3. Install playwright + chromium browser (one-time)
 cd tests/e2e
 npm install
@@ -25,7 +30,8 @@ npm test
 ```
 
 The base URL defaults to `http://127.0.0.1:18001`. Override with
-`BASE_URL=http://other:port npm test`.
+`BASE_URL=http://other:port npm test`. The admin service defaults to
+`http://127.0.0.1:18010` — override with `ADMIN_URL=…`.
 
 Bootstrap admin credentials come from the devenv env block
 (`admin@hnvr.local` / `hnvr-dev`). Override with `HNVR_ADMIN_EMAIL` /

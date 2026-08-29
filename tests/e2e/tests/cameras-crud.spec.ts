@@ -1,4 +1,4 @@
-import {test, expect, type Page} from '../lib/auth';
+import {test, expect, ADMIN_URL, type Page} from '../lib/auth';
 
 /**
  * Camera CRUD happy-path: create, list, edit, delete.
@@ -29,7 +29,7 @@ function uniqueSlug(): string {
 }
 
 async function createCamera(page: Page, slug: string, name: string): Promise<void> {
-  await page.goto('/NewCamera');
+  await page.goto(ADMIN_URL + '/NewCamera');
   await page.locator('input[name="slug"]').fill(slug);
   await page.locator('input[name="name"]').fill(name);
   await page.locator('input[name="rtspUrl"]').fill(STUB_RTSP_URL);
@@ -50,7 +50,7 @@ async function deleteCameraBySlug(page: Page, slug: string): Promise<void> {
   // reaching the leader (Playwright's baseURL config doesn't always
   // propagate to page.request calls — use page.url() to derive the
   // origin).
-  await page.goto('/Cameras');
+  await page.goto(ADMIN_URL + '/Cameras');
   const row = page.locator('tr', {hasText: slug});
   await row.getByRole('link', {name: 'Show'}).click();
   await page.waitForURL(/\/ShowCamera\?cameraId=/);
@@ -70,7 +70,7 @@ async function deleteCameraBySlug(page: Page, slug: string): Promise<void> {
 }
 
 test.describe('Cameras CRUD', () => {
-  test('create → list → edit → delete', async ({loggedInPage: page}) => {
+  test('create → list → edit → delete', async ({adminLoggedInPage: page}) => {
     const slug = uniqueSlug();
     const initialName = `E2E camera ${slug}`;
     const updatedName = `E2E updated ${slug}`;
@@ -79,7 +79,7 @@ test.describe('Cameras CRUD', () => {
     await createCamera(page, slug, initialName);
 
     // ---- List ------------------------------------------------------
-    await page.goto('/Cameras');
+    await page.goto(ADMIN_URL + '/Cameras');
     await expect(page.locator('tbody')).toContainText(slug);
     await expect(page.locator('tbody')).toContainText(initialName);
 
@@ -94,20 +94,20 @@ test.describe('Cameras CRUD', () => {
     await page.waitForURL(/\/ShowCamera\?cameraId=/);
 
     // ---- Verify update ---------------------------------------------
-    await page.goto('/Cameras');
+    await page.goto(ADMIN_URL + '/Cameras');
     await expect(page.locator('tbody')).toContainText(updatedName);
 
     // ---- Delete + verify gone --------------------------------------
     await deleteCameraBySlug(page, slug);
-    await page.goto('/Cameras');
+    await page.goto(ADMIN_URL + '/Cameras');
     await expect(page.locator('tbody')).not.toContainText(slug);
   });
 
-  test('edit page Delete Camera button removes the camera (with confirm)', async ({loggedInPage: page}) => {
+  test('edit page Delete Camera button removes the camera (with confirm)', async ({adminLoggedInPage: page}) => {
     const slug = uniqueSlug();
     await createCamera(page, slug, `E2E delete-ui ${slug}`);
 
-    await page.goto('/Cameras');
+    await page.goto(ADMIN_URL + '/Cameras');
     await page.locator('tr', {hasText: slug}).getByRole('link', {name: 'Edit'}).click();
     await page.waitForURL(/\/EditCamera\?cameraId=/);
 

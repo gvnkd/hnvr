@@ -46,16 +46,15 @@ sql touchedFields returning =
             [ if testBit touchedFields 0 then Just "id" else Nothing
             , Just "email"
             , Just "password_hash"
-            , if testBit touchedFields 3 then Just "is_admin" else Nothing
             , Just "locked_at"
-            , if testBit touchedFields 5 then Just "failed_login_attempts" else Nothing
+            , if testBit touchedFields 4 then Just "failed_login_attempts" else Nothing
             , Just "last_login_at"
             , Just "timezone"
-            , if testBit touchedFields 8 then Just "created_at" else Nothing
+            , if testBit touchedFields 7 then Just "created_at" else Nothing
             ]
         columns = Text.intercalate ", " entries
         placeholders = Text.intercalate ", " ["$" <> Text.pack (show i) | i <- [1 .. length entries]]
-        returningClause = if returning then " RETURNING id, email, password_hash, is_admin, locked_at, failed_login_attempts, last_login_at, timezone, created_at" else ""
+        returningClause = if returning then " RETURNING id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, created_at" else ""
     in if null entries
         then "INSERT INTO users DEFAULT VALUES" <> returningClause
         else "INSERT INTO users (" <> columns <> ") VALUES (" <> placeholders <> ")" <> returningClause
@@ -66,12 +65,11 @@ encoder touchedFields = mconcat $ catMaybes
     [ if testBit touchedFields 0 then Just ((.id) >$< Encoders.param (Encoders.nonNullable Mapping.encoder)) else Nothing
     , Just ((.email) >$< Encoders.param (Encoders.nonNullable Encoders.text))
     , Just ((.passwordHash) >$< Encoders.param (Encoders.nonNullable Encoders.text))
-    , if testBit touchedFields 3 then Just ((.isAdmin) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
     , Just ((.lockedAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz))
-    , if testBit touchedFields 5 then Just ((.failedLoginAttempts) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 4 then Just ((.failedLoginAttempts) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , Just ((.lastLoginAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz))
     , Just ((.timezone) >$< Encoders.param (Encoders.nullable Encoders.text))
-    , if testBit touchedFields 8 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 7 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 

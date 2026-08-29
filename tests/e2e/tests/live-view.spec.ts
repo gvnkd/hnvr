@@ -1,4 +1,4 @@
-import {test, expect, type Page} from '../lib/auth';
+import {test, expect, firstCamera, type Page} from '../lib/auth';
 
 /**
  * Live view page (WebRTC via WHEP).
@@ -18,22 +18,12 @@ import {test, expect, type Page} from '../lib/auth';
  */
 test.describe('Live view (WHEP)', () => {
   test('page renders video element + WHEP POST to /whep/<slug>', async ({loggedInPage: page}) => {
-    await page.goto('/Cameras');
-    const firstShowLink = page.locator('tbody tr').first().getByRole('link', {name: 'Show'});
-    const hasCamera = await firstShowLink.count();
-    test.skip(!hasCamera, 'no cameras in DB — run cameras-crud.spec first');
-
-    await firstShowLink.click();
-    await page.waitForURL(/\/ShowCamera\?cameraId=/);
-    const showUrl = page.url();
-    const cameraId = new URL(showUrl).searchParams.get('cameraId');
-    expect(cameraId).toBeTruthy();
-
-    // Extract slug from the Show view's H1 (renders as
-    // <span class="font-mono">{camera.slug}</span>). Use .first() in
-    // case multiple font-mono spans appear in the layout chrome.
-    const slug = (await page.locator('h1 .font-mono').first().textContent()) ?? '';
-    expect(slug.length, `slug should be non-empty (got "${slug}")`).toBeGreaterThan(0);
+    // M4: camera picking moved off /Cameras (leader is read-mostly) —
+    // scrape the dashboard card's data-cam-id/data-slug instead.
+    const cam = await firstCamera(page);
+    test.skip(!cam, 'no cameras in DB — run cameras-crud.spec first');
+    const cameraId = cam!.id;
+    const slug = cam!.slug;
 
     // Set up request interception BEFORE navigating to the live page
     // so we catch the WHEP POST issued during page init.

@@ -1,16 +1,17 @@
-import {test, expect} from '../lib/auth';
+import {test, expect, firstCamera, ADMIN_URL} from '../lib/auth';
 
 /**
  * Rules CRUD with the drawing canvas (Phase 4). Drives the real UI:
  * canvas clicks produce the geometry JSON, the form POSTs it, and the
  * rule round-trips through the DB into the list + edit views.
  *
- * Requires: devenv services up + leader on :18001 with at least one
- * camera configured.
+ * M4 (design_docs/13): rules management moved to hnvr-admin — these
+ * specs run against ADMIN_URL with the admin session cookie. Requires:
+ * devenv services up + hnvr-admin on :18010 with at least one camera.
  */
 
 async function firstCameraUuid(page: import('@playwright/test').Page): Promise<string> {
-  await page.goto('/Cameras');
+  await page.goto(`${ADMIN_URL}/Cameras`);
   const href = await page.locator('a[href*="ShowCamera?cameraId="]').first().getAttribute('href');
   expect(href).toBeTruthy();
   return href!.split('cameraId=')[1];
@@ -35,11 +36,11 @@ async function waitForCanvasReady(page: import('@playwright/test').Page): Promis
   await page.waitForTimeout(1500);
 }
 
-test('rules: create via canvas, edit prefill, purge', async ({loggedInPage: page}) => {
+test('rules: create via canvas, edit prefill, purge', async ({adminLoggedInPage: page}) => {
   const camUuid = await firstCameraUuid(page);
 
   // --- Create with a canvas-drawn line --------------------------------
-  await page.goto(`/NewRule?ruleCameraId=${camUuid}`);
+  await page.goto(`${ADMIN_URL}/NewRule?ruleCameraId=${camUuid}`);
   await page.locator('#name').fill('playwright line');
   await page.locator('#rule-kind').selectOption('line_cross');
 
@@ -60,20 +61,20 @@ test('rules: create via canvas, edit prefill, purge', async ({loggedInPage: page
   await expect(page.locator('#rule-geometry')).toHaveValue(/"a":\s*\[/);
 
   // --- List shows it ---------------------------------------------------
-  await page.goto('/Rules');
+  await page.goto(`${ADMIN_URL}/Rules`);
   await expect(page.locator('td', {hasText: 'playwright line'})).toBeVisible();
 
   // --- Purge -----------------------------------------------------------
-  await page.goto('/Rules');
+  await page.goto(`${ADMIN_URL}/Rules`);
   const row = page.locator('tr', {hasText: 'playwright line'});
   await row.getByRole('button', {name: /delete/i}).click();
   await expect(page.locator('td', {hasText: 'playwright line'})).toHaveCount(0);
 });
 
-test('rules: zone polygon via canvas (3+ clicks, finish)', async ({loggedInPage: page}) => {
+test('rules: zone polygon via canvas (3+ clicks, finish)', async ({adminLoggedInPage: page}) => {
   const camUuid = await firstCameraUuid(page);
 
-  await page.goto(`/NewRule?ruleCameraId=${camUuid}`);
+  await page.goto(`${ADMIN_URL}/NewRule?ruleCameraId=${camUuid}`);
   await page.locator('#name').fill('playwright zone');
   await page.locator('#rule-kind').selectOption('zone_enter');
 
@@ -89,7 +90,7 @@ test('rules: zone polygon via canvas (3+ clicks, finish)', async ({loggedInPage:
   await page.waitForURL(/\/EditRule\?ruleId=/);
   await expect(page.locator('#name')).toHaveValue('playwright zone');
 
-  await page.goto('/Rules');
+  await page.goto(`${ADMIN_URL}/Rules`);
   const row = page.locator('tr', {hasText: 'playwright zone'});
   await row.getByRole('button', {name: /delete/i}).click();
   await expect(page.locator('td', {hasText: 'playwright zone'})).toHaveCount(0);
@@ -107,8 +108,10 @@ test('events page: table renders with kind badges and play links', async ({logge
 });
 
 test('live view: event feed panel populates via the fragment poller', async ({loggedInPage: page}) => {
-  const camUuid = await firstCameraUuid(page);
-  await page.goto(`/ShowLive?cameraId=${camUuid}`);
+  // Leader read path (M4): camera id from the dashboard card.
+  const cam = await firstCamera(page);
+  test.skip(!cam, 'no cameras in DB');
+  await page.goto(`/ShowLive?cameraId=${cam!.id}`);
   // The feed panel refreshes from /EventsFeedLive every 5s; first
   // fetch happens on load. The fragment's .event-feed wrapper always
   // renders (with rows or the empty state inside).

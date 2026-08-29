@@ -29,6 +29,7 @@ import Data.Maybe (fromMaybe, maybe)
 import qualified Data.Text as T
 import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
+import Database.PostgreSQL.Simple.Types (Only (..))
 import Generated.Types
 import Hnvr.Capture.Worker (CaptureConfig (..))
 import Hnvr.Core.CameraSnapshot (CameraSnapshotBatch (..))
@@ -144,12 +145,19 @@ seedAdminUser = do
           -- in the env takes effect on the next leader boot. Without
           -- this, the very first seed wins forever and you can't log
           -- in after rotating the password.
-          "INSERT INTO users (email, password_hash, is_admin) \
-          \ VALUES (?, ?, TRUE) \
+          "INSERT INTO users (email, password_hash) \
+          \ VALUES (?, ?) \
           \ ON CONFLICT (email) DO UPDATE \
-          \    SET password_hash = EXCLUDED.password_hash, \
-          \        is_admin = TRUE"
+          \    SET password_hash = EXCLUDED.password_hash"
           (emailT, hash)
+      -- The seeded user holds superadmin (design_docs/13; is_admin was
+      -- dropped in 0018).
+      void
+        $ sqlExec
+          "INSERT INTO user_roles (user_id, role_id) \
+          \ SELECT id, '00000000-0000-4000-8000-000000000001' FROM users WHERE email = ? \
+          \ ON CONFLICT DO NOTHING"
+          (Only emailT)
       logInfo ("leader: ensured admin user " <> emailT)
     _ -> logInfo "leader: INITIAL_ADMIN_EMAIL/PASSWORD unset; skipping admin seed"
 

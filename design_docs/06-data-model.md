@@ -22,11 +22,11 @@ CREATE TABLE users (
     id              UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     email           TEXT NOT NULL UNIQUE,
     password_hash   TEXT NOT NULL,
-    is_admin        BOOLEAN NOT NULL DEFAULT FALSE,   -- single admin user for v1; viewer role post-v1
     locked_at       TIMESTAMP WITH TIME ZONE,
     failed_login_attempts INT NOT NULL DEFAULT 0,
     last_login_at   TIMESTAMP WITH TIME ZONE,          -- stamped by IHP AuthSupport beforeLogin hook
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    -- is_admin dropped in 0.22 (migration 0018) — RBAC via 13-roles-and-acl.md
 );
 
 -- =========================================================

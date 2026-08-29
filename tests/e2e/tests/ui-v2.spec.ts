@@ -1,4 +1,4 @@
-import {test, expect} from '../lib/auth';
+import {test, expect, ADMIN_URL} from '../lib/auth';
 
 /**
  * UI v2 (redesign) surface: theme switching, collapsible sidebar,
@@ -22,8 +22,9 @@ test.describe('UI v2', () => {
     await page.locator('[data-dropdown-button]').first().click();
     await page.locator('[data-theme-option="daylight"]').click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'daylight');
-    // Persisted: navigate away and back.
-    await page.goto('/Cameras');
+    // Persisted: navigate away and back. (/Cameras moved to
+    // hnvr-admin in M4 — /Events is the leader-side target now.)
+    await page.goto('/Events');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'daylight');
     // Restore default for other tests.
     await page.evaluate(() => (window as any).HNVR.setTheme('midnight'));
@@ -40,8 +41,8 @@ test.describe('UI v2', () => {
     await expect(page.locator('.shell')).not.toHaveClass(/nav-collapsed/);
   });
 
-  test('cameras table: sortable headers, instant filter, clickable rows', async ({loggedInPage: page}) => {
-    await page.goto('/Cameras');
+  test('cameras table: sortable headers, instant filter, clickable rows', async ({adminLoggedInPage: page}) => {
+    await page.goto(ADMIN_URL + '/Cameras');
     const rows = page.locator('#cameras-table tbody tr');
     test.skip((await rows.count()) === 0, 'no cameras in DB');
 

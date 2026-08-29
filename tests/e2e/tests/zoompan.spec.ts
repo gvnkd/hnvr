@@ -1,4 +1,4 @@
-import {test, expect} from '../lib/auth';
+import {test, expect, firstCamera} from '../lib/auth';
 
 /**
  * Video zoom/pan (HNVR.zoompan in app.js).
@@ -12,15 +12,10 @@ import {test, expect} from '../lib/auth';
  */
 test.describe('Video zoom/pan', () => {
   test('wheel zooms, drag pans, wheel-out resets (archive player)', async ({loggedInPage: page}) => {
-    await page.goto('/Cameras');
-    const firstShowLink = page.locator('tbody tr').first().getByRole('link', {name: 'Show'});
-    const hasCamera = await firstShowLink.count();
-    test.skip(!hasCamera, 'no cameras in DB — run cameras-crud.spec first');
-
-    await firstShowLink.click();
-    await page.waitForURL(/\/ShowCamera\?cameraId=/);
-    const cameraId = new URL(page.url()).searchParams.get('cameraId');
-    expect(cameraId).toBeTruthy();
+    // M4: camera picking from the dashboard card (leader is read-mostly).
+    const cam = await firstCamera(page);
+    test.skip(!cam, 'no cameras in DB — run cameras-crud.spec first');
+    const cameraId = cam!.id;
 
     await page.goto(`/PlayerArchive?cameraId=${cameraId}`);
     const video = page.locator('#hnvr-player');
@@ -57,14 +52,10 @@ test.describe('Video zoom/pan', () => {
     // Fullscreen targets the wrapper (.video-frame), never the <video>:
     // a fullscreened video element can bypass the compositor (hardware
     // overlay) and ignore the zoom transform entirely.
-    await page.goto('/Cameras');
-    const firstShowLink = page.locator('tbody tr').first().getByRole('link', {name: 'Show'});
-    const hasCamera = await firstShowLink.count();
-    test.skip(!hasCamera, 'no cameras in DB — run cameras-crud.spec first');
-
-    await firstShowLink.click();
-    await page.waitForURL(/\/ShowCamera\?cameraId=/);
-    const cameraId = new URL(page.url()).searchParams.get('cameraId');
+    // M4: camera picking from the dashboard card (leader is read-mostly).
+    const cam2 = await firstCamera(page);
+    test.skip(!cam2, 'no cameras in DB — run cameras-crud.spec first');
+    const cameraId = cam2!.id;
 
     await page.goto(`/PlayerArchive?cameraId=${cameraId}`);
     const video = page.locator('#hnvr-player');

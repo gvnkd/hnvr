@@ -45,17 +45,16 @@ sql touchedFields returning =
     let setEntries = catMaybes
             [ if testBit touchedFields 1 then Just "email" else Nothing
             , if testBit touchedFields 2 then Just "password_hash" else Nothing
-            , if testBit touchedFields 3 then Just "is_admin" else Nothing
-            , if testBit touchedFields 4 then Just "locked_at" else Nothing
-            , if testBit touchedFields 5 then Just "failed_login_attempts" else Nothing
-            , if testBit touchedFields 6 then Just "last_login_at" else Nothing
-            , if testBit touchedFields 7 then Just "timezone" else Nothing
-            , if testBit touchedFields 8 then Just "created_at" else Nothing
+            , if testBit touchedFields 3 then Just "locked_at" else Nothing
+            , if testBit touchedFields 4 then Just "failed_login_attempts" else Nothing
+            , if testBit touchedFields 5 then Just "last_login_at" else Nothing
+            , if testBit touchedFields 6 then Just "timezone" else Nothing
+            , if testBit touchedFields 7 then Just "created_at" else Nothing
             ]
         setClauses = [col <> " = $" <> Text.pack (show i) | (i, col) <- zip [1..] setEntries]
         pkIdx = length setEntries + 1
         whereClause = \startIdx -> "id" <> " = $" <> Text.pack (show startIdx)
-        returningClause = if returning then " RETURNING id, email, password_hash, is_admin, locked_at, failed_login_attempts, last_login_at, timezone, created_at" else ""
+        returningClause = if returning then " RETURNING id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, created_at" else ""
     in "UPDATE users SET " <> Text.intercalate ", " setClauses <> " WHERE " <> whereClause pkIdx <> returningClause
 
 
@@ -63,12 +62,11 @@ encoder :: Integer -> Encoders.Params Generated.ActualTypes.User
 encoder touchedFields = mconcat (catMaybes
     [ if testBit touchedFields 1 then Just ((.email) >$< Encoders.param (Encoders.nonNullable Encoders.text)) else Nothing
     , if testBit touchedFields 2 then Just ((.passwordHash) >$< Encoders.param (Encoders.nonNullable Encoders.text)) else Nothing
-    , if testBit touchedFields 3 then Just ((.isAdmin) >$< Encoders.param (Encoders.nonNullable Encoders.bool)) else Nothing
-    , if testBit touchedFields 4 then Just ((.lockedAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz)) else Nothing
-    , if testBit touchedFields 5 then Just ((.failedLoginAttempts) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
-    , if testBit touchedFields 6 then Just ((.lastLoginAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz)) else Nothing
-    , if testBit touchedFields 7 then Just ((.timezone) >$< Encoders.param (Encoders.nullable Encoders.text)) else Nothing
-    , if testBit touchedFields 8 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 3 then Just ((.lockedAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 4 then Just ((.failedLoginAttempts) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
+    , if testBit touchedFields 5 then Just ((.lastLoginAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 6 then Just ((.timezone) >$< Encoders.param (Encoders.nullable Encoders.text)) else Nothing
+    , if testBit touchedFields 7 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ])
     <> ((.id) >$< Encoders.param (Encoders.nonNullable Mapping.encoder))
 

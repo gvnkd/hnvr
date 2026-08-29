@@ -53,13 +53,12 @@ instance FromRow Generated.ActualTypes.User where
         id <- field
         email <- field
         passwordHash <- field
-        isAdmin <- field
         lockedAt <- field
         failedLoginAttempts <- field
         lastLoginAt <- field
         timezone <- field
         createdAt <- field
-        let theRecord = Generated.ActualTypes.User id email passwordHash isAdmin lockedAt failedLoginAttempts lastLoginAt timezone createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
+        let theRecord = Generated.ActualTypes.User id email passwordHash lockedAt failedLoginAttempts lastLoginAt timezone createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) }
         pure theRecord
 
 instance FromRowHasql Generated.ActualTypes.User where
@@ -111,7 +110,7 @@ updateRecordDiscardResultUser model = do
 
 instance Record Generated.ActualTypes.User where
     {-# INLINE newRecord #-}
-    newRecord = Generated.ActualTypes.User def def def False def def def def def  def
+    newRecord = Generated.ActualTypes.User def def def def def def def def  def
 
 
 instance QueryBuilder.FilterPrimaryKey "users" where
@@ -128,24 +127,21 @@ instance SetField "email" (User') Text where
 instance SetField "passwordHash" (User') Text where
     {-# INLINE setField #-}
     setField newValue record = record { passwordHash = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4 } }
-instance SetField "isAdmin" (User') Bool where
-    {-# INLINE setField #-}
-    setField newValue record = record { isAdmin = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8 } }
 instance SetField "lockedAt" (User') (Maybe UTCTime) where
     {-# INLINE setField #-}
-    setField newValue record = record { lockedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16 } }
+    setField newValue record = record { lockedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8 } }
 instance SetField "failedLoginAttempts" (User') Int where
     {-# INLINE setField #-}
-    setField newValue record = record { failedLoginAttempts = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 32 } }
+    setField newValue record = record { failedLoginAttempts = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16 } }
 instance SetField "lastLoginAt" (User') (Maybe UTCTime) where
     {-# INLINE setField #-}
-    setField newValue record = record { lastLoginAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 64 } }
+    setField newValue record = record { lastLoginAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 32 } }
 instance SetField "timezone" (User') (Maybe Text) where
     {-# INLINE setField #-}
-    setField newValue record = record { timezone = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 128 } }
+    setField newValue record = record { timezone = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 64 } }
 instance SetField "createdAt" (User') UTCTime where
     {-# INLINE setField #-}
-    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 256 } }
+    setField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 128 } }
 instance SetField "meta" (User') MetaBag where
     {-# INLINE setField #-}
     setField newValue record = record { meta = newValue }
@@ -158,24 +154,21 @@ instance UpdateField "email" (User') (User') Text Text where
 instance UpdateField "passwordHash" (User') (User') Text Text where
     {-# INLINE updateField #-}
     updateField newValue record = record { passwordHash = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 4 } }
-instance UpdateField "isAdmin" (User') (User') Bool Bool where
-    {-# INLINE updateField #-}
-    updateField newValue record = record { isAdmin = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8 } }
 instance UpdateField "lockedAt" (User') (User') (Maybe UTCTime) (Maybe UTCTime) where
     {-# INLINE updateField #-}
-    updateField newValue record = record { lockedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16 } }
+    updateField newValue record = record { lockedAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 8 } }
 instance UpdateField "failedLoginAttempts" (User') (User') Int Int where
     {-# INLINE updateField #-}
-    updateField newValue record = record { failedLoginAttempts = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 32 } }
+    updateField newValue record = record { failedLoginAttempts = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 16 } }
 instance UpdateField "lastLoginAt" (User') (User') (Maybe UTCTime) (Maybe UTCTime) where
     {-# INLINE updateField #-}
-    updateField newValue record = record { lastLoginAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 64 } }
+    updateField newValue record = record { lastLoginAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 32 } }
 instance UpdateField "timezone" (User') (User') (Maybe Text) (Maybe Text) where
     {-# INLINE updateField #-}
-    updateField newValue record = record { timezone = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 128 } }
+    updateField newValue record = record { timezone = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 64 } }
 instance UpdateField "createdAt" (User') (User') UTCTime UTCTime where
     {-# INLINE updateField #-}
-    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 256 } }
+    updateField newValue record = record { createdAt = newValue, meta = record.meta { touchedFields = record.meta.touchedFields .|. 128 } }
 instance UpdateField "meta" (User') (User') MetaBag MetaBag where
     {-# INLINE updateField #-}
     updateField newValue record = record { meta = newValue }
@@ -183,11 +176,10 @@ instance UpdateField "meta" (User') (User') MetaBag MetaBag where
 instance FieldBit "id" (User') where fieldBit = 1
 instance FieldBit "email" (User') where fieldBit = 2
 instance FieldBit "passwordHash" (User') where fieldBit = 4
-instance FieldBit "isAdmin" (User') where fieldBit = 8
-instance FieldBit "lockedAt" (User') where fieldBit = 16
-instance FieldBit "failedLoginAttempts" (User') where fieldBit = 32
-instance FieldBit "lastLoginAt" (User') where fieldBit = 64
-instance FieldBit "timezone" (User') where fieldBit = 128
-instance FieldBit "createdAt" (User') where fieldBit = 256
+instance FieldBit "lockedAt" (User') where fieldBit = 8
+instance FieldBit "failedLoginAttempts" (User') where fieldBit = 16
+instance FieldBit "lastLoginAt" (User') where fieldBit = 32
+instance FieldBit "timezone" (User') where fieldBit = 64
+instance FieldBit "createdAt" (User') where fieldBit = 128
 
 

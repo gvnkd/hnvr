@@ -1,5 +1,8 @@
 # HNVR — Roles, ACLs & Admin Service
 
+Status: **landed** (M1 0.18, M2 0.19, M3 0.20, M4 0.21, M5 0.22). The
+`is_admin` fallback is gone (backfill 0017, column drop 0018).
+
 Post-v1 replacement for the `users.is_admin` boolean (see 06-data-model.md).
 Two deliverables:
 

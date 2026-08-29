@@ -30,9 +30,10 @@ test.describe('Sessions / login', () => {
   });
 
   test('protected route redirects to /NewSession when logged out', async ({page}) => {
-    // Cameras is admin-gated (Slice 8); anonymous users should be
-    // redirected to the login form.
-    await page.goto('/Cameras');
+    // Events is ensureIsUser-gated; anonymous users should be
+    // redirected to the login form. (/Cameras moved to hnvr-admin in
+    // the M4 cutover — it 404s on the leader now.)
+    await page.goto('/Events');
     await page.waitForURL(/\/NewSession$/);
     await expect(page).toHaveURL(/\/NewSession$/);
   });

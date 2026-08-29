@@ -1,4 +1,4 @@
-import {test, expect} from '../lib/auth';
+import {test, expect, firstCamera} from '../lib/auth';
 
 /**
  * Archive playback page.
@@ -22,19 +22,12 @@ import {test, expect} from '../lib/auth';
  */
 test.describe('Archive playback', () => {
   test('page renders video element + hls.js loader + issues playlist GET', async ({loggedInPage: page}) => {
-    // Pick the first camera from the index. If no cameras exist, the
-    // Cameras CRUD test created at least one; otherwise we skip with a
-    // clear message.
-    await page.goto('/Cameras');
-    const firstShowLink = page.locator('tbody tr').first().getByRole('link', {name: 'Show'});
-    const hasCamera = await firstShowLink.count();
-    test.skip(!hasCamera, 'no cameras in DB — run cameras-crud.spec first');
-
-    await firstShowLink.click();
-    await page.waitForURL(/\/ShowCamera\?cameraId=/);
-    const showUrl = page.url();
-    const cameraId = new URL(showUrl).searchParams.get('cameraId');
-    expect(cameraId).toBeTruthy();
+    // Pick the first camera from the dashboard (M4: /Cameras lives on
+    // hnvr-admin now). If no cameras exist, the cameras CRUD test
+    // created at least one; otherwise we skip with a clear message.
+    const cam = await firstCamera(page);
+    test.skip(!cam, 'no cameras in DB — run cameras-crud.spec first');
+    const cameraId = cam!.id;
 
     // Catch the playlist GET the JS will issue on page load. Set up
     // the listener BEFORE navigating so we don't miss it.

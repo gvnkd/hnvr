@@ -33,13 +33,11 @@ bootstrapUser email password = do
   dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
   hash <- hashPassword password
   bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn -> do
-    -- is_admin=TRUE kept until M5 (the end-user app's fallback); the
-    -- superadmin grant is the durable half.
     void
       $ PG.execute
         conn
-        "INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, TRUE) \
-        \ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_admin = TRUE"
+        "INSERT INTO users (email, password_hash) VALUES (?, ?) \
+        \ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash"
         (email, hash)
     void
       $ PG.execute

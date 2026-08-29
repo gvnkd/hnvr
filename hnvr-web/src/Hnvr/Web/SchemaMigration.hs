@@ -138,6 +138,15 @@ cameraModelNameSql = $(embedFile "migrations/0015-camera-model-name.sql")
 rolesAclSql :: ByteString
 rolesAclSql = $(embedFile "migrations/0016-roles-acl.sql")
 
+-- | Backfill: users.is_admin = TRUE → superadmin role grant. Runs before
+-- the column drop in the same boot (design_docs/13 rollout).
+backfillSuperadminSql :: ByteString
+backfillSuperadminSql = $(embedFile "migrations/0017-backfill-superadmin.sql")
+
+-- | Drop users.is_admin — fully replaced by the superadmin role.
+dropIsAdminSql :: ByteString
+dropIsAdminSql = $(embedFile "migrations/0018-drop-is-admin.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -226,6 +235,14 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0016-roles-acl" rolesAclSql) True conn
     handleResult "0016-roles-acl" rolesAclRes
+    backfillRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0017-backfill-superadmin" backfillSuperadminSql) True conn
+    handleResult "0017-backfill-superadmin" backfillRes
+    dropAdminRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0018-drop-is-admin" dropIsAdminSql) True conn
+    handleResult "0018-drop-is-admin" dropAdminRes
   _ <- PG.query_ conn "SELECT count(*) FROM (SELECT pg_advisory_unlock(727272)) t" :: IO [PG.Only Int]
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"

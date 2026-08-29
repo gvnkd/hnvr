@@ -19,9 +19,6 @@
 --
 --   * @HNVR_DISABLE_AUTHZ=1@ → 'fullRoleSet' for everyone (e2e leader
 --     gate, same family as the other @HNVR_DISABLE_*@ switches).
---   * @users.is_admin = TRUE@ → 'fullRoleSet' (fallback until the M5
---     backfill drops the column — a halfway deployment never locks you
---     out).
 --   * logged-in user → union over @user_roles@.
 --   * anonymous → the seeded @guest@ role.
 --
@@ -102,9 +99,8 @@ roleSetVaultKey = unsafePerformIO Vault.newKey
 subjectVaultKey :: Vault.Key Subject
 subjectVaultKey = unsafePerformIO Vault.newKey
 
--- | Whether the subject holds the seeded superadmin role (or is_admin —
--- same privilege until the M5 backfill). The hnvr-admin service gates
--- every action on this.
+-- | Whether the subject holds the seeded superadmin role. The
+-- hnvr-admin service gates every action on this.
 {-# NOINLINE superVaultKey #-}
 superVaultKey :: Vault.Key Bool
 superVaultKey = unsafePerformIO Vault.newKey
@@ -208,13 +204,14 @@ authzMiddleware app req respond = do
           then whepGuarded rs req' respond
           else app req' respond
 
--- | Subject + RoleSet + superadmin resolution. 'fullRoleSet'
--- short-circuits the DB fetch (disabled gate / is_admin fallback — both
--- are superadmin-equivalent).
+-- | Subject + RoleSet + superadmin resolution. The disabled gate
+-- short-circuits the DB fetch; otherwise superadmin is pure role
+-- membership (the is_admin fallback was retired in M5, migration
+-- 0017/0018).
 resolve :: (?modelContext :: ModelContext) => Wai.Request -> IO (Subject, RoleSet, Bool)
 resolve req = case lookupAuthVault currentUserVaultKey req of
   Just u
-    | authzDisabled || u.isAdmin -> pure (SubjectUser (userUuid u), fullRoleSet, True)
+    | authzDisabled -> pure (SubjectUser (userUuid u), fullRoleSet, True)
     | otherwise -> do
         let uid = userUuid u
             subject = SubjectUser uid
