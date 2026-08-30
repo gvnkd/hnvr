@@ -168,16 +168,16 @@ instance View IndexView where
       renderEvent (ev, mThumbUrl) =
         [hsx|
         <tr data-href={playUrl ev}>
-          <td>{thumb ev mThumbUrl}</td>
-          <td class="mono">{tzTime ev.erTs}</td>
-          <td class="mono">{ev.erCameraSlug}</td>
-          <td>{kindBadge ev.erKind}</td>
-          <td>{className}</td>
-          <td>{confText}</td>
-          <td class="mono">{trackText}</td>
-          <td>{fromMaybe "—" ev.erRuleName}</td>
-          <td class="mono">{fromMaybe "—" ev.erHostId}</td>
-          <td class="mono">{bboxText ev.erBbox}</td>
+          <td class="ev-thumb-cell">{thumb ev mThumbUrl}</td>
+          <td class="mono" data-label="Time">{tzTime ev.erTs}</td>
+          <td class="mono" data-label="Camera">{ev.erCameraSlug}</td>
+          <td data-label="Kind">{kindBadge ev.erKind}</td>
+          <td data-label="Class">{className}</td>
+          <td data-label="Conf">{confText}</td>
+          <td class="mono cell-opt" data-label="Track">{trackText}</td>
+          <td data-label="Rule">{fromMaybe "—" ev.erRuleName}</td>
+          <td class="mono cell-opt" data-label="Host">{fromMaybe "—" ev.erHostId}</td>
+          <td class="mono cell-opt" data-label="Bbox">{bboxText ev.erBbox}</td>
           <td>{clipCell ev}</td>
         </tr>
       |]

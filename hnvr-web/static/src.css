@@ -696,6 +696,10 @@
     box-shadow: var(--glow-accent);
     outline: none;
   }
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 
   /* ── Status indicators ───────────────────────────────────────── */
   .led {
@@ -1334,5 +1338,56 @@
   .shell.nav-collapsed .version-tag,
   .shell.nav-collapsed .sidenav-foot-label {
     display: initial;
+  }
+}
+
+/* ── Responsive: events table becomes stacked cards ──────────── */
+@media (max-width: 700px) {
+  #events-table thead {
+    display: none;
+  }
+  #events-table,
+  #events-table tbody,
+  #events-table tbody tr {
+    display: block;
+  }
+  #events-table tbody tr {
+    margin: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--panel-2) 50%, transparent);
+    overflow: hidden;
+  }
+  #events-table tbody td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  #events-table tbody td[data-label]::before {
+    content: attr(data-label);
+    font-family: theme("fontFamily.mono");
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  /* Thumb cell: full-width image, no label row. */
+  #events-table tbody td.ev-thumb-cell {
+    display: block;
+    padding: 0;
+  }
+  #events-table .ev-thumb {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    border-radius: 0;
+    border: 0;
+  }
+  /* Low-value columns dropped on phones (visible on desktop). */
+  #events-table td.cell-opt {
+    display: none;
   }
 }

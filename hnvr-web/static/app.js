@@ -1037,6 +1037,21 @@
       });
     });
   }
+  /* ── Scroll wrappers for wide tables ────────────────────────── */
+  /* Cards clip with overflow:hidden, so wide tables would be cut off
+   * on narrow screens with no affordance; wrap every .table in a
+   * horizontally scrollable div (leader + admin both load app.js). */
+  function initTableWrap() {
+    document.querySelectorAll("table.table").forEach(function (t) {
+      var p = t.parentElement;
+      if (!p || p.classList.contains("table-wrap")) return;
+      var w = document.createElement("div");
+      w.className = "table-wrap";
+      p.insertBefore(w, t);
+      w.appendChild(t);
+    });
+  }
+
   /* ── Topbar clock (viewer's timezone) ───────────────────────── */
   function initClock() {
     var el = document.querySelector(".topbar .clock");
@@ -1074,6 +1089,7 @@
       if (drawer) drawer.classList.toggle("open");
     });
     initCollapsibles();
+    initTableWrap();
     initSortableTables();
     initTableFilters();
     initRowLinks();
