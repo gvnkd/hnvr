@@ -486,6 +486,7 @@
     /* ── pointer interaction ──────────────────────────────────── */
     var dragging = false;
     var downX = 0;
+    var downAt = 0;
     var hoverMs = null;
     var hoverToken = 0;
     var hoverTimer = null;
@@ -503,7 +504,7 @@
     }
     function positionHover(x) {
       var w = root.clientWidth;
-      var bw = 170; // preview width + border, keep inside the wrap
+      var bw = Math.min(170, w); // preview width + border, keep inside the wrap
       hover.style.left = Math.max(bw / 2, Math.min(w - bw / 2, x)) + "px";
     }
     function updateHover(ms) {
@@ -537,6 +538,7 @@
       dragging = true;
       hover.hidden = true;
       downX = e.clientX;
+      downAt = Date.now();
       canvas.setPointerCapture(e.pointerId);
       stopPlayback(); // new scrub: back to thumbnail mode
       var rect = canvas.getBoundingClientRect();
@@ -572,8 +574,13 @@
       var rect = canvas.getBoundingClientRect();
       var moved = Math.abs(e.clientX - downX);
       if (moved < 4) {
-        // Click, not a drag: event-marker hit test wins.
+        // Click, not a drag: event-marker hit test wins. Touch gets a
+        // wider tolerance (finger vs cursor) and long-press stands in
+        // for shift-click (no modifier keys on phones).
         var mx = e.clientX - rect.left;
+        var isTouch = e.pointerType === "touch";
+        var tol = isTouch ? 14 : 8;
+        var longPress = isTouch && Date.now() - downAt > 600;
         var g = laneGeom();
         var my = g.topPad + states.length * (g.laneH + g.gap);
         var relY = e.clientY - rect.top;
@@ -583,10 +590,10 @@
           if (activeSt)
             activeSt.markers.forEach(function (m) {
               var x = xOf(Date.parse(m.ts), rect.width);
-              if (Math.abs(x - mx) < 8) hit = m;
+              if (Math.abs(x - mx) < tol) hit = m;
             });
           if (hit) {
-            if (e.shiftKey && hit.clipId) {
+            if ((e.shiftKey || longPress) && hit.clipId) {
               window.location.href = "/PlayerEventClip?clipId=" + hit.clipId;
               return;
             }
