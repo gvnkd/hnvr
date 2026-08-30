@@ -986,6 +986,21 @@
   .zoompan-fs:focus-visible {
     opacity: 1;
   }
+  /* Touch: no hover — the fs button must always be visible. */
+  @media (hover: none) {
+    .zoompan-fs {
+      opacity: 1;
+    }
+  }
+  /* Zoompan touch gestures: vertical page scroll stays at z=1; once
+   * zoomed the element owns all gestures (one-finger pan + pinch).
+   * pan-y also opts out of the browser's page-level pinch-zoom. */
+  video[data-zoompan-bound] {
+    touch-action: pan-y;
+  }
+  video[data-zoompan-bound].is-zoomed {
+    touch-action: none;
+  }
 
   /* ── Events: animated thumbnails + lightbox ──────────────────── */
   .ev-thumb {

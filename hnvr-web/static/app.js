@@ -453,16 +453,53 @@
       { passive: false, capture: true }
     );
 
-    video.addEventListener("mousedown", function (e) {
-      if (e.button !== 0 || z <= 1) return;
+    /* Unified pointer pan: mouse drag (button 0) or one-finger touch,
+     * active only when zoomed; two-finger pinch zooms around the
+     * midpoint. Touch relies on touch-action on the video (src.css:
+     * pan-y at z=1 keeps vertical page scroll, none when zoomed) and
+     * opts the element out of the browser's own pinch-zoom. */
+    var pointers = new Map(),
+      pinch = null;
+    video.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "mouse" && (e.button !== 0 || z <= 1)) return;
       var rect = video.getBoundingClientRect();
       if (video.controls && (e.clientY - rect.top) / z > video.offsetHeight - 48) return;
-      drag = { x: e.clientX, y: e.clientY };
-      moved = 0;
-      video.classList.add("is-panning");
-      e.preventDefault();
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        var pts = Array.from(pointers.values());
+        pinch = { dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) };
+        drag = null;
+        video.classList.remove("is-panning");
+      } else if (pointers.size === 1 && z > 1) {
+        drag = { x: e.clientX, y: e.clientY };
+        moved = 0;
+        video.classList.add("is-panning");
+        e.preventDefault();
+      }
     });
-    document.addEventListener("mousemove", function (e) {
+    document.addEventListener("pointermove", function (e) {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && pointers.size === 2) {
+        var pts = Array.from(pointers.values());
+        var d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        if (d < 1 || pinch.dist < 1) return;
+        var rect = video.getBoundingClientRect();
+        // Zoom around the pinch midpoint, keeping that content point
+        // fixed on screen (same math as the wheel handler).
+        var mx = (pts[0].x + pts[1].x) / 2 - rect.left,
+          my = (pts[0].y + pts[1].y) / 2 - rect.top;
+        var z2 = Math.min(MAXZ, Math.max(1, (z * d) / pinch.dist));
+        if (z2 !== z) {
+          var s = z2 / z;
+          tx += mx * (1 - s);
+          ty += my * (1 - s);
+          z = z2;
+          apply();
+        }
+        pinch.dist = d;
+        return;
+      }
       if (!drag) return;
       var dx = e.clientX - drag.x,
         dy = e.clientY - drag.y;
@@ -472,8 +509,10 @@
       drag = { x: e.clientX, y: e.clientY };
       apply();
     });
-    document.addEventListener("mouseup", function () {
-      if (!drag) return;
+    function endPointer(e) {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (!drag || pointers.size > 0) return;
       drag = null;
       video.classList.remove("is-panning");
       // Expire the flag: if the release happened outside the browser
@@ -485,7 +524,9 @@
           suppressClick = false;
         }, 300);
       }
-    });
+    }
+    document.addEventListener("pointerup", endPointer);
+    document.addEventListener("pointercancel", endPointer);
     // Fullscreen entry/exit changes the element's box — re-clamp the
     // pan offsets so a zoom carried across the boundary can't leave the
     // frame shifted. (Fullscreen targets the WRAPPER div, not the
@@ -497,7 +538,9 @@
     });
     // Pointer left the document mid-drag: end the pan (no trailing
     // click exists in that case, so no suppression needed).
-    document.addEventListener("mouseleave", function () {
+    document.addEventListener("pointerleave", function () {
+      pointers.clear();
+      pinch = null;
       if (!drag) return;
       drag = null;
       video.classList.remove("is-panning");
