@@ -431,7 +431,7 @@
     overflow: hidden;
   }
   .card-header {
-    @apply px-4 py-2.5 flex items-center justify-between;
+    @apply px-4 py-2.5 flex flex-wrap items-center justify-between gap-2;
     border-bottom: 1px solid var(--border);
     font-size: 11px;
     text-transform: uppercase;
@@ -686,6 +686,7 @@
   .table-filter {
     @apply px-2.5 py-1 rounded-lg text-xs font-mono;
     width: 180px;
+    max-width: 100%;
     background: color-mix(in srgb, var(--bg) 55%, transparent);
     border: 1px solid var(--border);
     color: var(--text);
@@ -916,7 +917,7 @@
   }
   .live-overlay-ptz { display: contents; }
   .live-overlay-head {
-    @apply flex items-center gap-2 px-4 py-2.5;
+    @apply flex flex-wrap items-center gap-2 px-4 py-2.5;
     border-bottom: 1px solid var(--border);
     font-family: theme("fontFamily.mono");
   }
