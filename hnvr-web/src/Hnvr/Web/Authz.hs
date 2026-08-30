@@ -52,7 +52,7 @@ import qualified Data.ByteString.Char8 as BSC
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime)
@@ -70,7 +70,7 @@ import Hnvr.Web.WhepProxy (defaultMediaMtxWebrtc, proxyOne)
 import IHP.Controller.AccessDenied (accessDeniedUnless)
 import IHP.ControllerPrelude
 import IHP.ControllerSupport (Respond)
-import IHP.LoginSupport.Types (currentUserVaultKey, lookupAuthVault)
+import IHP.LoginSupport.Types (HasNewSessionUrl (..), currentUserVaultKey, lookupAuthVault)
 import IHP.ModelSupport (Id' (Id))
 import IHP.RequestVault.ModelContext ()
 import qualified Network.HTTP.Client as HC
@@ -126,18 +126,39 @@ currentRoleSet = fromMaybe emptyRoleSet (Vault.lookup roleSetVaultKey (Wai.vault
 currentIsSuperadmin :: (?request :: Wai.Request) => Bool
 currentIsSuperadmin = fromMaybe False (Vault.lookup superVaultKey (Wai.vault ?request))
 
--- | Enforce a per-camera action; 403 (early return) on deny.
+-- | Enforce a per-camera action; see 'denyUnless' for the deny behavior.
 ensurePerm :: (?request :: Wai.Request, ?respond :: Respond) => CameraAction -> CameraId -> IO ()
-ensurePerm action cam = accessDeniedUnless (cameraAllowed currentRoleSet action cam)
+ensurePerm action cam = denyUnless (cameraAllowed currentRoleSet action cam)
 
--- | Enforce a page grant; 403 (early return) on deny.
+-- | Enforce a page grant; see 'denyUnless' for the deny behavior.
 ensurePagePerm :: (?request :: Wai.Request, ?respond :: Respond) => PageKind -> IO ()
-ensurePagePerm page = accessDeniedUnless (pageAllowed currentRoleSet page)
+ensurePagePerm page = denyUnless (pageAllowed currentRoleSet page)
 
 -- | Enforce that an action is granted on at least one camera — for
 -- mutations not tied to a concrete camera (e.g. camera creation).
 ensurePermAnywhere :: (?request :: Wai.Request, ?respond :: Respond) => CameraAction -> IO ()
-ensurePermAnywhere action = accessDeniedUnless (cameraAllowedAnywhere currentRoleSet action)
+ensurePermAnywhere action = denyUnless (cameraAllowedAnywhere currentRoleSet action)
+
+-- | Shared deny handler for the @ensure*@ guards. Anonymous page loads
+-- (GET/HEAD without a session user) redirect to @\/NewSession@ with
+-- redirect-after-login — mirroring
+-- 'IHP.LoginSupport.Helper.Controller.ensureIsUser' — so the login wall
+-- (@guest@ role deleted) reads as a login form instead of a bare 403.
+-- Logged-in denials and XHR/API/mutation requests keep the 403: a 302
+-- would silently "succeed" client-side and hide real ACL bugs.
+denyUnless :: (?request :: Wai.Request, ?respond :: Respond) => Bool -> IO ()
+denyUnless allowed
+  | allowed = pure ()
+  | anonymousPageLoad = do
+      setSuccessMessage "Please log in to access this page"
+      setSession "IHP.LoginSupport.redirectAfterLogin" getRequestPathAndQuery
+      earlyReturn (redirectToPath (newSessionUrl (Proxy @User)))
+  | otherwise = accessDeniedUnless allowed
+  where
+    anonymousPageLoad =
+      isNothing (currentUserOrNothing @User)
+        && Wai.requestMethod ?request
+        `elem` [HTTP.methodGet, HTTP.methodHead]
 
 -- | Enforce superadmin (the hnvr-admin front door); 403 on deny.
 ensureSuperadmin :: (?request :: Wai.Request, ?respond :: Respond) => IO ()
