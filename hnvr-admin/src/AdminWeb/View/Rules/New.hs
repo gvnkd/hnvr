@@ -113,7 +113,7 @@ ruleForm camera mRule actionUrl =
         <div class="field">
           <label>Geometry — click on the frame</label>
           <div>
-            <canvas id="rule-canvas" width="960" height="540" style="max-width:100%; border:1px solid var(--border-strong); border-radius: 10px; cursor:crosshair;"></canvas>
+            <canvas id="rule-canvas" width="960" height="540" style="max-width:100%; border:1px solid var(--border-strong); border-radius: 10px; cursor:crosshair; touch-action:none;"></canvas>
           </div>
           <div class="hint">line: 2 clicks · zone: N clicks then "finish polygon" · drag vertices to adjust · direction arrow = line a→b</div>
           <button class="btn" type="button" id="rule-finish">finish polygon</button>
@@ -257,25 +257,27 @@ ruleForm camera mRule actionUrl =
           "}",
           "function hitIndex(e){",
           "  var p = normPos(e);",
+          "  var r2 = e.pointerType === 'touch' ? 24*24 : 10*10;",
           "  for (var i = points.length - 1; i >= 0; i--) {",
           "    var dx = (points[i][0] - p.x) * p.w, dy = (points[i][1] - p.y) * p.h;",
-          "    if (dx*dx + dy*dy < 100) return i;",
+          "    if (dx*dx + dy*dy < r2) return i;",
           "  }",
           "  return -1;",
           "}",
           "var dragIdx = -1, skipClick = false;",
-          "canvas.addEventListener('mousedown', function(e){",
+          "canvas.addEventListener('pointerdown', function(e){",
           "  var i = hitIndex(e);",
-          "  if (i >= 0) { dragIdx = i; e.preventDefault(); }",
+          "  if (i >= 0) { dragIdx = i; try { canvas.setPointerCapture(e.pointerId); } catch(_) {} e.preventDefault(); }",
           "});",
-          "window.addEventListener('mousemove', function(e){",
+          "window.addEventListener('pointermove', function(e){",
           "  if (dragIdx < 0) return;",
           "  var p = normPos(e);",
           "  points[dragIdx] = [p.x, p.y];",
           "  skipClick = true;",
           "  redraw();",
           "});",
-          "window.addEventListener('mouseup', function(){ dragIdx = -1; });",
+          "window.addEventListener('pointerup', function(){ dragIdx = -1; });",
+          "window.addEventListener('pointercancel', function(){ dragIdx = -1; });",
           "canvas.addEventListener('click', function(e){",
           "  if (skipClick) { skipClick = false; return; }",
           "  if (hitIndex(e) >= 0) return;",
