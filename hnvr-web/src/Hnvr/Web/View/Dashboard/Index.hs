@@ -109,7 +109,7 @@ instance View IndexView where
                   <th>Host</th>
                   <th>Role</th>
                   <th>Last health</th>
-                  <th>GPU</th>
+                  <th class="col-hide-sm">GPU</th>
                 </tr>
               </thead>
               <tbody>{forEach hs renderHost}</tbody>
@@ -123,7 +123,7 @@ instance View IndexView where
             <td class="mono t-strong">{hostIdText}</td>
             <td>{roleBadgeFor h.isLeader}</td>
             <td class="mono">{lastHealthHtml h.lastHealthAt}</td>
-            <td class="mono">{fromMaybe "—" h.gpuModel}</td>
+            <td class="mono col-hide-sm">{fromMaybe "—" h.gpuModel}</td>
           </tr>
         |]
         where

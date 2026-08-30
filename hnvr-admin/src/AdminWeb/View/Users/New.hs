@@ -31,11 +31,11 @@ instance View NewView where
           <form class="form" method="POST" action="/CreateUser">
             <div class="field">
               <label for="email">Email</label>
-              <input class="input" id="email" name="email" type="email" required />
+              <input class="input" id="email" name="email" type="email" autocomplete="off" required />
             </div>
             <div class="field">
               <label for="password">Password</label>
-              <input class="input" id="password" name="password" type="password" required />
+              <input class="input" id="password" name="password" type="password" autocomplete="new-password" required />
             </div>
             <div class="section-h">Roles</div>
             {roleCheckboxes roles assigned}

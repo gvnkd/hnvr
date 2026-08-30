@@ -41,18 +41,28 @@ instance View NewView where
             {textFieldFor "slug" "Slug" camera.slug "Unique handle, e.g. floor_2_5"}
             {textFieldFor "name" "Name" camera.name "Human-friendly label"}
             {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl "Main stream — typically high-res"}
-            <div class="field">
-              <label>RTSP transport</label>
-              <select name="rtspTransport">
-                <option value="tcp" selected={camera.rtspTransport == "tcp"}>tcp (default; recommended for LAN)</option>
-                <option value="udp" selected={camera.rtspTransport == "udp"}>udp (use if camera rejects TCP SETUP)</option>
-              </select>
-            </div>
             {textFieldFor "rtspSubUrl" "RTSP URL (sub, optional)" (fromMaybe "" camera.rtspSubUrl) "Analysis stream — lower-res"}
-            {textFieldFor "username" "Username" (fromMaybe "" camera.username) "RTSP credentials"}
-            {textFieldFor "password" "Password (stored encrypted)" ("" :: Text) "AES-256-GCM at rest"}
-            {textFieldFor "host" "Host IP" (fromMaybe "" camera.host) "Camera hostname or IP"}
             {textFieldFor "retentionHours" "Full-record retention (hours)" (tshow camera.retentionHours) "Event clips have their own per-rule retention"}
+
+            <details class="card mt-4 form-section">
+              <summary class="card-header">Connection details (optional)</summary>
+              <div class="card-body">
+                <div class="field">
+                  <label>RTSP transport</label>
+                  <select name="rtspTransport">
+                    <option value="tcp" selected={camera.rtspTransport == "tcp"}>tcp (default; recommended for LAN)</option>
+                    <option value="udp" selected={camera.rtspTransport == "udp"}>udp (use if camera rejects TCP SETUP)</option>
+                  </select>
+                </div>
+                {textFieldFor "username" "Username" (fromMaybe "" camera.username) "RTSP credentials"}
+                <div class="field">
+                  <label>Password (stored encrypted)</label>
+                  <input class="input" type="password" name="password" value="" autocomplete="new-password" />
+                  <div class="hint">AES-256-GCM at rest</div>
+                </div>
+                {textFieldFor "host" "Host IP" (fromMaybe "" camera.host) "Camera hostname or IP"}
+              </div>
+            </details>
 
             <div class="field">
               <label>Capture &amp; analysis</label>

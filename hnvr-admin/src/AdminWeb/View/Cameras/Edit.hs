@@ -78,6 +78,9 @@ instance View EditView where
       renderForm camera mOpts =
         [hsx|
           <form class="form" method="POST" action={updateUrl camera}>
+            <div class="mobile-only items-center mb-4">
+              <button class="btn btn-primary w-full justify-center" type="submit">Save Changes</button>
+            </div>
             {textFieldFor "slug" "Slug" camera.slug ""}
             {textFieldFor "name" "Name" camera.name ""}
             {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl ""}
@@ -90,7 +93,11 @@ instance View EditView where
             </div>
             {textFieldFor "rtspSubUrl" "RTSP URL (sub, optional)" (fromMaybe "" camera.rtspSubUrl) ""}
             {textFieldFor "username" "Username" (fromMaybe "" camera.username) ""}
-            {textFieldFor "password" "Password (blank = keep current)" ("" :: Text) "Stored encrypted; leave blank to retain existing value."}
+            <div class="field">
+              <label>Password (blank = keep current)</label>
+              <input class="input" type="password" name="password" value="" autocomplete="new-password" />
+              <div class="hint">Stored encrypted; leave blank to retain existing value.</div>
+            </div>
             {textFieldFor "host" "Host IP" (fromMaybe "" camera.host) ""}
             {textFieldFor "retentionHours" "Full-record retention (hours)" (tshow camera.retentionHours) "Event clips have their own per-rule retention"}
 
@@ -116,8 +123,8 @@ instance View EditView where
               <div class="hint">Resolved to &lt;model-dir&gt;/&lt;name&gt;.onnx on the assigned host</div>
             </div>
 
-            <div class="card mt-4">
-              <div class="card-header">ONVIF encoder settings (desired)</div>
+            <details class="card mt-4 form-section">
+              <summary class="card-header">ONVIF encoder settings (desired)</summary>
               <div class="card-body">
                 {pushInactiveWarning}
                 <p class="text-sm muted mb-4">
@@ -144,10 +151,10 @@ instance View EditView where
                 <div class="subtitle mt-4">Audio</div>
                 {audioSection camera.audioEncoding camera.audioBitrateKbps camera.audioSampleRateKhz (mOpts >>= \o -> o.foAudio)}
               </div>
-            </div>
+            </details>
 
-            <div class="card mt-4">
-              <div class="card-header">PTZ (manual control + presets)</div>
+            <details class="card mt-4 form-section">
+              <summary class="card-header">PTZ (manual control + presets)</summary>
               <div class="card-body">
                 <p class="text-sm muted mb-4">
                   Requires an ONVIF PTZ service on the camera (mgmt_proto=onvif,
@@ -162,7 +169,7 @@ instance View EditView where
                 {textFieldFor "ptzProfileToken" "Media profile token" (fromMaybe "" camera.ptzProfileToken) "ONVIF profile the PTZ ops address (filled by Probe PTZ)"}
                 {intFieldFor "ptzIdleTimeoutS" "Idle timeout (s)" (Just camera.ptzIdleTimeoutS) "Return to home preset after this many seconds without PTZ input; 0 disables"}
               </div>
-            </div>
+            </details>
 
             <div class="flex items-center gap-2 mt-6">
               <button class="btn btn-primary" type="submit">Save Changes</button>

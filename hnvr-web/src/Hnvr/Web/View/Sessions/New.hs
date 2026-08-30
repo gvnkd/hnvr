@@ -27,11 +27,11 @@ instance View (NewView User) where
               <form class="form" method="POST" action="/CreateSession">
                 <div class="field">
                   <label for="email">Email</label>
-                  <input class="input" id="email" name="email" type="email" value={user.email} required="1" autofocus="1" />
+                  <input class="input" id="email" name="email" type="email" autocomplete="username" value={user.email} required="1" autofocus="1" />
                 </div>
                 <div class="field">
                   <label for="password">Password</label>
-                  <input class="input" id="password" name="password" type="password" required="1" />
+                  <input class="input" id="password" name="password" type="password" autocomplete="current-password" required="1" />
                 </div>
                 <button class="btn btn-primary w-full justify-center mt-2" type="submit">Login →</button>
               </form>

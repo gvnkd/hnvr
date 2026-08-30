@@ -1095,6 +1095,16 @@
     });
   }
 
+  /* ── Collapsible form sections ──────────────────────────────── */
+  /* details.form-section: open on wide screens, collapsed on phones
+   * (long admin forms get a scannable summary list). */
+  function initFormSections() {
+    var open = !window.matchMedia("(max-width: 700px)").matches;
+    document.querySelectorAll("details.form-section").forEach(function (d) {
+      d.open = open;
+    });
+  }
+
   /* ── Topbar clock (viewer's timezone) ───────────────────────── */
   function initClock() {
     var el = document.querySelector(".topbar .clock");
@@ -1132,6 +1142,7 @@
       if (drawer) drawer.classList.toggle("open");
     });
     initCollapsibles();
+    initFormSections();
     initTableWrap();
     initSortableTables();
     initTableFilters();

@@ -602,6 +602,63 @@
   .textarea {
     @apply font-sans;
   }
+  /* Coarse pointers (phones/tablets): 44px minimum touch targets. */
+  @media (pointer: coarse) {
+    .input,
+    .select,
+    .textarea,
+    .field select,
+    .field input:not([type="checkbox"]),
+    .btn {
+      min-height: 44px;
+    }
+    .btn-sm {
+      min-height: 36px;
+    }
+    .field input[type="checkbox"] {
+      width: 1.25rem;
+      height: 1.25rem;
+    }
+  }
+
+  /* Checkbox rows (roles form, per-camera override matrix) */
+  .check {
+    @apply flex items-center gap-2 py-1;
+  }
+  .ovr-actions {
+    @apply flex flex-wrap gap-x-4 ml-6;
+  }
+
+  /* Collapsible form sections (admin camera forms); app.js opens
+   * them by default on wide screens, closed on phones. */
+  details.form-section > summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  details.form-section > summary::-webkit-details-marker {
+    display: none;
+  }
+  details.form-section > summary::after {
+    content: "▸";
+    margin-left: auto;
+  }
+  details.form-section[open] > summary::after {
+    content: "▾";
+  }
+
+  /* Mobile-only action rows (e.g. top-of-form save button). */
+  .mobile-only {
+    display: none !important;
+  }
+  @media (max-width: 700px) {
+    .mobile-only {
+      display: flex !important;
+    }
+    /* Low-value table columns dropped on phones. */
+    .col-hide-sm {
+      display: none;
+    }
+  }
   .field input[type="checkbox"] {
     @apply inline-block w-auto;
     accent-color: var(--accent);
