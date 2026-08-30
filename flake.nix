@@ -699,6 +699,79 @@
                     failure_threshold = 5;
                   };
 
+                  # nginx — throwaway reverse-proxy instance for testing
+                  # nginx.example.conf (repo root) against the dev leader.
+                  # Listens on 127.0.0.1:18081 and proxies to the dev leader
+                  # on PORT (18001). The system nginx owns :80 and SeaweedFS
+                  # owns :18080, hence 18081. Purely a dev harness — HNVR
+                  # does not need nginx (the app proxies /whep itself).
+                  processes.nginx.exec =
+                    let
+                      stateDir = "${config.env.DEVENV_STATE}/nginx";
+                      conf = pkgs.writeText "nginx-dev.conf" ''
+                        daemon off;
+                        worker_processes 1;
+                        pid ${stateDir}/nginx.pid;
+                        error_log /dev/stderr warn;
+                        events { worker_connections 256; }
+                        http {
+                          access_log /dev/stdout;
+                          client_body_temp_path ${stateDir}/tmp/client_body;
+                          proxy_temp_path       ${stateDir}/tmp/proxy;
+                          fastcgi_temp_path     ${stateDir}/tmp/fastcgi;
+                          uwsgi_temp_path       ${stateDir}/tmp/uwsgi;
+                          scgi_temp_path        ${stateDir}/tmp/scgi;
+
+                          map $http_upgrade $hnvr_connection_upgrade {
+                            default upgrade;
+                            '''      close;
+                          }
+
+                          upstream hnvr_leader {
+                            server 127.0.0.1:${config.env.PORT};
+                            keepalive 16;
+                          }
+
+                          server {
+                            listen 127.0.0.1:18081;
+
+                            location / {
+                              proxy_pass http://hnvr_leader;
+                              proxy_http_version 1.1;
+                              proxy_set_header Host              $host;
+                              proxy_set_header X-Real-IP         $remote_addr;
+                              proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+                              proxy_set_header X-Forwarded-Proto $scheme;
+                              proxy_set_header Upgrade           $http_upgrade;
+                              proxy_set_header Connection        $hnvr_connection_upgrade;
+                            }
+
+                            location /whep/ {
+                              proxy_pass http://hnvr_leader;
+                              proxy_http_version 1.1;
+                              proxy_set_header Host              $host;
+                              proxy_set_header X-Forwarded-Proto $scheme;
+                              proxy_buffering off;
+                              proxy_request_buffering off;
+                            }
+                          }
+                        }
+                      '';
+                    in
+                    ''
+                      mkdir -p ${stateDir}/tmp/client_body ${stateDir}/tmp/proxy ${stateDir}/tmp/fastcgi ${stateDir}/tmp/uwsgi ${stateDir}/tmp/scgi
+                      exec ${pkgs.nginx}/bin/nginx -c ${conf}
+                    '';
+                  # Any HTTP response (even 502 while no leader runs) means
+                  # nginx itself is up — the leader is not a devenv process.
+                  processes.nginx.ready = {
+                    exec = "${pkgs.curl}/bin/curl -s -o /dev/null http://127.0.0.1:18081/healthz";
+                    initial_delay = 1;
+                    period = 5;
+                    probe_timeout = 3;
+                    failure_threshold = 5;
+                  };
+
                   # Tailwind CSS watcher — rebuild static/app.css whenever
                   # HSX markup or src.css changes. Output goes into the
                   # project's hnvr-web/static/app.css (committed artifact

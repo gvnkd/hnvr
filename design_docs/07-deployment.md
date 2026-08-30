@@ -394,6 +394,11 @@ separate reverse proxy exists in front of the leader:
   };
 ```
 
+A plain-nginx equivalent lives at **`nginx.example.conf`** (repo root) —
+self-contained, with TLS termination, a separate mgmt vhost for hnvr-admin,
+and an optional RTSP `stream{}` block. Verified against the dev leader via
+the devenv `nginx` process (`127.0.0.1:18081` → leader on `$PORT`).
+
 ## Per-host files
 
 > **Design intent — `hosts/` does not exist in the repo.** The two files
