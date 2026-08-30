@@ -87,6 +87,7 @@ import Network.Minio
     removeObject,
     runMinio,
     setCreds,
+    setRegion,
   )
 import System.Environment (lookupEnv)
 
@@ -144,15 +145,22 @@ connectInfoWith ::
   S3Config ->
   ConnectInfo
 connectInfoWith pickEndpoint pickAk pickSk cfg =
-  setCreds
-    CredentialValue
-      { cvAccessKey = AccessKey (pickAk cfg),
-        cvSecretKey =
-          SecretKey
-            (BA.convert (TE.encodeUtf8 (pickSk cfg)) :: BA.ScrubbedBytes),
-        cvSessionToken = Nothing
-      }
-    (fromStringCI (pickEndpoint cfg))
+  -- Region pinned + autodiscovery off: minio-hs otherwise runs a
+  -- GetBucketLocation roundtrip on EVERY runMinio (the region cache
+  -- lives in the per-call MinioContext) — ~1 ms against the LAN
+  -- endpoint but ~180 ms through the TLS public endpoint, times every
+  -- presigned URL in a playlist (a 1-hour window = 3600 requests =
+  -- minutes of hang). SeaweedFS signs everything as us-east-1.
+  setRegion "us-east-1" $
+    setCreds
+      CredentialValue
+        { cvAccessKey = AccessKey (pickAk cfg),
+          cvSecretKey =
+            SecretKey
+              (BA.convert (TE.encodeUtf8 (pickSk cfg)) :: BA.ScrubbedBytes),
+          cvSessionToken = Nothing
+        }
+      (fromStringCI (pickEndpoint cfg))
   where
     fromStringCI :: Text -> ConnectInfo
     fromStringCI url = fromString (T.unpack url)
