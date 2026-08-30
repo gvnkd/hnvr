@@ -902,8 +902,9 @@
   }
   .live-overlay-panel {
     /* Video-first sizing: the panel is exactly as wide as the largest
-       16/9 box that fits the viewport height (head row ≈ 3.5rem). */
-    width: min(100%, calc((92dvh - 3.5rem) * 16 / 9));
+       16/9 box that fits the viewport height (head row ≈ 3.5rem).
+       20rem floor for landscape phones (tiny dvh). */
+    width: min(100%, max(20rem, calc((92dvh - 3.5rem) * 16 / 9)));
     border-radius: 16px;
     overflow: hidden;
     background: var(--panel-solid);
@@ -1090,8 +1091,10 @@
     @apply relative w-full rounded-xl overflow-hidden;
     /* Largest 16/9 surface that keeps the whole player + status row
        inside the viewport (page chrome ≈ 13rem); centered when the
-       height budget is the binding constraint. */
-    width: min(100%, calc((100dvh - 13rem) * 16 / 9));
+       height budget is the binding constraint. The 20rem floor keeps
+       phones (esp. landscape, where dvh is tiny) from collapsing the
+       player — below the floor the page simply scrolls. */
+    width: min(100%, max(20rem, calc((100dvh - 13rem) * 16 / 9)));
     margin-inline: auto;
     background: #000;
     border: 1px solid var(--border);
@@ -1243,8 +1246,10 @@
     position: relative;
     aspect-ratio: 16 / 9;
     /* Largest 16/9 surface that keeps the rangebar + player bar +
-       timeline canvas + hint on screen (chrome ≈ 22rem). */
-    width: min(100%, calc((100dvh - 22rem) * 16 / 9));
+       timeline canvas + hint on screen (chrome ≈ 22rem). 20rem floor
+       for phones — without it landscape handsets compute a NEGATIVE
+       width and the player collapses to zero. */
+    width: min(100%, max(20rem, calc((100dvh - 22rem) * 16 / 9)));
     margin-inline: auto;
     background: #000;
     border-radius: 8px;
