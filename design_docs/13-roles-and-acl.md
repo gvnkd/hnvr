@@ -152,9 +152,11 @@ ensurePagePerm :: (?context :: ControllerContext) => PageKind -> IO ()
 ### Anonymous access
 
 Today dashboard + `/ShowLive` are anonymous-readable. With roles, anonymous is
-modeled as an optional built-in `guest` role (is_system, no user row):
-requests with no session resolve to the guest `RoleSet`. Setting no grants on
-`guest` restores full login-wall behaviour without code changes.
+modeled as a built-in `guest` role (well-known UUID, no user row): requests
+with no session resolve to the guest `RoleSet`. The guest role is an ORDINARY
+role (since 0.23 / migration 0019 — not is_system): edit its grants in
+hnvr-admin, or delete it entirely for the full login wall. Re-create it with
+`hnvr-admin enable-guest` (idempotent, default grants).
 
 ## hnvr-admin service
 

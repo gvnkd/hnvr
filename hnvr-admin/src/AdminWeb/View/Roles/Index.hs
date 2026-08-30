@@ -27,7 +27,7 @@ instance View IndexView where
       <div class="page-header">
         <div>
           <h1>Roles</h1>
-          <div class="subtitle">{tshow (length roles)} roles · superadmin and guest are system-managed</div>
+          <div class="subtitle">{tshow (length roles)} roles · superadmin is system-managed; guest is ordinary — delete it for a full login wall</div>
         </div>
         <div class="actions">
           <a class="btn btn-primary" href="/NewRole">+ New Role</a>

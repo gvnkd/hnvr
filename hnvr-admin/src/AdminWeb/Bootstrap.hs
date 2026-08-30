@@ -10,6 +10,7 @@
 module AdminWeb.Bootstrap
   ( bootstrapUser,
     bootstrapFromEnv,
+    enableGuest,
   )
 where
 
@@ -20,7 +21,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Database.PostgreSQL.Simple as PG
-import Hnvr.Core.Authz (superadminRoleId)
+import Hnvr.Core.Authz (guestRoleId, superadminRoleId)
 import Hnvr.Core.Logging (logInfo)
 import IHP.AuthSupport.Authentication (hashPassword)
 import IHP.Prelude
@@ -61,6 +62,39 @@ bootstrapFromEnv = do
   forM_ ((,) <$> mEmail <*> mPassword) $ \(email, password) -> do
     bootstrapUser (T.pack email) (T.pack password)
     logInfo ("hnvr-admin: ensured admin user " <> T.pack email)
+
+-- | Re-create the seeded guest role (anonymous requests) with its
+-- default grants (dashboard + live pages, wildcard view_live) after a
+-- deliberate delete. Idempotent — existing grants are left alone.
+-- The guest role is an ordinary role since migration 0019; deleting it
+-- in the UI is the supported way to restore the full login wall.
+enableGuest :: IO ()
+enableGuest = do
+  dbUrl <- BSC.pack . fromMaybe defaultDbUrl <$> Env.lookupEnv "DATABASE_URL"
+  bracket (PG.connectPostgreSQL dbUrl) PG.close $ \conn ->
+    PG.withTransaction conn $ do
+      void
+        $ PG.execute
+          conn
+          "INSERT INTO roles (id, name, description, is_system) \
+          \VALUES (?, 'guest', 'Anonymous (unauthenticated) requests', FALSE) \
+          \ON CONFLICT (name) DO NOTHING"
+          (PG.Only guestRoleId)
+      forM_ (["dashboard", "live"] :: [Text]) $ \p ->
+        void
+          $ PG.execute
+            conn
+            "INSERT INTO role_page_perms (role_id, page) VALUES (?, ?::page_kind) ON CONFLICT DO NOTHING"
+            (guestRoleId, p)
+      void
+        $ PG.execute
+          conn
+          "INSERT INTO role_camera_perms (role_id, camera_id, action) \
+          \SELECT ?, NULL, 'view_live' WHERE NOT EXISTS ( \
+          \  SELECT 1 FROM role_camera_perms WHERE role_id = ? AND camera_id IS NULL AND action = 'view_live')"
+          (guestRoleId, guestRoleId)
+      void (PG.execute_ conn "NOTIFY roles_events, 'guest re-enabled'")
+      logInfo "hnvr-admin: guest role present with default grants"
 
 defaultDbUrl :: String
 defaultDbUrl = "postgresql:///hnvr?host=/run/postgresql"

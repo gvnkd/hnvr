@@ -147,6 +147,10 @@ backfillSuperadminSql = $(embedFile "migrations/0017-backfill-superadmin.sql")
 dropIsAdminSql :: ByteString
 dropIsAdminSql = $(embedFile "migrations/0018-drop-is-admin.sql")
 
+-- | guest becomes an ordinary (editable/deletable) role.
+guestOrdinarySql :: ByteString
+guestOrdinarySql = $(embedFile "migrations/0019-guest-ordinary-role.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -243,6 +247,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0018-drop-is-admin" dropIsAdminSql) True conn
     handleResult "0018-drop-is-admin" dropAdminRes
+    guestRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0019-guest-ordinary-role" guestOrdinarySql) True conn
+    handleResult "0019-guest-ordinary-role" guestRes
   _ <- PG.query_ conn "SELECT count(*) FROM (SELECT pg_advisory_unlock(727272)) t" :: IO [PG.Only Int]
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"

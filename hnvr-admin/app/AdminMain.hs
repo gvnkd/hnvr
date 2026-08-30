@@ -11,7 +11,7 @@
 --     so these never boot the app.
 module Main (main) where
 
-import AdminWeb.Bootstrap (bootstrapUser)
+import AdminWeb.Bootstrap (bootstrapUser, enableGuest)
 import AdminWeb.Config (config)
 import AdminWeb.FrontController ()
 import AdminWeb.Server (runAdmin)
@@ -36,6 +36,9 @@ main = do
     ["create-user", "--email", email, "--password", password] ->
       bootstrap (T.pack email) (T.pack password)
     "create-user" : _ -> die (T.unpack usage)
+    ["enable-guest"] -> do
+      runLeaderMigrations
+      enableGuest
     [] -> serve
     ["serve"] -> serve
     _ -> die (T.unpack usage)
@@ -55,5 +58,6 @@ usage =
   "hnvr-admin — HNVR management service\n\
   \  hnvr-admin [serve]                          run the admin web service\n\
   \  hnvr-admin create-user --email E --password P   create/update a superadmin user\n\
+  \  hnvr-admin enable-guest                     re-create the guest role (anonymous access) with default grants\n\
   \  hnvr-admin --version\n\
   \  hnvr-admin --help"
