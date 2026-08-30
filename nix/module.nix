@@ -228,6 +228,10 @@ in
           # (minutes), later starts load from here. Under dataDir so
           # ProtectSystem=strict allows the write.
           HNVR_TRT_CACHE_DIR = "${cfg.dataDir}/trt-cache";
+          # Public ICE hosts for the rendered mediamtx.yml (WHEP from
+          # outside the LAN — see services.hnvr.mediamtx.webrtcAdditionalHosts).
+          HNVR_MEDIAMTX_WEBRTC_HOSTS = lib.concatStringsSep ","
+            config.services.hnvr.mediamtx.webrtcAdditionalHosts;
           # hasql 1.10 + hasql-pool 1.4: interrupted sessions (killed web
           # handler threads) deallocate server-side prepared statements but
           # keep the client-side cache, permanently poisoning pooled

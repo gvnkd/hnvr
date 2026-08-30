@@ -71,7 +71,7 @@ tests =
         ],
       testGroup
         "renderPathsYaml"
-        [ let y = renderPathsYaml relay [cam]
+        [ let y = renderPathsYaml [] relay [cam]
            in testCase "ingestion path preserved" $
                 assertEqual
                   "source"
@@ -84,13 +84,13 @@ tests =
               "live"
               True
               ( "  backyard-live:\n    runOnDemand: 'ffmpeg"
-                  `T.isInfixOf` renderPathsYaml relay [cam]
+                  `T.isInfixOf` renderPathsYaml [] relay [cam]
               ),
           testCase "disabled camera emits nothing" $
             assertEqual
               "disabled"
               False
-              ("backyard" `T.isInfixOf` renderPathsYaml relay [cam {cpEnabled = False}])
+              ("backyard" `T.isInfixOf` renderPathsYaml [] relay [cam {cpEnabled = False}])
         ],
       testGroup
         "pathConfigs"

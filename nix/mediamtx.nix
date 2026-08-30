@@ -26,6 +26,8 @@ let
     webrtc: yes
     webrtcAddress: :${toString cfg.webrtcPort}
     webrtcLocalUDPAddress: :${toString cfg.webrtcUdpMuxPort}
+    ${lib.optionalString (cfg.webrtcAdditionalHosts != [ ])
+      "webrtcAdditionalHosts: [${lib.concatStringsSep ", " cfg.webrtcAdditionalHosts}]"}
     webrtcEncryption: no
     webrtcAllowOrigins: ['*']
     rtsp: yes
@@ -66,6 +68,20 @@ in
         Signaling rides the TCP webrtcPort, but the media itself is
         UDP on this port — a WHEP session that signs up fine and then
         dies on the ICE deadline means this port is firewalled.
+      '';
+    };
+
+    webrtcAdditionalHosts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "hnvr.example.org" ];
+      description = ''
+        Extra ICE candidate hosts (webrtcAdditionalHosts) — the public
+        hostname or IP the browsers reach the media on. Without these
+        mediamtx advertises only its interface addresses (LAN IP), so
+        WHEP live view works on-LAN but never connects from outside.
+        The hostname must resolve to a public IP whose UDP
+        webrtcUdpMuxPort is forwarded to this host.
       '';
     };
 

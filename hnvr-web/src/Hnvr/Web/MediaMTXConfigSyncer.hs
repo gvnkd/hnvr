@@ -131,6 +131,9 @@ listenLoop = do
   apiBase <- maybe defaultMediaMtxApi T.pack <$> Env.lookupEnv "HNVR_MEDIAMTX_API"
   cfgPath <- fromMaybe defaultConfigPath <$> Env.lookupEnv "HNVR_MEDIAMTX_CONFIG_PATH"
   relayBase <- maybe defaultRelayRtsp T.pack <$> Env.lookupEnv "HNVR_MEDIAMTX_RTSP_BASE"
+  webrtcHosts <-
+    maybe [] (filter (not . T.null) . map T.strip . T.splitOn "," . T.pack)
+      <$> Env.lookupEnv "HNVR_MEDIAMTX_WEBRTC_HOSTS"
   probeCache <- newIORef Map.empty
   -- Initial sync — covers the leader-restart case where cameras
   -- changed while the leader was down. Caught separately from the
@@ -138,10 +141,10 @@ listenLoop = do
   -- writable under ProtectSystem=strict) used to kill the async
   -- before LISTEN started, silently — no file, no REST push, no
   -- re-sync on later camera events.
-  syncOnce mgr apiBase cfgPath relayBase probeCache
+  syncOnce mgr apiBase cfgPath relayBase webrtcHosts probeCache
     `catch` \(e :: SomeException) ->
       logError ("MediaMTXConfigSyncer: initial sync failed: " <> T.pack (show e))
-  listenWith dbUrl (const $ syncOnce mgr apiBase cfgPath relayBase probeCache)
+  listenWith dbUrl (const $ syncOnce mgr apiBase cfgPath relayBase webrtcHosts probeCache)
     `catch` \(e :: SomeException) ->
       logError ("MediaMTXConfigSyncer: LISTEN loop died: " <> T.pack (show e))
 
@@ -170,14 +173,14 @@ listenWith dbUrl onNotif = do
 -- atomically, and push per-path updates to the mediamtx REST API.
 -- Cameras whose audio columns are unknown get a live probe
 -- ("Hnvr.Web.AudioProbe") before rendering, cached per slug.
-syncOnce :: (?modelContext :: ModelContext) => Manager -> Text -> FilePath -> Text -> IORef (Map.Map Text LiveAudio) -> IO ()
-syncOnce mgr apiBase cfgPath relayBase probeCache = do
+syncOnce :: (?modelContext :: ModelContext) => Manager -> Text -> FilePath -> Text -> [Text] -> IORef (Map.Map Text LiveAudio) -> IO ()
+syncOnce mgr apiBase cfgPath relayBase webrtcHosts probeCache = do
   cameras <-
     query @Camera
       |> orderByAsc #slug
       |> fetch
   paths <- mapM (cameraPath relayBase probeCache) cameras
-  writeAtomic cfgPath (renderPathsYaml relayBase paths)
+  writeAtomic cfgPath (renderPathsYaml webrtcHosts relayBase paths)
   pushPaths mgr apiBase (pathConfigs relayBase paths)
     `catch` \(e :: SomeException) ->
       logError ("MediaMTXConfigSyncer: REST push failed (file still written): " <> T.pack (show e))
