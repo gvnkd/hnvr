@@ -1289,13 +1289,25 @@
 }
 
 /* ── Responsive: sidebar becomes off-canvas on narrow screens ──── */
+.nav-scrim {
+  display: none;
+}
 @media (max-width: 900px) {
   .sidenav {
     position: fixed;
     left: 0;
+    height: 100dvh;
     transform: translateX(-100%);
     transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
     box-shadow: var(--shadow-pop);
+  }
+  .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(0, 0, 0, 0.55);
+    -webkit-tap-highlight-color: transparent;
   }
   /* Drawer hidden → the toggle peeks out at the screen's left edge;
    * drawer open → it sits inside the drawer's top-right corner. Either

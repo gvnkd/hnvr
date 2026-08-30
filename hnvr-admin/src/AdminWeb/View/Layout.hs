@@ -30,6 +30,7 @@ renderAdminLayout inner =
   <body>
     <div class="shell">
       <aside class="sidenav">
+        <button class="icon-btn nav-toggle" data-nav-toggle="1" aria-label="Toggle navigation" title="Toggle navigation">☰</button>
         <a href="/" class="brand">
           <span class="dot"></span>
           <span class="wordmark">HNVR <span class="badge badge-warn">admin</span></span>

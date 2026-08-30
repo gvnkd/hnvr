@@ -38,25 +38,46 @@
   };
 
   /* ── Sidebar collapse ───────────────────────────────────────── */
+  /* Desktop: .nav-collapsed = icon rail, persisted in localStorage.
+   * Mobile (<=900px): the same class means "drawer open" (src.css
+   * inverts it); drawer state is NOT persisted and starts closed, so a
+   * desktop-collapsed user doesn't get an auto-open drawer on a phone.
+   * A JS-created scrim closes the drawer on outside tap. */
   function initSidebar() {
     var shell = document.querySelector(".shell");
     if (!shell) return;
-    var collapsed = false;
+    var mq = window.matchMedia("(max-width: 900px)");
     try {
-      collapsed = localStorage.getItem("hnvr-nav-collapsed") === "1";
+      if (!mq.matches && localStorage.getItem("hnvr-nav-collapsed") === "1")
+        shell.classList.add("nav-collapsed");
     } catch (e) {}
-    if (collapsed) shell.classList.add("nav-collapsed");
+    var scrim = document.createElement("div");
+    scrim.className = "nav-scrim";
+    scrim.hidden = true;
+    shell.appendChild(scrim);
+    function syncScrim() {
+      scrim.hidden = !(mq.matches && shell.classList.contains("nav-collapsed"));
+    }
     document.querySelectorAll("[data-nav-toggle]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         shell.classList.toggle("nav-collapsed");
-        try {
-          localStorage.setItem(
-            "hnvr-nav-collapsed",
-            shell.classList.contains("nav-collapsed") ? "1" : "0"
-          );
-        } catch (e) {}
+        if (!mq.matches) {
+          try {
+            localStorage.setItem(
+              "hnvr-nav-collapsed",
+              shell.classList.contains("nav-collapsed") ? "1" : "0"
+            );
+          } catch (e) {}
+        }
+        syncScrim();
       });
     });
+    scrim.addEventListener("click", function () {
+      shell.classList.remove("nav-collapsed");
+      syncScrim();
+    });
+    if (mq.addEventListener) mq.addEventListener("change", syncScrim);
+    syncScrim();
   }
 
   /* ── Dropdown menus ─────────────────────────────────────────── */
