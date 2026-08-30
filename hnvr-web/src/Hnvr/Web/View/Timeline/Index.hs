@@ -70,9 +70,10 @@ instance View IndexView where
               <canvas class="tl-canvas" data-tl-canvas></canvas>
             </div>
             <div class="hint mt-2">
-              Pick the camera from the dropdown. Hover the timeline to preview a time; drag to scrub —
+              Pick the camera from the dropdown. Hover or drag the timeline to preview and scrub —
               the player shows the snapshot nearest the cursor; on release the selected camera plays
-              from the cursor time. Click an event marker to jump to it; shift-click opens its clip.
+              from the cursor time. Tap an event marker to jump to it; shift-click (long-press on touch)
+              opens its clip.
             </div>
           </div>
         </div>

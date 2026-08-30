@@ -66,7 +66,25 @@ HNVR.ptz = function (cameraId, rootEl) {
 
   var saveBtn = panel.querySelector('#ptz-preset-save');
   if (saveBtn) saveBtn.addEventListener('click', function () {
-    var name = window.prompt('Preset name:');
+    // Inline name entry: window.prompt is a blocking modal with poor
+    // mobile UX (and suppressed outright by some embedded WebViews).
+    var input = panel.querySelector('#ptz-preset-name-input');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.id = 'ptz-preset-name-input';
+      input.className = 'input';
+      input.placeholder = 'preset name';
+      input.maxLength = 60;
+      input.style.minWidth = '0';
+      input.style.flex = '1';
+      saveBtn.parentElement.insertBefore(input, saveBtn);
+      input.focus();
+      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); } });
+      return;
+    }
+    var name = input.value.trim();
+    input.remove();
     if (!name) return;
     fetch('/CreatePtzPreset?ptzCameraId=' + encodeURIComponent(cameraId) + '&format=json&preset_name=' + encodeURIComponent(name), { method: 'POST' })
       .then(function (r) { return r.json(); })

@@ -76,7 +76,7 @@ instance View IndexView where
             <form method="POST" action={homeUrl} style="display:inline">
               <button class="btn btn-ghost" type="submit">make home</button>
             </form>
-            <form method="POST" action={purgeUrl} style="display:inline">
+            <form method="POST" action={purgeUrl} style="display:inline" data-confirm={"Delete preset " <> preset.name <> "?"}>
               <button class="btn btn-ghost" type="submit">delete</button>
             </form>
           </td>

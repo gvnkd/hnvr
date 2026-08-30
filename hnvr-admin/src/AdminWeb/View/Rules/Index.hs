@@ -73,7 +73,7 @@ instance View IndexView where
           <td>{enabledBadge rule.enabled}</td>
           <td>
             <a class="btn btn-ghost" href={editUrl}>edit</a>
-            <form method="POST" action={purgeUrl} style="display:inline">
+            <form method="POST" action={purgeUrl} style="display:inline" data-confirm={"Delete rule " <> rule.name <> "?"}>
               <button class="btn btn-ghost" type="submit">delete</button>
             </form>
           </td>
