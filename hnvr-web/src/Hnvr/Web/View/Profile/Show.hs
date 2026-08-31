@@ -47,6 +47,22 @@ instance View ShowView where
             </div>
           </div>
           <div class="field">
+            <label for="locale">Date &amp; time format (locale)</label>
+            <input class="input" id="locale" name="locale" list="locale-suggestions" value={fromMaybe "" user.locale} placeholder="browser default" />
+            <datalist id="locale-suggestions">
+              <option value="en-US">en-US — 08/31/2026, 2:30 PM</option>
+              <option value="en-GB">en-GB — 31/08/2026, 14:30</option>
+              <option value="ru-RU">ru-RU — 31.08.2026, 14:30</option>
+              <option value="de-DE">de-DE — 31.08.2026, 14:30</option>
+              <option value="sv-SE">sv-SE — 2026-08-31 14:30 (ISO)</option>
+              <option value="ja-JP">ja-JP — 2026/08/31 14:30</option>
+            </datalist>
+            <div class="text-sm muted">
+              BCP 47 tag for rendering dates/times (e.g. en-GB, ru-RU, sv-SE). Empty = browser locale.
+              Saved: <span class="mono">{savedLocaleLabel}</span>
+            </div>
+          </div>
+          <div class="field">
             <button class="btn btn-primary" type="submit">Save</button>
             <button class="btn btn-ghost" type="button" data-tz-use-browser="1">Use browser timezone</button>
           </div>
@@ -55,6 +71,7 @@ instance View ShowView where
     |]
     where
       savedLabel = fromMaybe "browser default" user.timezone
+      savedLocaleLabel = fromMaybe "browser default" user.locale
       savedOption = case user.timezone of
         Nothing -> [hsx||]
         Just tz -> [hsx|<option value={tz} selected>{tz}</option>|]

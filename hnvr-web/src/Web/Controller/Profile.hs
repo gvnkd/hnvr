@@ -46,13 +46,13 @@ instance Controller ProfileController where
     render ShowView {..}
   action UpdateProfileAction = do
     let user = currentUser
-    case normalizeTz (T.strip (param @Text "timezone")) of
+    case (,) <$> normalizeTz (T.strip (param @Text "timezone")) <*> normalizeLocale (T.strip (param @Text "locale")) of
       Nothing -> do
-        setErrorMessage "Invalid timezone name"
+        setErrorMessage "Invalid timezone or locale name"
         redirectTo ShowProfileAction
-      Just mtz -> do
-        _ <- user |> set #timezone mtz |> updateRecord
-        audit currentUserUuid "profile.update" "user" (userUuidOf user) (Just (object ["timezone" .= mtz]))
+      Just (mtz, mloc) -> do
+        _ <- user |> set #timezone mtz |> set #locale mloc |> updateRecord
+        audit currentUserUuid "profile.update" "user" (userUuidOf user) (Just (object ["timezone" .= mtz, "locale" .= mloc]))
         setSuccessMessage "Profile saved"
         redirectTo ShowProfileAction
 
@@ -63,6 +63,15 @@ normalizeTz t
   | T.null t = Just Nothing
   | T.length t > 64 = Nothing
   | T.all (\c -> isAlphaNum c || c `elem` ("_/-+" :: String)) t = Just (Just t)
+  | otherwise = Nothing
+
+-- | Empty → NULL (browser locale). Otherwise accept BCP 47-ish tags:
+-- letters/digits plus @-@ @_@ (de-DE, zh-Hant-TW), 1..35 chars.
+normalizeLocale :: Text -> Maybe (Maybe Text)
+normalizeLocale t
+  | T.null t = Just Nothing
+  | T.length t > 35 = Nothing
+  | T.all (\c -> isAlphaNum c || c `elem` ("-_" :: String)) t = Just (Just t)
   | otherwise = Nothing
 
 userUuidOf :: User -> Maybe UUID

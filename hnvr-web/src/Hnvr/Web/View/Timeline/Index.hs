@@ -32,11 +32,7 @@ data IndexView = IndexView
   { cameras :: [Camera],
     winFrom :: UTCTime,
     winTo :: UTCTime,
-    cursor :: UTCTime,
-    -- | Page render time — presets center on the cursor unless the
-    -- centered window would run into the future, then the window ends
-    -- at now at full width.
-    winNow :: UTCTime
+    cursor :: UTCTime
   }
 
 instance View IndexView where
@@ -102,19 +98,16 @@ instance View IndexView where
       dtLocal = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M"
 
       -- \| Range presets keep the cursor timestamp: the new window is
-      -- centered on it (half the range each side); when the centered
-      -- window would extend past now, it ends at now at full width.
-      -- The explicit @t=@ keeps the cursor exact through the controller's
-      -- clamping.
+      -- centered on it (half the range each side). The centered window
+      -- may extend past now (the future half is simply empty — the
+      -- controller allows @to@ up to 24 h ahead).
       presetItem :: NominalDiffTime -> Text -> Html
       presetItem width label =
         [hsx|<a class={cls} href={href}>{label}</a>|]
         where
           half = width / 2
-          toCentered = addUTCTime half cursor
-          (f, t)
-            | toCentered <= winNow = (addUTCTime (-half) cursor, toCentered)
-            | otherwise = (addUTCTime (-width) winNow, winNow)
+          f = addUTCTime (-half) cursor
+          t = addUTCTime half cursor
           href = "/Timeline?from=" <> iso f <> "&to=" <> iso t <> "&t=" <> iso cursor
           cls = (if active then "dropdown-item is-active" else "dropdown-item") :: Text
           active = abs (diffUTCTime winTo winFrom - width) < 60

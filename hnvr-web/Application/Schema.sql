@@ -138,6 +138,7 @@ CREATE TABLE users (
     failed_login_attempts   INT NOT NULL DEFAULT 0,
     last_login_at           TIMESTAMP WITH TIME ZONE,
     timezone                TEXT,
+    locale                  TEXT,
     created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 

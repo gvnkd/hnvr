@@ -909,6 +909,12 @@
     var t = document.body && document.body.getAttribute("data-user-tz");
     return t || browserTz();
   };
+  /* Display locale: profile setting wins (body[data-user-locale]);
+   * undefined = Intl falls back to the browser locale. */
+  HNVR.viewerLocale = function () {
+    var l = document.body && document.body.getAttribute("data-user-locale");
+    return l || undefined;
+  };
   function tzLabel() {
     var tz = HNVR.viewerTz();
     if (tz === "UTC") return "UTC";
@@ -945,11 +951,10 @@
       opts.day = "2-digit";
     }
     try {
-      // Browser locale (undefined) — dates/times render per the user's
-      // locale; the zone comes from the profile (HNVR.viewerTz).
+      // Profile locale wins (data-user-locale), else the browser's.
       // Input VALUES keep the ISO contract via the sv-SE formatters in
-      // initTzDateInputs — never change those to the browser locale.
-      return new Intl.DateTimeFormat(undefined, opts).format(d);
+      // initTzDateInputs — never change those to the display locale.
+      return new Intl.DateTimeFormat(HNVR.viewerLocale(), opts).format(d);
     } catch (e) {
       return d.toISOString().replace("T", " ").slice(0, 19);
     }

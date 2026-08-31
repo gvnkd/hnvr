@@ -90,7 +90,7 @@ test.describe('Cameras CRUD', () => {
     await page.locator('input[name="name"]').fill(updatedName);
     // Password field MUST be left blank to keep existing (Slice 7b).
     // Don't fill it — verify the blank-password-no-overwrite path.
-    await page.getByRole('button', {name: /save changes/i}).click();
+    await page.getByRole('button', {name: /save changes/i}).last().click();
     await page.waitForURL(/\/ShowCamera\?cameraId=/);
 
     // ---- Verify update ---------------------------------------------

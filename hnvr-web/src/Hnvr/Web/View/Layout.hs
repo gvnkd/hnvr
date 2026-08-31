@@ -35,7 +35,7 @@ renderLayout inner =
     <script src="/static/app.js"></script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2309090b'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%2338bdf8'/%3E%3C/svg%3E" />
   </head>
-  <body data-user-tz={userTzAttr}>
+  <body data-user-tz={userTzAttr} data-user-locale={userLocaleAttr}>
     <div class="shell">
       <aside class="sidenav">
         <button class="icon-btn nav-toggle" data-nav-toggle="1" aria-label="Toggle navigation" title="Toggle navigation">☰</button>
@@ -82,6 +82,10 @@ renderLayout inner =
     -- app.js falls back to the browser's zone. Consumed by the topbar
     -- clock and the [data-utc-ts] timestamp rewriting.
     userTzAttr = fromMaybe "" ((currentUserOrNothing :: Maybe User) >>= (.timezone))
+
+    -- Logged-in user's display locale (BCP 47), empty = browser locale.
+    -- Consumed by HNVR.formatTs via HNVR.viewerLocale().
+    userLocaleAttr = fromMaybe "" ((currentUserOrNothing :: Maybe User) >>= (.locale))
 
     -- Roles & ACL (design_docs/13): nav items render only when the
     -- subject's RoleSet grants the page (hide, don't 403 — controllers

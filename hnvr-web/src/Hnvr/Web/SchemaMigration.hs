@@ -151,6 +151,10 @@ dropIsAdminSql = $(embedFile "migrations/0018-drop-is-admin.sql")
 guestOrdinarySql :: ByteString
 guestOrdinarySql = $(embedFile "migrations/0019-guest-ordinary-role.sql")
 
+-- | Per-user display locale (BCP 47 tag; NULL = browser locale).
+userLocaleSql :: ByteString
+userLocaleSql = $(embedFile "migrations/0020-user-locale.sql")
+
 -- | Run all leader-side migrations idempotently. Safe to call on every
 -- boot — already-applied migrations are skipped via the
 -- @schema_migrations@ table. Returns immediately on success; logs and
@@ -251,6 +255,10 @@ runLeaderMigrations = do
       runMigration $
         MigrationContext (MigrationScript "0019-guest-ordinary-role" guestOrdinarySql) True conn
     handleResult "0019-guest-ordinary-role" guestRes
+    localeRes <-
+      runMigration $
+        MigrationContext (MigrationScript "0020-user-locale" userLocaleSql) True conn
+    handleResult "0020-user-locale" localeRes
   _ <- PG.query_ conn "SELECT count(*) FROM (SELECT pg_advisory_unlock(727272)) t" :: IO [PG.Only Int]
   PG.close conn
   logInfo "SchemaMigration: migrations applied successfully"

@@ -42,5 +42,6 @@ rowDecoder = do
     failedLoginAttempts <- Decoders.column (Decoders.nonNullable (fromIntegral <$> Decoders.int4))
     lastLoginAt <- Decoders.column (Decoders.nullable Decoders.timestamptz)
     timezone <- Decoders.column (Decoders.nullable Decoders.text)
+    locale <- Decoders.column (Decoders.nullable Decoders.text)
     createdAt <- Decoders.column (Decoders.nonNullable Decoders.timestamptz)
-    pure (let theRecord = Generated.ActualTypes.User id email passwordHash lockedAt failedLoginAttempts lastLoginAt timezone createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)
+    pure (let theRecord = Generated.ActualTypes.User id email passwordHash lockedAt failedLoginAttempts lastLoginAt timezone locale createdAt def { originalDatabaseRecord = Just (Data.Dynamic.toDyn theRecord) } in theRecord)

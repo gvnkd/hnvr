@@ -35,7 +35,7 @@ statement :: Statement.Statement (Id' "users") (Maybe Generated.ActualTypes.User
 statement = Statement.preparable sql encoder decoder
 
 sql :: Text
-sql = "SELECT id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, created_at FROM users WHERE id = $1 LIMIT 1"
+sql = "SELECT id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, locale, created_at FROM users WHERE id = $1 LIMIT 1"
 
 encoder :: Encoders.Params (Id' "users")
 encoder = Encoders.param (Encoders.nonNullable Mapping.encoder)

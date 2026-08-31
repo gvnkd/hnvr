@@ -50,11 +50,12 @@ sql touchedFields returning =
             , if testBit touchedFields 4 then Just "failed_login_attempts" else Nothing
             , Just "last_login_at"
             , Just "timezone"
-            , if testBit touchedFields 7 then Just "created_at" else Nothing
+            , Just "locale"
+            , if testBit touchedFields 8 then Just "created_at" else Nothing
             ]
         columns = Text.intercalate ", " entries
         placeholders = Text.intercalate ", " ["$" <> Text.pack (show i) | i <- [1 .. length entries]]
-        returningClause = if returning then " RETURNING id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, created_at" else ""
+        returningClause = if returning then " RETURNING id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, locale, created_at" else ""
     in if null entries
         then "INSERT INTO users DEFAULT VALUES" <> returningClause
         else "INSERT INTO users (" <> columns <> ") VALUES (" <> placeholders <> ")" <> returningClause
@@ -69,7 +70,8 @@ encoder touchedFields = mconcat $ catMaybes
     , if testBit touchedFields 4 then Just ((.failedLoginAttempts) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , Just ((.lastLoginAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz))
     , Just ((.timezone) >$< Encoders.param (Encoders.nullable Encoders.text))
-    , if testBit touchedFields 7 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , Just ((.locale) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , if testBit touchedFields 8 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 

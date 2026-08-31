@@ -49,12 +49,13 @@ sql touchedFields returning =
             , if testBit touchedFields 4 then Just "failed_login_attempts" else Nothing
             , if testBit touchedFields 5 then Just "last_login_at" else Nothing
             , if testBit touchedFields 6 then Just "timezone" else Nothing
-            , if testBit touchedFields 7 then Just "created_at" else Nothing
+            , if testBit touchedFields 7 then Just "locale" else Nothing
+            , if testBit touchedFields 8 then Just "created_at" else Nothing
             ]
         setClauses = [col <> " = $" <> Text.pack (show i) | (i, col) <- zip [1..] setEntries]
         pkIdx = length setEntries + 1
         whereClause = \startIdx -> "id" <> " = $" <> Text.pack (show startIdx)
-        returningClause = if returning then " RETURNING id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, created_at" else ""
+        returningClause = if returning then " RETURNING id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, locale, created_at" else ""
     in "UPDATE users SET " <> Text.intercalate ", " setClauses <> " WHERE " <> whereClause pkIdx <> returningClause
 
 
@@ -66,7 +67,8 @@ encoder touchedFields = mconcat (catMaybes
     , if testBit touchedFields 4 then Just ((.failedLoginAttempts) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , if testBit touchedFields 5 then Just ((.lastLoginAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz)) else Nothing
     , if testBit touchedFields 6 then Just ((.timezone) >$< Encoders.param (Encoders.nullable Encoders.text)) else Nothing
-    , if testBit touchedFields 7 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , if testBit touchedFields 7 then Just ((.locale) >$< Encoders.param (Encoders.nullable Encoders.text)) else Nothing
+    , if testBit touchedFields 8 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ])
     <> ((.id) >$< Encoders.param (Encoders.nonNullable Mapping.encoder))
 

@@ -83,10 +83,9 @@ instance Controller TimelineController where
     ensurePagePerm PageArchive
     cameras <- aclFilterCameras ViewArchive (query @Camera |> orderByAsc #slug) >>= fetch
     (from, to) <- resolveWindow
-    now <- liftIO getCurrentTime
     let mT = nonemptyParam "t" >>= parseWhen
         cursor = maybe to (min to . max from) mT
-    render IndexView {cameras, winFrom = from, winTo = to, cursor, winNow = now}
+    render IndexView {cameras, winFrom = from, winTo = to, cursor}
   action TimelineDataAction = do
     ensurePagePerm PageArchive
     (from, to) <- resolveWindow
@@ -163,12 +162,15 @@ instance Controller TimelineController where
 
 -- | from/to query params (ISO or datetime-local, UTC) with the 24 h
 -- default ending at now; inverted or over-wide windows are clamped.
+-- @to@ may run up to 24 h into the future — range presets center on the
+-- cursor, so a cursor at now legitimately puts half the window ahead
+-- (the future half is simply empty; queries see no future rows).
 resolveWindow :: (?request :: Request) => IO (UTCTime, UTCTime)
 resolveWindow = do
   now <- liftIO getCurrentTime
   let mFrom = nonemptyParam "from" >>= parseWhen
       mTo = nonemptyParam "to" >>= parseWhen
-      to = maybe now (min now) mTo
+      to = maybe now (min (addUTCTime (24 * 3600) now)) mTo
       from0 = fromMaybe (addUTCTime (-defaultWindow) to) mFrom
       from = max (addUTCTime (-maxWindow) to) (min (addUTCTime (-60) to) from0)
   pure (from, to)

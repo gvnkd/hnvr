@@ -44,11 +44,11 @@ sql touchedFieldsList =
             let (g, offset') = valueGroup tf offset
             in (gs ++ [g], offset')
             ) ([], 1) touchedFieldsList
-    in "INSERT INTO users (id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, created_at) VALUES "
+    in "INSERT INTO users (id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, locale, created_at) VALUES "
         <> Text.intercalate ", " valueGroups
-        <> " RETURNING id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, created_at"
+        <> " RETURNING id, email, password_hash, locked_at, failed_login_attempts, last_login_at, timezone, locale, created_at"
   where
-    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, True), (5, False), (6, False), (7, True)]
+    columnMeta = [(0, True), (1, False), (2, False), (3, False), (4, True), (5, False), (6, False), (7, False), (8, True)]
     valueGroup tf offset =
         let step (parts, off) (bitIdx, hasDefault) =
                 if hasDefault && not (testBit tf bitIdx)
@@ -69,7 +69,8 @@ singleEncoder touchedFields = mconcat $ catMaybes
     , if testBit touchedFields 4 then Just ((.failedLoginAttempts) >$< Encoders.param (Encoders.nonNullable (fromIntegral >$< Encoders.int4))) else Nothing
     , Just ((.lastLoginAt) >$< Encoders.param (Encoders.nullable Encoders.timestamptz))
     , Just ((.timezone) >$< Encoders.param (Encoders.nullable Encoders.text))
-    , if testBit touchedFields 7 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
+    , Just ((.locale) >$< Encoders.param (Encoders.nullable Encoders.text))
+    , if testBit touchedFields 8 then Just ((.createdAt) >$< Encoders.param (Encoders.nonNullable Encoders.timestamptz)) else Nothing
     ]
 
 decoder :: Decoders.Result [Generated.ActualTypes.User]

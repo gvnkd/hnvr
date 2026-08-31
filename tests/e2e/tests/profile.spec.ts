@@ -57,4 +57,20 @@ test.describe('Profile / timezone', () => {
     expect(clockText).toContain(expected.replace(/:\d{2}$/, '')); // seconds may tick between reads
     expect(clockText).toContain(browserTz === 'UTC' ? 'UTC' : browserTz);
   });
+
+  test('locale setting changes timestamp rendering', async ({loggedInPage}) => {
+    await loggedInPage.goto('/ShowProfile');
+    await loggedInPage.locator('#locale').fill('sv-SE');
+    await loggedInPage.getByRole('button', {name: /^save$/i}).click();
+    await loggedInPage.waitForURL(/\/ShowProfile$/);
+    await expect(loggedInPage.locator('body')).toHaveAttribute('data-user-locale', 'sv-SE');
+    // sv-SE renders ISO-ordered "YYYY-MM-DD HH:mm:ss".
+    const clockText = await loggedInPage.locator('.topbar .clock').textContent();
+    expect(clockText).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+    // Clearing restores the browser locale.
+    await loggedInPage.locator('#locale').fill('');
+    await loggedInPage.getByRole('button', {name: /^save$/i}).click();
+    await loggedInPage.waitForURL(/\/ShowProfile$/);
+    await expect(loggedInPage.locator('body')).toHaveAttribute('data-user-locale', '');
+  });
 });
