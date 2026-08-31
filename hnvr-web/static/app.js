@@ -1033,8 +1033,47 @@
         pad(d.getUTCMinutes())
       );
     }
+    /* Localized display overlay: the native datetime-local widget
+     * always renders the BROWSER UI locale — neither the page lang nor
+     * any API can override it. So we show a read-only text field in the
+     * viewer's locale on top; clicking it opens the native picker via
+     * showPicker() (Chrome 99+/Safari 16+/FF 101+). Browsers without
+     * showPicker keep the plain native input. */
+    function fmtLocal(v) {
+      var d = new Date(v + (v.length === 16 ? ":00Z" : "Z"));
+      if (isNaN(d)) return v;
+      return new Intl.DateTimeFormat(HNVR.viewerLocale(), {
+        timeZone: HNVR.viewerTz(),
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(d);
+    }
     inputs.forEach(function (inp) {
       if (inp.value) inp.value = utcToLocal(inp.value);
+      if (typeof inp.showPicker !== "function") return;
+      var wrap = document.createElement("span");
+      wrap.className = "tz-dt-wrap";
+      inp.parentNode.insertBefore(wrap, inp);
+      wrap.appendChild(inp);
+      var disp = document.createElement("input");
+      disp.type = "text";
+      disp.className = inp.className + " tz-dt-display";
+      disp.readOnly = true;
+      disp.setAttribute("aria-label", inp.getAttribute("aria-label") || inp.name);
+      wrap.appendChild(disp);
+      function sync() {
+        // inp.value holds the wall-clock fields in the viewer's zone;
+        // parse them back via localToUtc so the display matches.
+        disp.value = inp.value ? fmtLocal(localToUtc(inp.value)) : "";
+      }
+      inp.addEventListener("change", sync);
+      inp.addEventListener("input", sync);
+      disp.addEventListener("click", function () {
+        try {
+          inp.showPicker();
+        } catch (e) {}
+      });
+      sync();
     });
     inputs.forEach(function (inp) {
       var form = inp.closest("form");

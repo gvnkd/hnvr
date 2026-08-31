@@ -1286,6 +1286,26 @@
     flex: 1 1 9rem;
     min-width: 0;
   }
+  /* Localized display overlay for datetime-local inputs (app.js
+   * initTzDateInputs): the native input is kept for value + picker,
+   * visually hidden; the text sibling shows the viewer-locale format. */
+  .tz-dt-wrap {
+    position: relative;
+    display: block;
+  }
+  .tl-custom .tz-dt-wrap {
+    flex: 1 1 9rem;
+    min-width: 0;
+  }
+  .tz-dt-wrap input[type="datetime-local"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .tz-dt-display {
+    cursor: pointer;
+  }
   .tl-cursor-label {
     @apply text-sm font-mono;
   }
