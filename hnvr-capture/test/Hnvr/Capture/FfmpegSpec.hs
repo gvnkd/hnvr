@@ -54,15 +54,15 @@ tests =
           _flag : chain : _ ->
             assertEqual
               "filter chain"
-              "asetrate=16000,aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000"
+              "asetrate=16000,aresample=48000,asetpts=NB_CONSUMED_SAMPLES/SR/TB,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000"
               chain
           _ -> fail "expected -af <chain> in argv",
       testCase "8 kHz / unset input rate adds no asetrate" $ do
         let chainOf c = case dropWhile (/= "-af") (recordingArgs c {rcRecordAudio = True}) of
               _flag : chain : _ -> chain
               _ -> ""
-        assertEqual "8 kHz" "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000" (chainOf tcpCfg {rcAudioInputRateHz = Just 8000})
-        assertEqual "unset" "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000" (chainOf tcpCfg)
+        assertEqual "8 kHz" "aresample=48000,asetpts=NB_CONSUMED_SAMPLES/SR/TB,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000" (chainOf tcpCfg {rcAudioInputRateHz = Just 8000})
+        assertEqual "unset" "aresample=48000,asetpts=NB_CONSUMED_SAMPLES/SR/TB,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000" (chainOf tcpCfg)
     ]
 
 -- | The exact audio argv slice (from @-af@ through the bitrate) that
@@ -73,7 +73,7 @@ tests =
 audioArgsExpected :: [String]
 audioArgsExpected =
   [ "-af",
-    "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000",
+    "aresample=48000,asetpts=NB_CONSUMED_SAMPLES/SR/TB,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000",
     "-c:a",
     "aac",
     "-b:a",

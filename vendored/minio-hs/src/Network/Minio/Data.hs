@@ -35,7 +35,7 @@ import qualified Data.Aeson as A
 import qualified Data.ByteArray as BA
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as LB
-import Data.Default.Class (def)
+import Data.Default (def)
 import qualified Data.HashMap.Strict as H
 import qualified Data.Ini as Ini
 import qualified Data.List as List

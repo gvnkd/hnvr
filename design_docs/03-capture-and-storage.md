@@ -93,8 +93,17 @@ ffmpeg (muxed into the shared fMP4 fragments — the separate-audio-ffmpeg
 design above was superseded). Filter chain:
 
 ```
-[asetrate=<input Hz>,]aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000
+[asetrate=<input Hz>,]aresample=48000,asetpts=NB_CONSUMED_SAMPLES/SR/TB,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000
 ```
+
+The `asetpts` rebuilds audio PTS from the cumulative sample count. The
+Hik-OEMs emit audio RTP whose DTS jumps backward ~112 ms every couple of
+seconds; ffmpeg clamps each jump to prev+1 and the fMP4 muxer then writes
+trun sample durations of ~22 ticks instead of 1024 — audio media time
+collapses to ~2% of wall time in stretches and the archive player's
+A/V-slope probe strips the (fully present) audio. Sample-count PTS makes
+encoder input perfectly monotonic (verified: every AAC frame at duration
+1024, zero DTS clamps).
 
 The `asetrate` retag applies only for fixed-clock codecs (G.711/G.726 —
 RFC 3551 pins PCMU/PCMA to an 8 kHz RTP clock) whose camera samples at a

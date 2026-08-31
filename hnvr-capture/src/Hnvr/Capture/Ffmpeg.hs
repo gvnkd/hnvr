@@ -140,10 +140,22 @@ recordingArgs cfg =
     -- first of all: it re-labels the decoded frames at the true rate
     -- (no resample, pitch+speed corrected) before aresample does the
     -- rate conversion.
+    --
+    -- @asetpts=NB_CONSUMED_SAMPLES\/SR\/TB@ rebuilds the audio PTS from
+    -- the cumulative sample count after aresample. The Hik-OEMs emit
+    -- audio RTP whose DTS jumps backward ~112 ms every couple of
+    -- seconds; ffmpeg clamps each jump to prev+1, and the fMP4 muxer
+    -- then writes trun sample durations of ~22 ticks instead of 1024 —
+    -- media time collapses to ~2% of wall time in stretches, the
+    -- archive player's A/V-slope probe reads those windows as
+    -- legacy-skewed and strips the (fully present) audio. Regenerated
+    -- from sample counts, encoder input is perfectly monotonic and
+    -- every AAC frame lands with duration 1024 (muxer even coalesces
+    -- to tfhd default_sample_duration).
     audioOpts
       | rcRecordAudio cfg =
           [ "-af",
-            asetrate <> "aresample=48000,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000",
+            asetrate <> "aresample=48000,asetpts=NB_CONSUMED_SAMPLES/SR/TB,highpass=f=60,highpass=f=60,lowpass=f=14000,lowpass=f=14000",
             "-c:a",
             "aac",
             "-b:a",
