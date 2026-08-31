@@ -195,6 +195,10 @@ Hungarian via `hungarian-algorithm-1.0.0`. Cost = `1 - IoU` between predicted tr
 
 - Tentative → confirmed on 3 consecutive hits (eligible for events).
 - Killed after 30 missed frames (`max_age`).
+- Tracker knobs are env-tunable at analyzer start (0.25.6):
+  `HNVR_SORT_MAX_AGE` (frames, default 30 — the "track buffer"),
+  `HNVR_SORT_MIN_HITS` (default 3 — the "init threshold"),
+  `HNVR_SORT_IOU_GATE` (default 0.3).
 - Killed tracks emit nothing — the `track_start`/`track_end` lifecycle
   events were pruned from the `event_kind` enum in migration 0010 (zero
   emitters ever shipped).
@@ -252,6 +256,16 @@ Point-in-polygon (ray casting). Per track:
 ### Cooldowns
 
 Per-rule state in `tPerRuleState :: IntMap RuleState` on each track. Prune entries when track dies.
+
+Since 0.25.6 the cooldown is ALSO a rule-level refractory
+(`EngineState.esRuleLastEmit`): a rule emits at most one event per
+cooldown window regardless of which track triggered it. Per-track
+cooldown + id-switch adoption are heuristics that miss real-world
+SORT id churn (reappearances scattered beyond the handover radius) —
+without the refractory, a whole-frame `zone_inside` rule fired for
+every orphaned track id (Aug 2026: ~12k rows, bursts of 8 ids in
+40 s on floor_2_5). Trade-off: two genuinely distinct objects
+tripping the same rule within one window produce a single event.
 
 ## Auto-track consumer (v1.1 milestone)
 

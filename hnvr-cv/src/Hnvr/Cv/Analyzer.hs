@@ -23,6 +23,7 @@ module Hnvr.Cv.Analyzer
     Analyzer (..),
     withAnalyzer,
     analyzeFrame,
+    trackerFromEnv,
     parseExecProviders,
     execProviderName,
     execProvidersFromEnv,
@@ -52,9 +53,10 @@ import Hnvr.Cv.OnnxRuntime
     withSession,
   )
 import Hnvr.Cv.Preprocess (letterboxGeometry, preprocessTo, toTensor)
-import Hnvr.Cv.Tracker.Sort (Track, Tracker, confirmedTracks, newTracker)
+import Hnvr.Cv.Tracker.Sort (Track, Tracker, confirmedTracks)
 import qualified Hnvr.Cv.Tracker.Sort as Sort
 import System.Environment (lookupEnv)
+import Text.Read (readMaybe)
 
 -- | Per-camera analysis knobs. Model input size is 320 for
 -- YOLOv8n-320 (YOLOv8s-640 override lands with per-camera
@@ -95,11 +97,32 @@ data Analyzer = Analyzer
 -- doesn't look like @[1, 3, h, w]@.
 withAnalyzer :: AnalyzerConfig -> Text -> [ExecutionProvider] -> (Analyzer -> IO r) -> IO r
 withAnalyzer cfg modelPath eps k =
-  withSession modelPath eps $ \sess ->
+  withSession modelPath eps $ \sess -> do
+    tracker <- trackerFromEnv
     let cfg' = case sessionInputShape sess of
           [1, 3, h, _w] | h > 0 -> cfg {acTargetSize = fromIntegral h}
           _ -> cfg
-     in k Analyzer {anSession = sess, anConfig = cfg', anTracker = newTracker}
+    k Analyzer {anSession = sess, anConfig = cfg', anTracker = tracker}
+
+-- | Build the SORT tracker, honoring @HNVR_SORT_MAX_AGE@ (coast
+-- budget in frames — how long a track survives without a detection),
+-- @HNVR_SORT_MIN_HITS@ (matches before a track confirms) and
+-- @HNVR_SORT_IOU_GATE@ (min IoU for a detection↔track match, 0..1).
+-- Missing\/malformed values fall back to the 'Sort' defaults — a
+-- typo'd knob must not kill camera start.
+trackerFromEnv :: IO Tracker
+trackerFromEnv = do
+  maxAge <- envOr "HNVR_SORT_MAX_AGE" Sort.defaultMaxAge
+  minHits <- envOr "HNVR_SORT_MIN_HITS" Sort.defaultMinHits
+  iouGate <- envOr "HNVR_SORT_IOU_GATE" Sort.defaultIouGate
+  pure (Sort.newTrackerWith maxAge minHits iouGate)
+  where
+    envOr :: (Read a) => String -> a -> IO a
+    envOr name def = do
+      m <- lookupEnv name
+      pure $ case m of
+        Just raw | Just v <- readMaybe raw -> v
+        _ -> def
 
 -- | One frame through the full pipeline. Returns the updated analyzer
 -- and this frame's confirmed tracks (boxes in source-frame pixels).

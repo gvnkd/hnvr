@@ -5,6 +5,7 @@
 module Hnvr.Cv.RulesSpec (tests) where
 
 import Data.Aeson (Value, object, (.=))
+import qualified Data.Map.Strict as M
 import Data.Maybe (isJust, isNothing)
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..), addUTCTime, secondsToDiffTime)
@@ -12,6 +13,7 @@ import Hnvr.Core.CameraSnapshot (RuleSnapshot (..))
 import Hnvr.Core.Geometry (Box (..), V2 (..))
 import Hnvr.Cv.Rules
   ( Direction (..),
+    EngineState (..),
     Rule (..),
     RuleEvent (..),
     RuleEventKind (..),
@@ -215,15 +217,26 @@ tests =
           testCase "no adoption when the fresh track is too far" $ do
             let r = squareZone ZoneInside
                 (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.3, 0.3)] t0
-                (_, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 0 (0.7, 0.7)] (plus 0.5 t0)
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 0 (0.7, 0.7)] (plus 0.5 t0)
             length evs1 @?= 1
-            length evs2 @?= 1,
+            -- no adoption: both tracks keep their own rule state
+            assertBool "track 1 state kept" (M.member ("z1", 1) (esRules st2))
+            assertBool "track 2 own state" (M.member ("z1", 2) (esRules st2))
+            -- ...but the rule-level refractory suppresses the fresh
+            -- track's emit anyway (same rule, 0.5 s after the last)
+            assertBool "refractory suppresses" (null evs2)
+            -- once the rule cooldown elapses the far track fires on
+            -- its own clock
+            let (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 2 0 (0.7, 0.7)] (plus 6 t0)
+            length evs3 @?= 1,
           testCase "no adoption across detection classes" $ do
             let r = squareZone ZoneInside
                 (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
-                (_, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 2 (0.51, 0.5)] (plus 0.5 t0)
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 2 (0.51, 0.5)] (plus 0.5 t0)
             length evs1 @?= 1
-            length evs2 @?= 1,
+            assertBool "track 1 state kept" (M.member ("z1", 1) (esRules st2))
+            assertBool "track 2 own state" (M.member ("z1", 2) (esRules st2))
+            assertBool "refractory suppresses" (null evs2),
           testCase "memory expiry prunes the state" $ do
             let r = squareZone ZoneInside
                 (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 5 0 (0.5, 0.5)] t0
@@ -257,26 +270,34 @@ tests =
           testCase "different class live track does not shadow" $ do
             let r = squareZone ZoneInside
                 (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
-                (_, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 2 (0.55, 0.5)] (plus 0.5 t0)
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 2 (0.55, 0.5)] (plus 0.5 t0)
             length evs1 @?= 1
-            length evs2 @?= 1,
+            assertBool "not shadowed" (M.notMember 2 (esShadows st2))
+            assertBool "refractory suppresses" (null evs2),
           testCase "far live track does not shadow" $ do
             let r = squareZone ZoneInside
                 (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
-                (_, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.75, 0.75)] (plus 0.5 t0)
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.75, 0.75)] (plus 0.5 t0)
             length evs1 @?= 1
-            length evs2 @?= 1,
+            assertBool "not shadowed" (M.notMember 2 (esShadows st2))
+            assertBool "refractory suppresses" (null evs2),
           testCase "shadow split re-arms the second track" $ do
             let r = squareZone ZoneInside
                 (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
                 (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.6, 0.5)] (plus 0.5 t0)
                 -- the pair diverges beyond shadow range: two objects
-                -- after all — the second one evaluates (and fires,
-                -- having never accumulated rule state)
-                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.75, 0.75)] (plus 1 t0)
+                -- after all — the mapping drops and the second track
+                -- is evaluated, but the rule-level refractory (1 s
+                -- after the last emit) still holds the emit
+                (st3, evs3) = evalTracks st2 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.75, 0.75)] (plus 1 t0)
+                -- once the rule cooldown elapses the pair fires once
+                -- more (refractory: one emit per rule per window)
+                (_, evs4) = evalTracks st3 [r] 1 1 [mkTrack 1 0 (0.5, 0.5), mkTrack 2 0 (0.75, 0.75)] (plus 6.5 t0)
             length evs1 @?= 1
             assertBool "shadowed" (null evs2)
-            length evs3 @?= 1,
+            assertBool "mapping dropped" (M.null (esShadows st3))
+            assertBool "refractory suppresses" (null evs3)
+            length evs4 @?= 1,
           testCase "velocity prediction adopts a walking person" $ do
             let r = squareZone ZoneInside
                 (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.4, 0.5)] t0
@@ -311,6 +332,41 @@ tests =
                 (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 4 0 (0.645, 0.605)] (plus 7 t0)
             length evs1 @?= 1
             assertBool "adopted via prediction" (null evs3)
+        ],
+      testGroup
+        "rule-level refractory"
+        [ testCase "id-churn burst collapses to one event per window" $ do
+            -- the whole-frame zone_inside storm: SORT hands the same
+            -- person a new id every few frames and adoption can't
+            -- match the scattered reappearances — without the
+            -- refractory every orphan id fired on first observation
+            let r = squareZone ZoneInside
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.3, 0.3)] t0
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 0 (0.7, 0.3)] (plus 1 t0)
+                (st3, evs3) = evalTracks st2 [r] 1 1 [mkTrack 3 0 (0.3, 0.7)] (plus 2 t0)
+                (st4, evs4) = evalTracks st3 [r] 1 1 [mkTrack 4 0 (0.7, 0.7)] (plus 3 t0)
+                (_, evs5) = evalTracks st4 [r] 1 1 [mkTrack 5 0 (0.5, 0.5)] (plus 6 t0)
+            length evs1 @?= 1
+            assertBool "burst suppressed" (null evs2 && null evs3 && null evs4)
+            length evs5 @?= 1,
+          testCase "refractory is per rule" $ do
+            let r1 = squareZone ZoneInside
+                r2 = (squareZone ZoneInside) {rId = "z2"}
+                (st1, evs1) = evalTracks emptyEngineState [r1] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                -- r2 (hot-added) has never emitted: its gate is open
+                -- even though r1 fired 1 s ago
+                (_, evs2) = evalTracks st1 [r1, r2] 1 1 [mkTrack 2 0 (0.7, 0.7)] (plus 1 t0)
+            length evs1 @?= 1
+            length evs2 @?= 1
+            map (reRuleId . (\(_, _, ev) -> ev)) evs2 @?= ["z2"],
+          testCase "refractory window follows the rule's cooldown" $ do
+            let r = (squareZone ZoneInside) {rCooldownMs = 15000}
+                (st1, evs1) = evalTracks emptyEngineState [r] 1 1 [mkTrack 1 0 (0.5, 0.5)] t0
+                (st2, evs2) = evalTracks st1 [r] 1 1 [mkTrack 2 0 (0.7, 0.7)] (plus 6 t0)
+                (_, evs3) = evalTracks st2 [r] 1 1 [mkTrack 3 0 (0.3, 0.3)] (plus 16 t0)
+            length evs1 @?= 1
+            assertBool "6 s < 15 s cooldown: suppressed" (null evs2)
+            length evs3 @?= 1
         ],
       testGroup
         "projectRule zone_motion"

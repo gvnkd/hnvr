@@ -48,6 +48,7 @@ module Hnvr.Cv.Rules
 
     -- * Evaluation
     evalRule,
+    evalRuleGated,
     evalTracks,
     normalizeBox,
 
@@ -248,16 +249,27 @@ data SeenTrack = SeenTrack
 --     already-live same-class track becomes its shadow: it is never
 --     rule-evaluated, and when the primary disappears the shadow
 --     inherits its rule state (so the person's cooldown still holds).
+--
+-- @esRuleLastEmit@ is a /rule-level refractory/: the last time each
+-- rule emitted an event for ANY track. A rule never fires twice
+-- within its cooldown window no matter which track triggered it —
+-- adoption and shadowing are heuristics that miss real-world id
+-- churn (reappearances scattered beyond the handover radius), and
+-- without this gate every orphaned track id fired zone rules on its
+-- first observation (the Aug 2026 whole-frame-zone event storm:
+-- ~12k zone_inside rows, bursts of 8 track ids in 40 s).
 data EngineState = EngineState
   { esRules :: !(Map (Text, Int) RuleState),
     esSeen :: !(Map Int SeenTrack),
     -- | Shadow track id → primary track id (live duplicates only).
-    esShadows :: !(Map Int Int)
+    esShadows :: !(Map Int Int),
+    -- | Rule id → timestamp of the rule's last emitted event.
+    esRuleLastEmit :: !(Map Text UTCTime)
   }
   deriving stock (Eq, Show)
 
 emptyEngineState :: EngineState
-emptyEngineState = EngineState {esRules = M.empty, esSeen = M.empty, esShadows = M.empty}
+emptyEngineState = EngineState {esRules = M.empty, esSeen = M.empty, esShadows = M.empty, esRuleLastEmit = M.empty}
 
 -- | Seconds a disappeared track's rule state survives. MUST exceed
 -- 'handoverWindowSec' — this trim runs before adoption, so a memory
@@ -303,13 +315,21 @@ data RuleEvent = RuleEvent
 -- previous and current center in normalized coords, the detection
 -- class, and the frame timestamp.
 evalRule :: Rule -> Int -> UTCTime -> V2 Double -> V2 Double -> RuleState -> (Maybe RuleEvent, RuleState)
-evalRule rule classId now p0 p1 st
+evalRule rule = evalRuleGated rule True
+
+-- | Like 'evalRule' but with the rule-level refractory gate: when
+-- 'False', transitions still advance the state machine (zone inside
+-- flags, motion anchors) but never emit — the rule's cooldown since
+-- its last emitted event (for ANY track, see 'esRuleLastEmit') has
+-- not elapsed.
+evalRuleGated :: Rule -> Bool -> Int -> UTCTime -> V2 Double -> V2 Double -> RuleState -> (Maybe RuleEvent, RuleState)
+evalRuleGated rule gateOk classId now p0 p1 st
   | not (ruleClasses rule classId) = (Nothing, st)
   | otherwise = case rule of
       LineRule {rLine = (a, b), rDirection = dir} ->
         let crossed = segIntersect p0 p1 a b && dirMatches dir a b p0 p1
             kind = LineCrossed
-         in fire rule kind now crossed st
+         in fire rule kind gateOk now crossed st
       ZoneRule {rZone = poly, rMode = ZoneMotion thr} ->
         let insideNow = pointInPoly p1 poly
             st0 = st {rsInside = Just insideNow}
@@ -319,7 +339,7 @@ evalRule rule classId now p0 p1 st
                 Nothing -> (Nothing, st0 {rsAnchor = Just p1})
                 Just anchor ->
                   let moved = dist anchor p1 >= thr
-                      (mEv, st1) = fire rule ZoneMotionEvent now moved st0
+                      (mEv, st1) = fire rule ZoneMotionEvent gateOk now moved st0
                       -- On emit, re-anchor so the next event needs a
                       -- fresh threshold displacement; while the
                       -- cooldown suppresses, keep accumulating.
@@ -338,7 +358,7 @@ evalRule rule classId now p0 p1 st
               ZoneEnter -> ZoneEntered
               ZoneExit -> ZoneExited
               ZoneInside -> ZoneInsideEvent
-            (mEv, st') = fire rule kind now transition st
+            (mEv, st') = fire rule kind gateOk now transition st
          in (mEv, st' {rsInside = Just insideNow})
 
 -- | Evaluate a set of rules over one frame's tracks. Threads the
@@ -391,21 +411,31 @@ evalTracks st rules fw fh tracks now =
       -- remembered — an absent track is forgotten only after the
       -- memory window elapses.
       rules2 = M.filterWithKey (\(_, tid) _ -> M.member tid seen3) rules1
-      step (st', evs) track
-        | M.member (let TrackId n = tId track in n) shadows2 = (st', evs)
+      -- Rule-level refractory: forget last-emit entries for rules
+      -- that no longer exist.
+      lastEmit0 = M.filterWithKey (\rid _ -> rid `elem` ruleIds) (esRuleLastEmit st)
+      ruleIds = map ruleId rules
+      step (st', le, evs) track
+        | M.member (let TrackId n = tId track in n) shadows2 = (st', le, evs)
         | otherwise =
             let p0 = norm (boxCenter (tPrevBox track))
                 p1 = norm (boxCenter (tBox track))
-                stepRule (st'', evs') rule =
+                stepRule (st'', le', evs') rule =
                   let key = (ruleId rule, let TrackId n = tId track in n)
                       prevSt = M.findWithDefault emptyRuleState key st''
-                      (mEv, newSt) = evalRule rule (tClassId track) now p0 p1 prevSt
+                      gateOk = case M.lookup (ruleId rule) le' of
+                        Nothing -> True
+                        Just lastEmit ->
+                          diffUTCTime now lastEmit * 1000 > fromIntegral (ruleCooldownMs rule)
+                      (mEv, newSt) = evalRuleGated rule gateOk (tClassId track) now p0 p1 prevSt
+                      le'' = maybe le' (const (M.insert (ruleId rule) now le')) mEv
                    in ( M.insert key newSt st'',
+                        le'',
                         maybe evs' (\ev -> (rule, track, ev) : evs') mEv
                       )
-             in foldl stepRule (st', evs) rules
-      (rules3, evs) = foldl step (rules2, []) tracks
-   in (EngineState rules3 seen3 shadows2, reverse evs)
+             in foldl stepRule (st', le, evs) rules
+      (rules3, lastEmit1, evs) = foldl step (rules2, lastEmit0, []) tracks
+   in (EngineState rules3 seen3 shadows2 lastEmit1, reverse evs)
   where
     liveTids = [n | Track {tId = TrackId n} <- tracks]
     liveCenters =
@@ -503,17 +533,18 @@ normalizeBox fw fh Box {bxX = x, bxY = y, bxW = w, bxH = h} =
       bxH = realToFrac h / fromIntegral fh
     }
 
--- | Cooldown gate: emit only when the transition fired AND the
--- cooldown since the last emit has elapsed. The cooldown clock resets
--- on every EMITTED event (not on suppressed transitions).
-fire :: Rule -> RuleEventKind -> UTCTime -> Bool -> RuleState -> (Maybe RuleEvent, RuleState)
-fire _ _ _ False st = (Nothing, st)
-fire rule kind now True st =
+-- | Cooldown gate: emit only when the transition fired, the per-track
+-- cooldown since the last emit has elapsed, AND the rule-level
+-- refractory gate is open. The cooldown clock resets on every
+-- EMITTED event (not on suppressed transitions).
+fire :: Rule -> RuleEventKind -> Bool -> UTCTime -> Bool -> RuleState -> (Maybe RuleEvent, RuleState)
+fire _ _ _ _ False st = (Nothing, st)
+fire rule kind gateOk now True st =
   let cooldownOk = case rsLastEmit st of
         Nothing -> True
         Just lastEmit ->
           diffUTCTime now lastEmit * 1000 > fromIntegral (ruleCooldownMs rule)
-   in if cooldownOk
+   in if cooldownOk && gateOk
         then
           ( Just RuleEvent {reRuleId = ruleId rule, reKind = kind, reTs = now},
             st {rsLastEmit = Just now}

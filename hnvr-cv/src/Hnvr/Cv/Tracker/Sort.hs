@@ -18,6 +18,7 @@ module Hnvr.Cv.Tracker.Sort
     Track (..),
     Tracker (..),
     newTracker,
+    newTrackerWith,
     defaultMaxAge,
     defaultMinHits,
     defaultIouGate,
@@ -80,12 +81,18 @@ defaultIouGate :: Float
 defaultIouGate = 0.3
 
 newTracker :: Tracker
-newTracker =
+newTracker = newTrackerWith defaultMaxAge defaultMinHits defaultIouGate
+
+-- | Tracker with explicit knobs (env-tunable at analyzer start):
+-- coast budget in frames (\"track buffer\"), hits to confirm
+-- (\"init threshold\"), detection↔track IoU gate.
+newTrackerWith :: Int -> Int -> Float -> Tracker
+newTrackerWith maxAge minHits iouGate =
   Tracker
     { trNextId = 1,
-      trMaxAge = defaultMaxAge,
-      trMinHits = defaultMinHits,
-      trIouGate = defaultIouGate,
+      trMaxAge = maxAge,
+      trMinHits = minHits,
+      trIouGate = iouGate,
       trTracks = IM.empty
     }
 
