@@ -28,7 +28,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM
-import Control.Exception (SomeAsyncException, SomeException, fromException, throwIO, try)
+import Control.Exception (SomeAsyncException, SomeException, bracket, fromException, throwIO, try)
 import Control.Monad (forM_, unless, void, when)
 import qualified Data.ByteString as B
 import Data.Text (Text)
@@ -36,6 +36,7 @@ import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime)
 import qualified Data.Vector.Storable as VS
 import Hnvr.Capture.Ffmpeg (AnalysisConfig, analysisArgs)
+import Hnvr.Capture.Process (reapProcess)
 import Hnvr.Core.Frame (Frame (..))
 import Hnvr.Core.Logging (logWarn)
 import Hnvr.Core.Metrics (Metrics (..))
@@ -89,18 +90,28 @@ sliceFrames frameSize buf
 -- | One ffmpeg lifetime: spawn, slice frames into the queue until
 -- EOF/exit. Returns the process exit code (for the backoff loop's
 -- logging).
+--
+-- The lifetime is bracketed with 'reapProcess' (pitfall #130): a
+-- cancellation of the enclosing async lands inside 'readLoop' and
+-- would otherwise skip 'waitForProcess', zombifying the ffmpeg.
 runFrameSource :: FrameSourceConfig -> TBQueue Frame -> IO ExitCode
 runFrameSource cfg q = do
   let frameSize = fscWidth cfg * fscHeight cfg * 3
-  (_, Just hOut, _, ph) <-
-    createProcess
-      (proc "ffmpeg" (analysisArgs (fscAnalysis cfg)))
-        { std_out = CreatePipe,
-          std_err = Inherit
-        }
-  readLoop hOut frameSize B.empty
-  _ <- try (terminateProcess ph) :: IO (Either SomeException ())
-  waitForProcess ph
+  bracket
+    ( createProcess
+        (proc "ffmpeg" (analysisArgs (fscAnalysis cfg)))
+          { std_out = CreatePipe,
+            std_err = Inherit
+          }
+    )
+    (\(_, _, _, ph) -> reapProcess ph)
+    $ \(_, mOut, _, ph) -> do
+      hOut <- case mOut of
+        Just h -> pure h
+        Nothing -> fail "ffmpeg did not give us a stdout pipe"
+      readLoop hOut frameSize B.empty
+      _ <- try (terminateProcess ph) :: IO (Either SomeException ())
+      waitForProcess ph
   where
     readLoop :: Handle -> Int -> B.ByteString -> IO ()
     readLoop h frameSize leftover = do

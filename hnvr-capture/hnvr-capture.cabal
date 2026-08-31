@@ -10,6 +10,7 @@ library
     Hnvr.Capture.Ffmpeg
     Hnvr.Capture.Fmp4
     Hnvr.Capture.FrameSource
+    Hnvr.Capture.Process
     Hnvr.Capture.RingBuffer
     Hnvr.Capture.SpoolDrainer
     Hnvr.Capture.Worker
@@ -32,6 +33,7 @@ library
     , text
     , time
     , typed-process
+    , unix
     , vector
 
   hs-source-dirs:   src
@@ -77,11 +79,13 @@ test-suite hnvr-capture-test
     Hnvr.Capture.FfmpegSpec
     Hnvr.Capture.Fmp4Spec
     Hnvr.Capture.FrameSourceSpec
+    Hnvr.Capture.ProcessSpec
     Hnvr.Capture.RingBufferSpec
     Hnvr.Capture.SpoolDrainerSpec
     Hnvr.Capture.WorkerSpec
 
   build-depends:
+    , async
     , base              >=4.18 && <5
     , bytestring
     , directory
@@ -90,6 +94,7 @@ test-suite hnvr-capture-test
     , hnvr-core
     , hnvr-storage
     , minio-hs
+    , process
     , QuickCheck
     , stm
     , tasty

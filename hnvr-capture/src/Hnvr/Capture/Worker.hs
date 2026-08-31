@@ -50,7 +50,7 @@ where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, writeTVar)
-import Control.Exception (SomeAsyncException (..), SomeException, catch, fromException, throwIO)
+import Control.Exception (SomeAsyncException (..), SomeException, bracket, catch, fromException, throwIO)
 import Control.Monad (foldM)
 import Crypto.Hash (Digest, SHA256 (..), hash)
 import qualified Data.ByteArray as BA (convert)
@@ -63,6 +63,7 @@ import qualified Data.Text as T
 import Data.Time.Clock (UTCTime, addUTCTime, getCurrentTime)
 import Hnvr.Capture.Ffmpeg (RecordingConfig (..), Transport (..), recordingArgs)
 import Hnvr.Capture.Fmp4 (Fmp4State, Fragment (..), feed, finish, initial)
+import Hnvr.Capture.Process (reapProcess)
 import Hnvr.Capture.RingBuffer (RingBuffer)
 import qualified Hnvr.Capture.RingBuffer as RB
 import Hnvr.Core.CameraStatus (CaptureStateWire (..))
@@ -256,6 +257,11 @@ transition stateVar cfg cam recentRef = \case
 -- The ffmpeg reads from the mediamtx internal relay
 -- (@rtsp://localhost:8554/<slug>@, the single-puller point from M1.B);
 -- mediamtx holds the single camera pull.
+--
+-- The process lifetime is bracketed with 'reapProcess' (pitfall #130):
+-- a supervisor cancellation lands inside the stdout read loop and would
+-- otherwise skip 'waitForProcess', leaving the abandoned ffmpeg as a
+-- zombie when it dies of EPIPE a moment later.
 runOnce :: CaptureConfig -> CameraConfig -> IO ExitCode
 runOnce cfg cam = do
   let argsConfig =
@@ -265,18 +271,21 @@ runOnce cfg cam = do
             rcRecordAudio = ccRecordAudio cam,
             rcAudioInputRateHz = ccAudioInputRateHz cam
           }
-  (_, mOut, _, ph) <-
-    createProcess
-      (proc "ffmpeg" (recordingArgs argsConfig))
-        { std_out = CreatePipe,
-          std_err = Inherit
-        }
-  hOut <- case mOut of
-    Just h -> pure h
-    Nothing -> fail "ffmpeg did not give us a stdout pipe"
-  hSetBuffering hOut (BlockBuffering (Just 65_536))
-  processStream cfg cam hOut initial Nothing
-  waitForProcess ph
+  bracket
+    ( createProcess
+        (proc "ffmpeg" (recordingArgs argsConfig))
+          { std_out = CreatePipe,
+            std_err = Inherit
+          }
+    )
+    (\(_, _, _, ph) -> reapProcess ph)
+    $ \(_, mOut, _, ph) -> do
+      hOut <- case mOut of
+        Just h -> pure h
+        Nothing -> fail "ffmpeg did not give us a stdout pipe"
+      hSetBuffering hOut (BlockBuffering (Just 65_536))
+      processStream cfg cam hOut initial Nothing
+      waitForProcess ph
 
 -- | Stream ffmpeg's stdout through the Fmp4 parser, handling each emitted
 -- fragment. Returns when stdout hits EOF.
