@@ -100,12 +100,16 @@ instance View IndexView where
       -- \| Range presets keep the cursor timestamp: the new window is
       -- centered on it (half the range each side). The centered window
       -- may extend past now (the future half is simply empty — the
-      -- controller allows @to@ up to 24 h ahead).
-      presetItem :: NominalDiffTime -> Text -> Html
-      presetItem width label =
-        [hsx|<a class={cls} href={href}>{label}</a>|]
+      -- controller allows @to@ up to 24 h ahead). timeline.js
+      -- intercepts clicks via @data-tl-preset@ to center on the CURRENT
+      -- (possibly scrubbed) cursor — the href here is the no-JS
+      -- fallback, rendered with the page-load cursor.
+      presetItem :: Int -> Text -> Html
+      presetItem seconds label =
+        [hsx|<a class={cls} href={href} data-tl-preset={tshow seconds}>{label}</a>|]
         where
-          half = width / 2
+          half = fromIntegral seconds / 2
+          width = fromIntegral seconds :: NominalDiffTime
           f = addUTCTime (-half) cursor
           t = addUTCTime half cursor
           href = "/Timeline?from=" <> iso f <> "&to=" <> iso t <> "&t=" <> iso cursor

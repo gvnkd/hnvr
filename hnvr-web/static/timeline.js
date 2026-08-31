@@ -660,6 +660,25 @@
       });
     }
 
+    /* Range presets: navigate centered on the CURRENT cursor — the
+     * rendered hrefs carry the page-load cursor, which goes stale the
+     * moment the user scrubs. */
+    document.querySelectorAll("[data-tl-preset]").forEach(function (a) {
+      a.addEventListener("click", function (e) {
+        e.preventDefault();
+        var secs = parseInt(a.getAttribute("data-tl-preset"), 10);
+        if (!secs) return;
+        var half = (secs / 2) * 1000;
+        var f = new Date(cursorMs - half).toISOString();
+        var t = new Date(cursorMs + half).toISOString();
+        var c = new Date(cursorMs).toISOString();
+        window.location.href =
+          "/Timeline?from=" + encodeURIComponent(f) +
+          "&to=" + encodeURIComponent(t) +
+          "&t=" + encodeURIComponent(c);
+      });
+    });
+
     resize();
     updateLabel();
     fetchData().then(function () {

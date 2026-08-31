@@ -22,6 +22,32 @@ test("range preset centers the window on the cursor", async ({ loggedInPage: pag
   expect(Math.abs(cur2 - (from + to2) / 2)).toBeLessThan(60 * 1000);
 });
 
+test("range preset after scrubbing centers on the scrubbed cursor", async ({ loggedInPage: page }) => {
+  await page.goto("/Timeline");
+  const canvas = page.locator("[data-tl-canvas]");
+  await canvas.scrollIntoViewIfNeeded();
+  const box = (await canvas.boundingBox())!;
+  // Scrub to ~20% from the left (cursor leaves "now").
+  await page.mouse.move(box.x + box.width * 0.8, box.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.2, box.y + 20, { steps: 5 });
+  await page.mouse.up();
+  const curLabel = await page.locator("[data-tl-cursor-label]").textContent();
+
+  await page.locator(".tl-rangebar [data-dropdown-button]").click();
+  await page.locator(".tl-rangebar .dropdown-item", { hasText: "1 hour" }).click();
+  await page.waitForURL(/\/Timeline\?from=/);
+  const root = page.locator("[data-timeline]");
+  const from = Date.parse((await root.getAttribute("data-from"))!);
+  const to = Date.parse((await root.getAttribute("data-to"))!);
+  const cur = Date.parse((await root.getAttribute("data-cursor"))!);
+  expect(to - from).toBe(3600 * 1000);
+  // Centered on the scrubbed cursor, NOT reset to now.
+  expect(Math.abs(cur - (from + to) / 2)).toBeLessThan(60 * 1000);
+  expect(to).toBeLessThan(Date.now() - 60 * 1000);
+  await expect(page.locator("[data-tl-cursor-label]")).toHaveText(curLabel!);
+});
+
 test("range preset from a now-cursor centers too (window may reach into the future)", async ({ loggedInPage: page }) => {
   await page.goto("/Timeline");
   await page.locator(".tl-rangebar [data-dropdown-button]").click();
