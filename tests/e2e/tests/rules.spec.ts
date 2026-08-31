@@ -67,6 +67,7 @@ test('rules: create via canvas, edit prefill, purge', async ({adminLoggedInPage:
   // --- Purge -----------------------------------------------------------
   await page.goto(`${ADMIN_URL}/Rules`);
   const row = page.locator('tr', {hasText: 'playwright line'});
+  page.once('dialog', (d) => d.accept()); // data-confirm gate on the delete form
   await row.getByRole('button', {name: /delete/i}).click();
   await expect(page.locator('td', {hasText: 'playwright line'})).toHaveCount(0);
 });
@@ -92,6 +93,7 @@ test('rules: zone polygon via canvas (3+ clicks, finish)', async ({adminLoggedIn
 
   await page.goto(`${ADMIN_URL}/Rules`);
   const row = page.locator('tr', {hasText: 'playwright zone'});
+  page.once('dialog', (d) => d.accept()); // data-confirm gate on the delete form
   await row.getByRole('button', {name: /delete/i}).click();
   await expect(page.locator('td', {hasText: 'playwright zone'})).toHaveCount(0);
 });
