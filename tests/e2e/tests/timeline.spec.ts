@@ -23,12 +23,14 @@ test.describe('Archive timeline', () => {
     const to = Date.parse((await root.getAttribute('data-to'))!);
     expect(to - from).toBe(24 * 3600 * 1000);
     // 24h preset is the active one.
-    await expect(page.locator('.tl-rangebar a', {hasText: '24h'})).toHaveClass(/btn-primary/);
+    await page.locator('.tl-rangebar [data-dropdown-button]').click();
+    await expect(page.locator('.tl-rangebar .dropdown-item', {hasText: '24 hours'})).toHaveClass(/is-active/);
   });
 
   test('range preset narrows the window', async ({loggedInPage: page}) => {
     await page.goto('/Timeline');
-    await page.locator('.tl-rangebar a', {hasText: '1h'}).click();
+    await page.locator('.tl-rangebar [data-dropdown-button]').click();
+    await page.locator('.tl-rangebar .dropdown-item', {hasText: '1 hour'}).click();
     await page.waitForURL(/\/Timeline\?from=/);
     const root = page.locator('[data-timeline]');
     const from = Date.parse((await root.getAttribute('data-from'))!);

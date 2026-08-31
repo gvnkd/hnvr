@@ -1341,10 +1341,13 @@
     @apply block w-full cursor-crosshair;
     touch-action: none;
   }
-  /* Hover scrub preview (YouTube-style) */
+  /* Hover scrub preview (YouTube-style). Sits ABOVE the timeline —
+   * rendered over the canvas it hid the event markers and lane labels
+   * being previewed. */
   .tl-hover-preview {
     position: absolute;
-    top: 4px;
+    top: auto;
+    bottom: calc(100% + 6px);
     transform: translateX(-50%);
     width: 240px;
     max-width: calc(100vw - 2rem);

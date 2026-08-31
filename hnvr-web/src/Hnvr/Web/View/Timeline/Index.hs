@@ -32,7 +32,11 @@ data IndexView = IndexView
   { cameras :: [Camera],
     winFrom :: UTCTime,
     winTo :: UTCTime,
-    cursor :: UTCTime
+    cursor :: UTCTime,
+    -- | Page render time — presets center on the cursor unless the
+    -- centered window would run into the future, then the window ends
+    -- at now at full width.
+    winNow :: UTCTime
   }
 
 instance View IndexView where
@@ -44,10 +48,16 @@ instance View IndexView where
         <div class="card mb-4 tl-shell" data-tl-shell>
           <div class="card-body tl-shell-body">
             <div class="tl-rangebar">
-              <span class="muted text-sm">Range:</span>
-              {presetLink 3600 "1h"}
-              {presetLink (6 * 3600) "6h"}
-              {presetLink (24 * 3600) "24h"}
+              <div class="dropdown" data-dropdown="1">
+                <button class="btn btn-ghost btn-sm" data-dropdown-button="1" aria-expanded="false" type="button">
+                  ◷ Range: {rangeLabel} ▾
+                </button>
+                <div class="dropdown-menu drop-down" hidden>
+                  {presetItem 3600 "1 hour"}
+                  {presetItem (6 * 3600) "6 hours"}
+                  {presetItem (24 * 3600) "24 hours"}
+                </div>
+              </div>
               <form method="GET" action="/Timeline" class="tl-custom">
                 <input class="input" type="datetime-local" name="from" data-tz-dt="1" value={dtLocal winFrom} />
                 <span class="muted">→</span>
@@ -91,13 +101,32 @@ instance View IndexView where
       dtLocal :: UTCTime -> Text
       dtLocal = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M"
 
-      presetLink :: NominalDiffTime -> Text -> Html
-      presetLink width label =
+      -- \| Range presets keep the cursor timestamp: the new window is
+      -- centered on it (half the range each side); when the centered
+      -- window would extend past now, it ends at now at full width.
+      -- The explicit @t=@ keeps the cursor exact through the controller's
+      -- clamping.
+      presetItem :: NominalDiffTime -> Text -> Html
+      presetItem width label =
         [hsx|<a class={cls} href={href}>{label}</a>|]
         where
-          href = "/Timeline?from=" <> iso (addUTCTime (-width) winTo) <> "&to=" <> iso winTo
+          half = width / 2
+          toCentered = addUTCTime half cursor
+          (f, t)
+            | toCentered <= winNow = (addUTCTime (-half) cursor, toCentered)
+            | otherwise = (addUTCTime (-width) winNow, winNow)
+          href = "/Timeline?from=" <> iso f <> "&to=" <> iso t <> "&t=" <> iso cursor
+          cls = (if active then "dropdown-item is-active" else "dropdown-item") :: Text
           active = abs (diffUTCTime winTo winFrom - width) < 60
-          cls = (if active then "btn btn-primary" else "btn btn-ghost") :: Text
+
+      rangeLabel :: Text
+      rangeLabel
+        | isWidth 3600 = "1h"
+        | isWidth (6 * 3600) = "6h"
+        | isWidth (24 * 3600) = "24h"
+        | otherwise = "custom"
+        where
+          isWidth w = abs (diffUTCTime winTo winFrom - w) < 60
 
       -- Single archive player: camera dropdown + one video surface.
       -- Exactly one camera streams at a time (N concurrent hls.js

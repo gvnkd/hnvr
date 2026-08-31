@@ -48,10 +48,13 @@ test.describe('Profile / timezone', () => {
     await loggedInPage.getByRole('button', {name: /^save$/i}).click();
     await loggedInPage.waitForURL(/\/ShowProfile$/);
     await expect(loggedInPage.locator('body')).toHaveAttribute('data-user-tz', '');
-    // Clock now follows the browser zone (named abbreviation or IANA
-    // name depending on the chromium build's ICU data).
+    // Clock follows the browser zone AND locale (formatTs renders with
+    // the browser locale since 0.25): compare against formatTs itself.
     const clockText = await loggedInPage.locator('.topbar .clock').textContent();
-    expect(clockText).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+/);
+    const expected = await loggedInPage.evaluate(() =>
+      (window as any).HNVR.formatTs(new Date().toISOString()),
+    );
+    expect(clockText).toContain(expected.replace(/:\d{2}$/, '')); // seconds may tick between reads
     expect(clockText).toContain(browserTz === 'UTC' ? 'UTC' : browserTz);
   });
 });

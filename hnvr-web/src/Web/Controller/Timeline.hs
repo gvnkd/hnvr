@@ -83,9 +83,10 @@ instance Controller TimelineController where
     ensurePagePerm PageArchive
     cameras <- aclFilterCameras ViewArchive (query @Camera |> orderByAsc #slug) >>= fetch
     (from, to) <- resolveWindow
+    now <- liftIO getCurrentTime
     let mT = nonemptyParam "t" >>= parseWhen
         cursor = maybe to (min to . max from) mT
-    render IndexView {cameras, winFrom = from, winTo = to, cursor}
+    render IndexView {cameras, winFrom = from, winTo = to, cursor, winNow = now}
   action TimelineDataAction = do
     ensurePagePerm PageArchive
     (from, to) <- resolveWindow

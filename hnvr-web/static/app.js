@@ -945,8 +945,11 @@
       opts.day = "2-digit";
     }
     try {
-      // sv-SE renders ISO-ordered "YYYY-MM-DD HH:mm:ss".
-      return new Intl.DateTimeFormat("sv-SE", opts).format(d);
+      // Browser locale (undefined) — dates/times render per the user's
+      // locale; the zone comes from the profile (HNVR.viewerTz).
+      // Input VALUES keep the ISO contract via the sv-SE formatters in
+      // initTzDateInputs — never change those to the browser locale.
+      return new Intl.DateTimeFormat(undefined, opts).format(d);
     } catch (e) {
       return d.toISOString().replace("T", " ").slice(0, 19);
     }
