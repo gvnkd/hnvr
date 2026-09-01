@@ -397,12 +397,12 @@ in
           HNVR_NATS_URI = cfg.natsUri;
           APP_STATIC = "${cfg.dataDir}/static";
           IHP_SESSION_SECRET_FILE = "${cfg.dataDir}/client_session_key.aes";
-           HASQL_DISABLE_PREPARED_STATEMENTS = "1";
-         } // lib.optionalAttrs (cfgA.baseUrl != null) {
-           HNVR_ADMIN_BASE_URL = cfgA.baseUrl;
-         } // lib.optionalAttrs (cfg.configFile != null) {
-           HNVR_CONFIG = toString cfg.configFile;
-         };
+          HASQL_DISABLE_PREPARED_STATEMENTS = "1";
+        } // lib.optionalAttrs (cfgA.baseUrl != null) {
+          HNVR_ADMIN_BASE_URL = cfgA.baseUrl;
+        } // lib.optionalAttrs (cfg.configFile != null) {
+          HNVR_CONFIG = toString cfg.configFile;
+        };
 
         serviceConfig = {
           ExecStart = "${cfgA.package}/bin/hnvr-admin";
