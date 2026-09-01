@@ -270,7 +270,9 @@ instance View IndexView where
       nextLink
         | hasNext = [hsx|<a class="btn btn-ghost" href={pageUrl (page + 1)}>Next →</a>|]
         | otherwise = [hsx||]
-      pageUrl p = urlFor ("/Events?" <> filterQuery <> "page=" <> tshow p)
+      pageUrl p = urlFor ("/Events?" <> filterQuery <> sep <> "page=" <> tshow p)
+        where
+          sep = if T.null filterQuery then "" else "&"
       filterQuery =
         T.intercalate "&" (catMaybes [qp "cameraId" fltCamera, qp "kind" fltKind, qp "from" fltFrom, qp "to" fltTo])
       qp name = fmap (\v -> name <> "=" <> v)
