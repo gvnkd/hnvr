@@ -55,17 +55,26 @@ module Hnvr.Node.CaptureSupervisor
   )
 where
 
-import Control.Concurrent.Async (Async, async, cancel, waitCatch)
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Async (Async, async, cancel, poll, waitCatch)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Concurrent.STM
   ( TVar,
     atomically,
     newTVarIO,
+    readTVar,
     readTVarIO,
     writeTVar,
   )
-import Control.Exception (SomeException, try)
-import Control.Monad (forM, forM_, void, when)
+import Control.Exception
+  ( SomeAsyncException (..),
+    SomeException,
+    finally,
+    fromException,
+    throwIO,
+    try,
+  )
+import Control.Monad (forM, forM_, forever, void, when)
 import Data.Aeson (object, (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef
@@ -172,7 +181,17 @@ data CaptureSupervisor = CaptureSupervisor
     -- Cached per camera for the node's lifetime, successes AND
     -- failures: the probe reads the relay for ~7 s and runs under the
     -- camera's lifecycle lock.
-    csAudioProbes :: !(IORef (Map CameraId (Maybe Int)))
+    csAudioProbes :: !(IORef (Map CameraId (Maybe Int))),
+    -- | In-flight event-thumbnail uploads. Bounded ('maxThumbInFlight')
+    -- so a wedged S3 endpoint can't accumulate an unbounded pile of
+    -- forked threads — pitfall #131.
+    csThumbInFlight :: !(TVar Int),
+    -- | Last ('CameraSnapshot', relay URL) per camera, recorded at
+    -- 'startCameraLocked' and dropped at 'stopCameraLocked'. The
+    -- analysis watchdog uses it to restart a dead\/wedged pair without
+    -- touching the capture worker (recording must not flap because the
+    -- CV side hiccuped).
+    csAssignments :: !(IORef (Map CameraId (CameraSnapshot, Text)))
   }
 
 -- | Publishes at most one JPEG per @fpMinInterval@ seconds per camera
@@ -234,8 +253,28 @@ startCaptureSupervisor cfg = do
       (Just bus, True) -> Just FramePublisher {fpBus = bus, fpMinInterval = 1 / fps, fpLast = fpRef}
       _ -> Nothing
   probesRef <- newIORef Map.empty
+  thumbTv <- newTVarIO 0
+  assignRef <- newIORef Map.empty
+  let sup =
+        CaptureSupervisor
+          { csConfig = cfg,
+            csWorkers = ref,
+            csAnalysis = aRef,
+            csPtz = pRef,
+            csLocks = lRef,
+            csClipState = clipState,
+            csSnapshots = snapshots,
+            csFramePub = framePub,
+            csAudioProbes = probesRef,
+            csThumbInFlight = thumbTv,
+            csAssignments = assignRef
+          }
+  wdOff <- (== Just "1") <$> lookupEnv "HNVR_DISABLE_ANALYSISWATCHDOG"
+  if wdOff
+    then logInfo "CaptureSupervisor: analysis watchdog disabled (HNVR_DISABLE_ANALYSISWATCHDOG=1)"
+    else void $ async (analysisWatchdog sup)
   logInfo "CaptureSupervisor: started"
-  pure (CaptureSupervisor {csConfig = cfg, csWorkers = ref, csAnalysis = aRef, csPtz = pRef, csLocks = lRef, csClipState = clipState, csSnapshots = snapshots, csFramePub = framePub, csAudioProbes = probesRef})
+  pure sup
 
 -- | Fetch (or create) the per-camera lifecycle lock backing
 -- 'withCameraLock'.
@@ -350,6 +389,7 @@ startCameraLocked sup snap = do
   a <- async (captureWorkerWithStop sup.csConfig camCfg shouldStop stateVar)
   let handle = WorkerHandle {whStop = stopTVar, whAsync = a, whSlug = csSlug snap, whState = stateVar}
   modifyIORef' sup.csWorkers (Map.insert (csId snap) handle)
+  modifyIORef' sup.csAssignments (Map.insert (csId snap) (snap, relayUrl))
   maybeStartAnalysis sup snap relayUrl
   maybeStartPtz sup snap
   logInfo ("CaptureSupervisor: started worker for " <> csSlug snap <> " via " <> relayUrl)
@@ -495,11 +535,14 @@ analysisSink sup snap rules clipRules rulesRef latest frame tracks = do
     Nothing -> pure ()
     Just bus ->
       forM_ evs $ \(_rule, track, ev) -> do
-        mThumb <- uploadThumbnail sup snap frame track ev
+        mThumb <- queueThumbnailUpload sup snap frame track ev
         Bus.publishJson bus Subjects.events (toCvEvent sup snap track ev frame mThumb)
 
 -- | Throttled publish of a JPEG on the frame channel. Single analyzer
--- thread per camera, so the last-published map needs no lock.
+-- thread per camera, so the last-published map needs no lock. A NATS
+-- hiccup must never kill the analyzer loop (pitfall #131) — publish
+-- failures are logged and the frame dropped; the watchdog restarts the
+-- pair if the analyzer dies anyway.
 publishFrame :: FramePublisher -> CameraId -> Frame -> IO ()
 publishFrame fp camId frame = do
   now <- getCurrentTime
@@ -507,31 +550,82 @@ publishFrame fp camId frame = do
   let due = maybe True (\t -> realToFrac (diffUTCTime now t) >= fp.fpMinInterval) (Map.lookup camId lastPub)
   when due $ do
     writeIORef fp.fpLast (Map.insert camId now lastPub)
-    Bus.publish
-      fp.fpBus
-      (Subjects.framesCamera (T.pack (show camId)))
-      (BL.toStrict (renderJpeg 70 frame))
+    r <-
+      try
+        ( Bus.publish
+            fp.fpBus
+            (Subjects.framesCamera (T.pack (show camId)))
+            (BL.toStrict (renderJpeg 70 frame))
+        )
+    case r of
+      Right () -> pure ()
+      Left e
+        | Just (SomeAsyncException _) <- fromException e -> throwIO e
+        | otherwise ->
+            logWarn ("CaptureSupervisor: frame publish failed for camera id " <> T.pack (show (unCameraId camId)) <> ": " <> T.pack (show e))
 
--- | Draw the offending track's bbox on the frame and upload as PNG to
--- S3 (@<slug>/events/<ts>.png@). Failures degrade to 'Nothing' — the
--- event row must persist even when storage hiccups.
-uploadThumbnail :: CaptureSupervisor -> CameraSnapshot -> Frame -> Track -> RuleEvent -> IO (Maybe Text)
-uploadThumbnail sup snap frame track ev =
+-- | Cap on concurrent forked thumbnail uploads. Beyond this, events go
+-- out without a thumbnail — a missing image is a UI gap, a blocked
+-- analyzer is lost detection.
+maxThumbInFlight :: Int
+maxThumbInFlight = 8
+
+-- | Hard bound on one forked thumbnail upload. minio-hs retries a dead
+-- endpoint forever (pitfall #108); without this the in-flight slots
+-- leak during an outage and thumbnails stay disabled after recovery.
+thumbUploadTimeoutUs :: Int
+thumbUploadTimeoutUs = 60_000_000
+
+-- | Draw the offending track's bbox on the frame and queue its upload
+-- as PNG to S3 (@<slug>/events/<ts>.png@). The upload runs on a forked
+-- thread bounded by 'thumbUploadTimeoutUs' — NEVER inline: a blocking
+-- S3 call in the analyzer sink wedges rule evaluation, event
+-- publishing and the @hnvr.frames@ channel for the camera until
+-- process restart (pitfall #131). Returns the thumbnail key when the
+-- upload was queued ('Nothing' when S3 is unconfigured or the
+-- in-flight cap is hit); the event is published with that key
+-- immediately, so a failed upload leaves a dangling key — acceptable
+-- per the SnapshotWriter philosophy (a missing thumbnail is a UI gap,
+-- not a data problem).
+queueThumbnailUpload :: CaptureSupervisor -> CameraSnapshot -> Frame -> Track -> RuleEvent -> IO (Maybe Text)
+queueThumbnailUpload sup snap frame track ev =
   case capS3 sup.csConfig of
     Nothing -> pure Nothing
     Just ci -> do
       let key = csSlug snap <> "/events/" <> formatYmdHmsMs (reTs ev) <> ".png"
-          png = renderDebugPng frame [track]
+      acquired <-
+        atomically $ do
+          n <- readTVar sup.csThumbInFlight
+          if n >= maxThumbInFlight
+            then pure False
+            else do
+              writeTVar sup.csThumbInFlight (n + 1)
+              pure True
+      if not acquired
+        then do
+          logWarn ("CaptureSupervisor: thumbnail upload backlog full; event for " <> csSlug snap <> " goes without thumbnail")
+          pure Nothing
+        else do
+          void $ forkIO $ upload ci key `finally` release
+          pure (Just key)
+  where
+    release = atomically $ do
+      n <- readTVar sup.csThumbInFlight
+      writeTVar sup.csThumbInFlight (n - 1)
+    upload ci key = do
+      let png = renderDebugPng frame [track]
           opts = defaultPutObjectOptions {pooContentType = Just "image/png"}
       r <-
-        try
-          (putObjectBytes ci (capBucket sup.csConfig) key (BL.toStrict png) opts) ::
-          IO (Either SomeException ())
+        try (timeout thumbUploadTimeoutUs (putObjectBytes ci (capBucket sup.csConfig) key (BL.toStrict png) opts)) ::
+          IO (Either SomeException (Maybe ()))
       case r of
-        Right () -> pure (Just key)
-        Left e -> do
-          logWarn ("thumbnail upload failed for " <> csSlug snap <> ": " <> T.pack (show e))
-          pure Nothing
+        Right (Just ()) -> pure ()
+        Right Nothing ->
+          logWarn ("thumbnail upload timed out for " <> csSlug snap)
+        Left e
+          | Just (SomeAsyncException _) <- fromException e -> throwIO e
+          | otherwise ->
+              logWarn ("thumbnail upload failed for " <> csSlug snap <> ": " <> T.pack (show e))
 
 -- | Project an emitted rule event + its track into the wire
 -- 'CvEvent' (bbox normalized 0..1, design 06).
@@ -618,10 +712,11 @@ stopCamera sup camId = withCameraLock sup camId (stopCameraLocked sup camId)
 -- | Unlocked stop; callers must hold the camera's lifecycle lock.
 stopCameraLocked :: CaptureSupervisor -> CameraId -> IO ()
 stopCameraLocked sup camId = do
-  stopAnalysisPair
+  stopAnalysisPairLocked sup camId
   stopPtzController
   Clip.closeCameraClip sup.csConfig sup.csClipState camId
   Clip.unregisterCamera sup.csClipState camId
+  modifyIORef' sup.csAssignments (Map.delete camId)
   mHandle <-
     atomicModifyIORef'
       sup.csWorkers
@@ -638,14 +733,6 @@ stopCameraLocked sup camId = do
           cancel handle.whAsync
       logInfo ("CaptureSupervisor: stopped worker for camera id " <> T.pack (show (unCameraId camId)))
   where
-    stopAnalysisPair = do
-      mAna <-
-        atomicModifyIORef'
-          sup.csAnalysis
-          (\m -> (Map.delete camId m, Map.lookup camId m))
-      forM_ mAna $ \h -> do
-        cancel h.ahSource
-        cancel h.ahAnalyzer
     stopPtzController = do
       mPtz <-
         atomicModifyIORef'
@@ -654,6 +741,89 @@ stopCameraLocked sup camId = do
       forM_ mPtz $ \(cmdLoop, ticker) -> do
         cancel cmdLoop
         cancel ticker
+
+-- | Remove and cancel the analysis pair for a camera. Callers must
+-- hold the camera's lifecycle lock (or be the analysis watchdog,
+-- which takes it itself).
+stopAnalysisPairLocked :: CaptureSupervisor -> CameraId -> IO ()
+stopAnalysisPairLocked sup camId = do
+  mAna <-
+    atomicModifyIORef'
+      sup.csAnalysis
+      (\m -> (Map.delete camId m, Map.lookup camId m))
+  forM_ mAna $ \h -> do
+    cancel h.ahSource
+    cancel h.ahAnalyzer
+
+-- | How often the analysis watchdog scans the pair table.
+watchdogIntervalUs :: Int
+watchdogIntervalUs = 30_000_000
+
+-- | A pair whose newest analyzed frame is older than this while its
+-- capture worker reports 'Running' is considered wedged (the pitfall
+-- #131 signature: analyzer alive but stuck inside a blocking call, so
+-- @hnvr.frames@, snapshots and rule events silently stop).
+watchdogStaleSec :: Double
+watchdogStaleSec = 120
+
+-- | Auto-heal loop for analysis pairs (pitfall #131). Restarts a pair
+-- when either async has died or the pair has stopped producing
+-- analyzed frames while the camera's capture worker is 'Running'.
+-- Restarts go through the per-camera lifecycle lock and re-check
+-- 'csAssignments' so a concurrent 'stopCamera' can't be resurrected.
+-- The capture worker is deliberately NOT touched — recording must not
+-- flap because the CV side hiccuped. Kill switch:
+-- @HNVR_DISABLE_ANALYSISWATCHDOG=1@.
+analysisWatchdog :: CaptureSupervisor -> IO ()
+analysisWatchdog sup = forever $ do
+  threadDelay watchdogIntervalUs
+  r <- try scan
+  case r of
+    Right () -> pure ()
+    Left e
+      | Just (SomeAsyncException _) <- fromException e -> throwIO e
+      | otherwise ->
+          logWarn ("CaptureSupervisor: watchdog scan failed: " <> T.pack (show e))
+  where
+    scan = do
+      now <- getCurrentTime
+      pairs <- readIORef sup.csAnalysis
+      forM_ (Map.toList pairs) $ \(camId, h) -> do
+        srcDead <- isDead h.ahSource
+        anaDead <- isDead h.ahAnalyzer
+        stale <- case srcDead || anaDead of
+          True -> pure False
+          False -> do
+            running <- workerRunning camId
+            mLatest <- readTVarIO h.ahLatest
+            pure $ case mLatest of
+              Just (frame, _) ->
+                running && realToFrac (diffUTCTime now (frameTimestamp frame)) > watchdogStaleSec
+              Nothing -> False
+        when (srcDead || anaDead || stale) $ do
+          let reason
+                | srcDead && anaDead = "frame source + analyzer died"
+                | srcDead = "frame source died"
+                | anaDead = "analyzer died"
+                | otherwise = "no analyzed frame for " <> T.pack (show (round watchdogStaleSec :: Int)) <> "s while Running"
+          restartPair camId reason
+    isDead a = do
+      m <- poll a
+      pure $ case m of
+        Nothing -> False
+        Just _ -> True
+    workerRunning camId = do
+      m <- readIORef sup.csWorkers
+      case Map.lookup camId m of
+        Nothing -> pure False
+        Just wh -> (== Running) <$> readTVarIO wh.whState
+    restartPair camId reason =
+      withCameraLock sup camId $ do
+        mAssign <- Map.lookup camId <$> readIORef sup.csAssignments
+        forM_ mAssign $ \(snap, relayUrl) -> do
+          logWarn ("CaptureSupervisor: restarting analysis pair for " <> csSlug snap <> " (" <> reason <> ")")
+          stopAnalysisPairLocked sup camId
+          maybeStartAnalysis sup snap relayUrl
 
 -- | Convenience: stop + start under a single lock hold. Useful when
 -- only config has changed (e.g. RTSP URL rotation) and the caller
