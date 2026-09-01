@@ -32,6 +32,7 @@ library
     Hnvr.Core.Ptz
     Hnvr.Core.Recording
     Hnvr.Core.Segment
+    Hnvr.Core.SessionCookie
     Hnvr.Core.Time
     Hnvr.Core.Timeline
     Hnvr.Core.Whep
@@ -93,6 +94,7 @@ test-suite hnvr-core-test
     Hnvr.Core.PtzSpec
     Hnvr.Core.RecordingSpec
     Hnvr.Core.SegmentSpec
+    Hnvr.Core.SessionCookieSpec
     Hnvr.Core.TimelineSpec
     Hnvr.Core.TimeSpec
     Hnvr.Core.WhepSpec

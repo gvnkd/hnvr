@@ -60,6 +60,7 @@ import Hnvr.Web.PendingPurge (startPendingPurgeSweeper)
 import Hnvr.Web.PtzAuditWriter (startPtzAuditWriter)
 import Hnvr.Web.PtzStatusCache (startPtzStatusCache)
 import Hnvr.Web.RetentionSweeper (startRetentionSweeper)
+import Hnvr.Web.SessionCookie (sessionCookieMiddleware)
 import Hnvr.Web.SnapshotResponder (startSnapshotResponder)
 import Hnvr.Web.SupervisorRegistry (supervisorRegistry)
 import IHP.AuthSupport.Authentication (hashPassword)
@@ -95,9 +96,13 @@ config = do
   -- `buildFrameworkConfig` runs `appConfig >> ihpDefaultConfig` so our
   -- `option`s land before the defaults. Calling `option $ CustomMiddleware`
   -- twice silently drops the second one. Compose all custom WAI
-  -- middlewares here. Order: base-path strip runs first, then
-  -- debug-frame (most-specific path prefix), /status, /healthz, then
-  -- IHP. The WHEP
+  -- middlewares here. Order: session-cookie rename runs first
+  -- (outermost — IHP hardcodes the cookie name "SESSION"
+  -- (IHP/Server.hs withSession), so without translation leader and
+  -- admin share one cookie on a shared vhost; "Hnvr.Web.SessionCookie".
+  -- NOTE: the rename to "hnvr" invalidates existing leader sessions
+  -- once), then the base-path strip, then debug-frame (most-specific
+  -- path prefix), /status, /healthz, then IHP. The WHEP
   -- proxy is NOT here — it moved into the AuthMiddleware chain
   -- ('Hnvr.Web.Authz.authzMiddleware') because CustomMiddleware runs
   -- before session/auth and the stream endpoint is part of the ACL
@@ -123,7 +128,7 @@ config = do
   staticDir <- liftIO (fromMaybe "hnvr-web/static" <$> Env.lookupEnv "APP_STATIC")
   let prefixStaticApp = Static.staticApp (Static.defaultFileServerSettings staticDir)
   statusMw <- liftIO mkStatusMiddleware
-  option $ CustomMiddleware (mountMiddleware basePath prefixStaticApp . debugStreamMiddleware . statusMw . healthzMiddleware)
+  option $ CustomMiddleware (sessionCookieMiddleware "hnvr" . mountMiddleware basePath prefixStaticApp . debugStreamMiddleware . statusMw . healthzMiddleware)
   option $ AuthMiddleware (authMiddleware @User . authzMiddleware)
   addInitializer connectNatsAndStartEventWriter
   addInitializer seedAdminUser

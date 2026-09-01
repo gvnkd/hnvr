@@ -7,8 +7,9 @@
 --
 -- Differences from the leader's 'Hnvr.Web.Config':
 --
---   * own session cookie name (@hnvr_admin@) — an end-user session
---     grants nothing here;
+--   * own session cookie name (@hnvr_admin@ — IHP hardcodes
+--     @SESSION@; 'Hnvr.Web.SessionCookie' translates at the edge) —
+--     an end-user session grants nothing here;
 --   * port from @HNVR_ADMIN_PORT@ (default 18010; the leader's PORT is
 --     ignored);
 --   * auth chain reuses 'Hnvr.Web.Authz.authzMiddleware' — RoleSet
@@ -32,6 +33,7 @@ import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Web.Auth ()
 import Hnvr.Web.Authz (authzMiddleware)
 import Hnvr.Web.BusRegistry (busRegistry)
+import Hnvr.Web.SessionCookie (sessionCookieMiddleware)
 import IHP.FrameworkConfig
 import IHP.LoginSupport.Middleware (authMiddleware)
 import IHP.ModelSupport (ModelContext)
@@ -49,6 +51,14 @@ config = do
   -- (hostname:port) is fine and first-write-wins would shadow it.
   forM_ explicitUrl (option . BaseUrl)
   option $ SessionCookie ((defaultIHPSessionCookie baseUrl) {Cookie.setCookieName = "hnvr_admin"})
+  -- IHP IGNORES the cookie name above: initSessionMiddleware is
+  -- `withSession store "SESSION" …` (IHP/Server.hs). On a shared
+  -- vhost (leader at /, admin at a sub-path) both apps would read and
+  -- write the same SESSION cookie and share sessions. The rename
+  -- middleware translates hnvr_admin <-> SESSION at the edge
+  -- ("Hnvr.Web.SessionCookie"); it must be the OUTERMOST middleware,
+  -- which the CustomMiddleware slot is.
+  option $ CustomMiddleware (sessionCookieMiddleware "hnvr_admin")
   option $ AuthMiddleware (authMiddleware @User . authzMiddleware)
   -- redirectToPath (IHP's only redirect primitive — redirectTo goes
   -- through it too) prepends Approot.getApproot, which the middleware

@@ -21,6 +21,7 @@ import qualified Hnvr.Core.PlaylistSpec as PlaylistSpec
 import qualified Hnvr.Core.PtzSpec as PtzSpec
 import qualified Hnvr.Core.RecordingSpec as RecordingSpec
 import qualified Hnvr.Core.SegmentSpec as SegmentSpec
+import qualified Hnvr.Core.SessionCookieSpec as SessionCookieSpec
 import qualified Hnvr.Core.TimeSpec as TimeSpec
 import qualified Hnvr.Core.TimelineSpec as TimelineSpec
 import qualified Hnvr.Core.WhepSpec as WhepSpec
@@ -52,6 +53,7 @@ main =
         PtzSpec.tests,
         RecordingSpec.tests,
         SegmentSpec.tests,
+        SessionCookieSpec.tests,
         TimeSpec.tests,
         TimelineSpec.tests,
         WhepSpec.tests
