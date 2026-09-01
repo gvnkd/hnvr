@@ -75,7 +75,7 @@
       purgeForm.hidden = false;
       purgeForm.setAttribute(
         "action",
-        "/PurgeRecording?purgeCameraId=" + encodeURIComponent(st.camId)
+        HNVR.u("/PurgeRecording?purgeCameraId=" + encodeURIComponent(st.camId))
       );
       purgeForm.setAttribute(
         "data-confirm",
@@ -175,13 +175,14 @@
       var from = new Date(ms).toISOString();
       windowEndMs = Math.min(toMs, ms + PLAYLIST_MAX_MS);
       var to = new Date(windowEndMs).toISOString();
-      var src =
+      var src = HNVR.u(
         "/PlaylistArchive?cameraId=" +
         encodeURIComponent(activeCamId) +
         "&from=" +
         encodeURIComponent(from) +
         "&to=" +
-        encodeURIComponent(to);
+        encodeURIComponent(to)
+      );
       video = document.createElement("video");
       // Muted autoplay always starts (engagement-gated otherwise);
       // controls let the user unmute.
@@ -323,11 +324,12 @@
         return;
       }
       var token = ++thumbToken;
-      var url =
+      var url = HNVR.u(
         "/TimelineThumb?cameraId=" +
         encodeURIComponent(activeCamId) +
         "&t=" +
-        encodeURIComponent(new Date(ms).toISOString());
+        encodeURIComponent(new Date(ms).toISOString())
+      );
       img.onload = function () {
         if (token !== thumbToken || video) return;
         setState("snapshot " + HNVR.formatTs(new Date(ms).toISOString(), "time"));
@@ -342,11 +344,12 @@
 
     /* ── data fetch ───────────────────────────────────────────── */
     function fetchData() {
-      var url =
+      var url = HNVR.u(
         "/TimelineData?from=" +
         encodeURIComponent(new Date(fromMs).toISOString()) +
         "&to=" +
-        encodeURIComponent(new Date(toMs).toISOString());
+        encodeURIComponent(new Date(toMs).toISOString())
+      );
       return fetch(url, { credentials: "same-origin" })
         .then(function (r) {
           return r.json();
@@ -522,11 +525,12 @@
         if (token !== hoverToken) return;
         hoverImg.hidden = true;
       };
-      hoverImg.src =
+      hoverImg.src = HNVR.u(
         "/TimelineThumb?cameraId=" +
         encodeURIComponent(activeCamId) +
         "&t=" +
-        encodeURIComponent(new Date(ms).toISOString());
+        encodeURIComponent(new Date(ms).toISOString())
+      );
     }
     function seekTo(ms) {
       cursorMs = clampCursor(ms);
@@ -594,7 +598,7 @@
             });
           if (hit) {
             if ((e.shiftKey || longPress) && hit.clipId) {
-              window.location.href = "/PlayerEventClip?clipId=" + hit.clipId;
+              window.location.href = HNVR.u("/PlayerEventClip?clipId=" + hit.clipId);
               return;
             }
             seekTo(Date.parse(hit.ts));
@@ -672,10 +676,11 @@
         var f = new Date(cursorMs - half).toISOString();
         var t = new Date(cursorMs + half).toISOString();
         var c = new Date(cursorMs).toISOString();
-        window.location.href =
+        window.location.href = HNVR.u(
           "/Timeline?from=" + encodeURIComponent(f) +
           "&to=" + encodeURIComponent(t) +
-          "&t=" + encodeURIComponent(c);
+          "&t=" + encodeURIComponent(c)
+        );
       });
     });
 

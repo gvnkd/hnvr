@@ -6,6 +6,7 @@
 -- | /Roles — role list with grant summary.
 module AdminWeb.View.Roles.Index (IndexView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.Grants (RoleGrants (..))
 import AdminWeb.View.Layout (renderAdminLayout)
 import Data.Text (Text)
@@ -30,7 +31,7 @@ instance View IndexView where
           <div class="subtitle">{tshow (length roles)} roles · superadmin is system-managed; guest is ordinary — delete it for a full login wall</div>
         </div>
         <div class="actions">
-          <a class="btn btn-primary" href="/NewRole">+ New Role</a>
+          <a class="btn btn-primary" href={urlFor "/NewRole"}>+ New Role</a>
         </div>
       </div>
       {renderRoles roles}
@@ -74,8 +75,8 @@ instance View IndexView where
                     <button type="submit" class="btn btn-ghost btn-sm">Delete</button>
                   </form>
                 |]
-          editUrl = "/EditRole?roleId=" <> idText
-          purgeUrl = "/PurgeRole?roleId=" <> idText
+          editUrl = urlFor ("/EditRole?roleId=" <> idText)
+          purgeUrl = urlFor ("/PurgeRole?roleId=" <> idText)
           idText = case role |> get #id of Id u -> UUID.toText u
 
 pageList :: RoleGrants -> Text

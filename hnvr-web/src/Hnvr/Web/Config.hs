@@ -32,6 +32,7 @@ import Data.Time.Format.ISO8601 (iso8601Show)
 import Database.PostgreSQL.Simple.Types (Only (..))
 import Generated.Types
 import Hnvr.Capture.Worker (CaptureConfig (..))
+import Hnvr.Core.BasePath (splitBaseUrl)
 import Hnvr.Core.CameraSnapshot (CameraSnapshotBatch (..))
 import Hnvr.Core.Id (HostId (..))
 import Hnvr.Core.Logging (logError, logInfo)
@@ -45,6 +46,7 @@ import Hnvr.Web (version)
 import Hnvr.Web.AssignmentCoordinator (startAssignmentCoordinator)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.Authz (authzMiddleware, startAuthzCacheInvalidator)
+import Hnvr.Web.BasePath (mountMiddleware)
 import Hnvr.Web.BusRegistry (busRegistry)
 import Hnvr.Web.ConfigBroadcaster (startConfigBroadcaster)
 import Hnvr.Web.DebugStream (debugStreamMiddleware)
@@ -68,6 +70,7 @@ import IHP.ModelSupport (ModelContext, sqlExec)
 import IHP.Prelude
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
+import qualified Network.Wai.Application.Static as Static
 import qualified Network.Wai.Middleware.HealthCheckEndpoint as HealthCheck
 import qualified System.Environment as Env
 import qualified System.Timeout as Timeout
@@ -92,14 +95,35 @@ config = do
   -- `buildFrameworkConfig` runs `appConfig >> ihpDefaultConfig` so our
   -- `option`s land before the defaults. Calling `option $ CustomMiddleware`
   -- twice silently drops the second one. Compose all custom WAI
-  -- middlewares here. Order: debug-frame runs first (most-specific path
-  -- prefix), falls through to /status, /healthz, then IHP. The WHEP
+  -- middlewares here. Order: base-path strip runs first, then
+  -- debug-frame (most-specific path prefix), /status, /healthz, then
+  -- IHP. The WHEP
   -- proxy is NOT here — it moved into the AuthMiddleware chain
   -- ('Hnvr.Web.Authz.authzMiddleware') because CustomMiddleware runs
   -- before session/auth and the stream endpoint is part of the ACL
   -- boundary (design_docs/13, M2).
+  --
+  -- Sub-path reverse-proxy mount (HNVR_BASE_URL with a path, e.g.
+  -- https://host/hnvr): strip the prefix before everything else and
+  -- serve <prefix>/static/* ourselves — IHP.Server.run's static
+  -- shortcut sits OUTSIDE this middleware stack, so a stripped
+  -- /static/* request would miss on disk ("Hnvr.Web.BasePath"). The
+  -- full URL (path included) becomes BaseUrl + APPROOT so urlTo and
+  -- redirectToPath stay under the mount. /healthz, /status and
+  -- /debug-frame move under the prefix too (they are matched AFTER
+  -- the strip); outside-prefix requests 404.
+  (publicUrl, basePath) <- liftIO leaderBaseUrl
+  forM_ publicUrl $ \url -> do
+    option (BaseUrl url)
+    liftIO
+      $ Env.lookupEnv "APPROOT"
+      >>= \case
+        Just _ -> pure ()
+        Nothing -> Env.setEnv "APPROOT" (cs url)
+  staticDir <- liftIO (fromMaybe "hnvr-web/static" <$> Env.lookupEnv "APP_STATIC")
+  let prefixStaticApp = Static.staticApp (Static.defaultFileServerSettings staticDir)
   statusMw <- liftIO mkStatusMiddleware
-  option $ CustomMiddleware (debugStreamMiddleware . statusMw . healthzMiddleware)
+  option $ CustomMiddleware (mountMiddleware basePath prefixStaticApp . debugStreamMiddleware . statusMw . healthzMiddleware)
   option $ AuthMiddleware (authMiddleware @User . authzMiddleware)
   addInitializer connectNatsAndStartEventWriter
   addInitializer seedAdminUser
@@ -253,6 +277,20 @@ startNodeRoles bus host = do
       logInfo ("leader: local snapshot reply contained " <> cs (show (length (csbCameras batch))) <> " camera(s)")
       forM_ (csbCameras batch) (startCamera sup)
     _ -> logInfo "leader: no local snapshot reply (continuing)"
+
+-- | Public base URL of the leader UI from @HNVR_BASE_URL@ (full URL,
+-- path allowed — e.g. @https://nvr.example.com/hnvr@ for a reverse-
+-- proxy sub-path mount). Returns the URL as configured (Nothing when
+-- unset — IHP's default BaseUrl\/approot then applies) and the
+-- normalized mount prefix ('Hnvr.Core.BasePath.splitBaseUrl').
+leaderBaseUrl :: IO (Maybe Text, Text)
+leaderBaseUrl = do
+  explicit <- Env.lookupEnv "HNVR_BASE_URL"
+  pure $ case explicit of
+    Just url ->
+      let (baseUrl, basePath) = splitBaseUrl (cs url)
+       in (Just baseUrl, basePath)
+    Nothing -> (Nothing, "")
 
 -- | WAI middleware that short-circuits @/healthz@ and @/_healthz@ with 200 OK.
 -- Falls through to the inner IHP app for everything else.

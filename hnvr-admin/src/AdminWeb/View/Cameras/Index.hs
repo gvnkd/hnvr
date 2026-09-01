@@ -5,6 +5,7 @@
 
 module AdminWeb.View.Cameras.Index (IndexView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Generated.Types
 import Hnvr.Core.Authz (CameraAction (..), cameraAllowed, cameraAllowedAnywhere)
@@ -41,7 +42,7 @@ instance View IndexView where
       canCreate = cameraAllowedAnywhere rs EditConfig
       newBtn =
         if canCreate
-          then [hsx|<a class="btn btn-primary" href="/NewCamera">+ New Camera</a>|]
+          then [hsx|<a class="btn btn-primary" href={urlFor "/NewCamera"}>+ New Camera</a>|]
           else mempty
 
       renderCameras [] =
@@ -94,9 +95,9 @@ instance View IndexView where
         |]
         where
           cid = tshow (camera |> get #id)
-          showUrl = "/ShowCamera?cameraId=" <> cid
-          editUrl = "/EditCamera?cameraId=" <> cid
-          toggleUrl = "/ToggleCameraEnabled?cameraId=" <> cid
+          showUrl = urlFor ("/ShowCamera?cameraId=" <> cid)
+          editUrl = urlFor ("/EditCamera?cameraId=" <> cid)
+          toggleUrl = urlFor ("/ToggleCameraEnabled?cameraId=" <> cid)
           canEdit = cameraAllowed rs EditConfig (camIdOf camera)
           camIdOf c = case c |> get #id of Id u -> CameraId u
           toggleBtn camera' =

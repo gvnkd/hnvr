@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoImplicitPrelude #-}
@@ -20,10 +21,12 @@ where
 
 import AdminWeb.Bootstrap (bootstrapFromEnv)
 import qualified Control.Exception as E
+import Control.Monad (forM_)
 import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Generated.Types
+import Hnvr.Core.BasePath (splitBaseUrl)
 import Hnvr.Core.Logging (logError, logInfo)
 import qualified Hnvr.Nats.Bus as Bus
 import Hnvr.Web.Auth ()
@@ -41,15 +44,44 @@ config :: ConfigBuilder
 config = do
   port <- liftIO adminPort
   option (AppPort port)
-  baseUrl <- liftIO (maybe ("http://localhost:" <> tshow port) T.pack <$> Env.lookupEnv "IHP_BASE_URL")
+  (baseUrl, basePath, explicitUrl) <- liftIO (adminBaseUrl port)
+  -- BaseUrl only when explicitly configured: otherwise IHP's default
+  -- (hostname:port) is fine and first-write-wins would shadow it.
+  forM_ explicitUrl (option . BaseUrl)
   option $ SessionCookie ((defaultIHPSessionCookie baseUrl) {Cookie.setCookieName = "hnvr_admin"})
   option $ AuthMiddleware (authMiddleware @User . authzMiddleware)
+  -- redirectToPath (IHP's only redirect primitive — redirectTo goes
+  -- through it too) prepends Approot.getApproot, which the middleware
+  -- stack reads from the APPROOT env var once at init. Point it at the
+  -- full public URL (path included) so redirects stay under the mount.
+  unless (T.null basePath)
+    $ liftIO
+    $ Env.lookupEnv "APPROOT"
+    >>= \case
+      Just _ -> pure ()
+      Nothing -> Env.setEnv "APPROOT" (cs baseUrl)
   addInitializer seedBootstrap
   addInitializer connectNats
   where
     seedBootstrap =
       bootstrapFromEnv `E.catch` \(e :: E.SomeException) ->
         logError ("hnvr-admin: INITIAL_ADMIN_* seed failed: " <> cs (show e))
+
+-- | Public base URL of the admin UI. @HNVR_ADMIN_BASE_URL@ (full URL,
+-- path allowed — e.g. @https://nvr.example.com/admin@ for a reverse-
+-- proxy sub-path mount) wins over the legacy host-only @IHP_BASE_URL@;
+-- the fallback keeps the old localhost behaviour. Returns the base URL
+-- (path included — redirects and the cookie's Secure flag need it),
+-- the normalized mount prefix, and the explicitly configured URL.
+adminBaseUrl :: Int -> IO (Text, Text, Maybe Text)
+adminBaseUrl port = do
+  explicit <- Env.lookupEnv "HNVR_ADMIN_BASE_URL"
+  legacy <- Env.lookupEnv "IHP_BASE_URL"
+  pure $ case explicit of
+    Just url ->
+      let (baseUrl, basePath) = splitBaseUrl (cs url)
+       in (baseUrl, basePath, Just baseUrl)
+    Nothing -> (maybe ("http://localhost:" <> tshow port) cs legacy, "", Nothing)
 
 adminPort :: IO Int
 adminPort = do

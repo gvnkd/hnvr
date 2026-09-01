@@ -13,6 +13,7 @@ import Hnvr.Core.Authz (PageKind (..), pageAllowed)
 import Hnvr.Web (version)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.Authz (currentRoleSet)
+import Hnvr.Web.BasePath (requestBasePath, urlFor)
 import IHP.ViewPrelude
 import Network.Wai (rawPathInfo)
 
@@ -31,15 +32,15 @@ renderLayout inner =
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
     <meta name="theme-color" content="#07090d" />
     {themeInitScript}
-    <link rel="stylesheet" href="/static/app.css" />
-    <script src="/static/app.js"></script>
+    <link rel="stylesheet" href={urlFor "/static/app.css"} />
+    <script src={urlFor "/static/app.js"}></script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2309090b'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%2338bdf8'/%3E%3C/svg%3E" />
   </head>
-  <body data-user-tz={userTzAttr} data-user-locale={userLocaleAttr}>
+  <body data-user-tz={userTzAttr} data-user-locale={userLocaleAttr} data-base-path={requestBasePath}>
     <div class="shell">
       <aside class="sidenav">
         <button class="icon-btn nav-toggle" data-nav-toggle="1" aria-label="Toggle navigation" title="Toggle navigation">☰</button>
-        <a href="/" class="brand">
+        <a href={urlFor "/"} class="brand">
           <span class="dot"></span>
           <span class="wordmark">HNVR</span>
         </a>
@@ -102,7 +103,7 @@ renderLayout inner =
 
     navItem href glyph label active =
       [hsx|
-        <a href={href} class={navClass}>
+        <a href={urlFor href} class={navClass}>
           <span class="nav-icon">{glyph}</span>
           <span class="nav-label">{label}</span>
         </a>
@@ -129,9 +130,9 @@ renderLayout inner =
         [hsx|
           <span class="user-block">
             <span class="led led-on"></span>
-            <a href="/ShowProfile" class="sidenav-foot-label" title="Profile settings">{u.email}</a>
+            <a href={urlFor "/ShowProfile"} class="sidenav-foot-label" title="Profile settings">{u.email}</a>
             <span class="sidenav-foot-label">·</span>
-            <form method="POST" action="/DeleteSession" style="display:inline">
+            <form method="POST" action={urlFor "/DeleteSession"} style="display:inline">
               <input type="hidden" name="_method" value="DELETE" />
               <button type="submit" class="link-button">logout</button>
             </form>
@@ -141,6 +142,6 @@ renderLayout inner =
         [hsx|
           <span class="user-block">
             <span class="led led-off"></span>
-            <a href="/NewSession">Login</a>
+            <a href={urlFor "/NewSession"}>Login</a>
           </span>
         |]

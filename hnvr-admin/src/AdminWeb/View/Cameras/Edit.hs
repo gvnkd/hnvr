@@ -5,6 +5,7 @@
 
 module AdminWeb.View.Cameras.Edit (EditView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Generated.Types
 import Hnvr.Core.Authz (CameraAction (..), cameraAllowed)
@@ -70,10 +71,10 @@ instance View EditView where
     |]
     where
       cid = tshow (camera |> get #id)
-      showUrl = "/ShowCamera?cameraId=" <> cid
-      probeUrl = "/ProbeCamera?cameraId=" <> cid
-      probePtzUrl = "/ProbePtzCamera?cameraId=" <> cid
-      presetsUrl = "/PtzPresets?ptzCameraId=" <> cid
+      showUrl = urlFor ("/ShowCamera?cameraId=" <> cid)
+      probeUrl = urlFor ("/ProbeCamera?cameraId=" <> cid)
+      probePtzUrl = urlFor ("/ProbePtzCamera?cameraId=" <> cid)
+      presetsUrl = urlFor ("/PtzPresets?ptzCameraId=" <> cid)
 
       renderForm camera mOpts =
         [hsx|
@@ -233,11 +234,11 @@ instance View EditView where
               |]
             Nothing -> [hsx||]
 
-      updateUrl cam = "/UpdateCamera?cameraId=" <> tshow (cam |> get #id)
+      updateUrl cam = urlFor ("/UpdateCamera?cameraId=" <> tshow (cam |> get #id))
 
       -- \| AutoRoute maps Delete* to HTTP DELETE; plain forms use the
       -- _method override (same pattern as the layout's logout form).
-      deleteUrl cam = "/DeleteCamera?cameraId=" <> tshow (cam |> get #id)
+      deleteUrl cam = urlFor ("/DeleteCamera?cameraId=" <> tshow (cam |> get #id))
 
       -- \| One video stream section. With live options: dropdowns for
       -- encoding + resolution (a select feeding hidden width/height

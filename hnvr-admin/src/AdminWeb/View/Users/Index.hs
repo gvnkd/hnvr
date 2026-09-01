@@ -6,6 +6,7 @@
 -- | /Users — user list with assigned roles.
 module AdminWeb.View.Users.Index (IndexView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -29,7 +30,7 @@ instance View IndexView where
           <div class="subtitle">{tshow (length users)} users · roles only (is_admin retired in 0.22)</div>
         </div>
         <div class="actions">
-          <a class="btn btn-primary" href="/NewUser">+ New User</a>
+          <a class="btn btn-primary" href={urlFor "/NewUser"}>+ New User</a>
         </div>
       </div>
       {renderUsers users}
@@ -62,8 +63,8 @@ instance View IndexView where
           </tr>
         |]
         where
-          editUrl = "/EditUser?userId=" <> idText
-          purgeUrl = "/PurgeUser?userId=" <> idText
+          editUrl = urlFor ("/EditUser?userId=" <> idText)
+          purgeUrl = urlFor ("/PurgeUser?userId=" <> idText)
           idText = case user |> get #id of Id u -> UUID.toText u
 
 roleNames :: [Role] -> Text

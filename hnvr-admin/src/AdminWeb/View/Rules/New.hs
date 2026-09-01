@@ -13,6 +13,7 @@ module AdminWeb.View.Rules.New
   )
 where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Data.Aeson (Value (..), encode)
 import qualified Data.Aeson.KeyMap as KM
@@ -40,7 +41,7 @@ instance View NewView where
           <div class="subtitle">draw on the latest analysis frame</div>
         </div>
       </div>
-      {ruleForm camera Nothing "/CreateRule"}
+      {ruleForm camera Nothing (urlFor "/CreateRule")}
     |]
 
 -- | The rule form: text fields + class checkboxes + a canvas over the

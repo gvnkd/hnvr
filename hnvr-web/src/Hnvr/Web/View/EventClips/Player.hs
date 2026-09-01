@@ -11,6 +11,7 @@ module Hnvr.Web.View.EventClips.Player (ClipPlayerView (..)) where
 
 import qualified Data.Text as T
 import Generated.Types
+import Hnvr.Web.BasePath (urlFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.Time (tzTime)
 import IHP.ViewPrelude
@@ -33,7 +34,7 @@ instance View ClipPlayerView where
           <div class="subtitle">{tzTime clip.startedAt} · {tshow clip.durationSec}s · retention {tshow clip.retentionHours}h</div>
         </div>
         <div class="actions">
-          <a class="btn btn-ghost" href="/Events">Events</a>
+          <a class="btn btn-ghost" href={urlFor "/Events"}>Events</a>
           <a class="btn btn-ghost" href={liveUrl}>Live</a>
         </div>
       </div>
@@ -49,8 +50,8 @@ instance View ClipPlayerView where
       {scriptTag}
     |]
     where
-      playlistUrl = "/PlaylistEventClip?playlistClipId=" <> tshow (clip |> get #id)
-      liveUrl = "/ShowLive?cameraId=" <> tshow (camera |> get #id)
+      playlistUrl = urlFor ("/PlaylistEventClip?playlistClipId=" <> tshow (clip |> get #id))
+      liveUrl = urlFor ("/ShowLive?cameraId=" <> tshow (camera |> get #id))
       -- IHP HSX doesn't splice {…} inside <script> tags (pitfall #63):
       -- build the whole element in Haskell, splice at body level.
       scriptTag = preEscapedTextValue ("<script>" <> js <> "</script>" :: Text)

@@ -8,6 +8,7 @@
 -- system ones.
 module AdminWeb.View.Users.Edit (EditView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import AdminWeb.View.Users.RoleBoxes (roleCheckboxes)
 import Data.UUID (UUID)
@@ -28,7 +29,7 @@ instance View EditView where
       [hsx|
       <div class="page-header">
         <div><h1>Edit user · <span class="font-mono t-accent">{user.email}</span></h1><div class="subtitle">blank password keeps the current one</div></div>
-        <div class="actions"><a class="btn btn-ghost" href="/Users">← Back</a></div>
+        <div class="actions"><a class="btn btn-ghost" href={urlFor "/Users"}>← Back</a></div>
       </div>
       <div class="card">
         <div class="card-body">
@@ -47,5 +48,5 @@ instance View EditView where
       </div>
     |]
     where
-      updateUrl = "/UpdateUser?userId=" <> idText
+      updateUrl = urlFor ("/UpdateUser?userId=" <> idText)
       idText = case user |> get #id of Id u -> UUID.toText u

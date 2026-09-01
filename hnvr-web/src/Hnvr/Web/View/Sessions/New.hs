@@ -8,6 +8,7 @@
 module Hnvr.Web.View.Sessions.New () where
 
 import Generated.Types
+import Hnvr.Web.BasePath (urlFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.AuthSupport.View.Sessions.New (NewView (..))
 import IHP.ViewPrelude
@@ -24,7 +25,7 @@ instance View (NewView User) where
                 HNVR
               </h1>
               <div class="subtitle">sign in to continue</div>
-              <form class="form" method="POST" action="/CreateSession">
+              <form class="form" method="POST" action={urlFor "/CreateSession"}>
                 <div class="field">
                   <label for="email">Email</label>
                   <input class="input" id="email" name="email" type="email" autocomplete="username" value={user.email} required="1" autofocus="1" />

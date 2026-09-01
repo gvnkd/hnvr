@@ -25,6 +25,17 @@
 
   var HNVR = (window.HNVR = window.HNVR || {});
 
+  /* ── Sub-path mount ─────────────────────────────────────────── */
+  /* When the leader runs behind a reverse proxy under a path prefix
+   * (HNVR_BASE_URL with a path), the layout stamps it onto
+   * <body data-base-path>; every root-relative URL built in JS must
+   * go through HNVR.u. document.body is null while this <head> script
+   * evaluates, so resolve lazily at call time. */
+  HNVR.u = function (path) {
+    var bp = (document.body && document.body.getAttribute("data-base-path")) || "";
+    return bp + path;
+  };
+
   /* ── Themes ─────────────────────────────────────────────────── */
   HNVR.themes = ["midnight", "daylight"];
   HNVR.setTheme = function (name) {
@@ -333,7 +344,7 @@
           });
         })
         .then(function () {
-          return fetch("/whep/" + slug, {
+          return fetch(HNVR.u("/whep/" + slug), {
             method: "POST",
             headers: { "Content-Type": "application/sdp" },
             body: pc.localDescription.sdp,

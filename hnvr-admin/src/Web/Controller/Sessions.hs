@@ -14,6 +14,7 @@ module Web.Controller.Sessions
   )
 where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Control.Monad (void)
 import Data.Time.Clock (getCurrentTime)
@@ -59,7 +60,7 @@ instance View (NewView User) where
             <div class="login-body">
               <h1><span class="led led-rec"></span> HNVR <span class="badge badge-warn">admin</span></h1>
               <div class="subtitle">sign in to continue</div>
-              <form class="form" method="POST" action="/CreateSession">
+              <form class="form" method="POST" action={urlFor "/CreateSession"}>
                 <div class="field">
                   <label for="email">Email</label>
                   <input class="input" id="email" name="email" type="email" value={user.email} required="1" autofocus="1" />

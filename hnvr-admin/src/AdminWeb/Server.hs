@@ -9,12 +9,15 @@
 -- (default 127.0.0.1) only (design_docs/13). Assembled from IHP's
 -- exported building blocks; static files are served from APP_STATIC
 -- (default hnvr-web/static) by a plain wai-app-static app behind the
--- same /static shortcut.
+-- same /static shortcut. A reverse-proxy sub-path mount
+-- (HNVR_ADMIN_BASE_URL with a path) is handled by stripping the
+-- prefix before everything else ("AdminWeb.BasePath").
 module AdminWeb.Server
   ( runAdmin,
   )
 where
 
+import AdminWeb.BasePath (basePathFromEnv, stripBasePathMiddleware)
 import AdminWeb.FrontController ()
 import Control.Monad (forM_)
 import Data.Maybe (fromMaybe)
@@ -46,9 +49,10 @@ runAdmin configBuilder = do
       forM_ frameworkConfig.initializers $ \(Initializer onStartup) -> onStartup
       middleware <- initMiddlewareStack frameworkConfig modelContext Nothing
       staticDir <- fromMaybe "hnvr-web/static" <$> Env.lookupEnv "APP_STATIC"
+      basePath <- basePathFromEnv
       let staticApp = Static.staticApp (Static.defaultFileServerSettings staticDir)
           ihpApp = application staticApp frameworkConfig.requestLoggerMiddleware
-          fullApp = staticRouteShortcut staticApp (middleware ihpApp)
+          fullApp = stripBasePathMiddleware basePath (staticRouteShortcut staticApp (middleware ihpApp))
       host <- fromMaybe "127.0.0.1" <$> Env.lookupEnv "HNVR_ADMIN_LISTEN"
       let settings =
             Warp.defaultSettings

@@ -15,6 +15,7 @@ where
 
 import Data.Maybe (fromMaybe)
 import Generated.Types
+import Hnvr.Web.BasePath (urlFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
@@ -34,7 +35,7 @@ instance View ShowView where
       </div>
 
       <div class="card">
-        <form class="form p-4" method="POST" action="/UpdateProfile">
+        <form class="form p-4" method="POST" action={urlFor "/UpdateProfile"}>
           <div class="field">
             <label for="timezone">Timezone</label>
             <select class="input" id="timezone" name="timezone" data-tz-select="1">

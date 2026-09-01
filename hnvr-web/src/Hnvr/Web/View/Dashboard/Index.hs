@@ -13,6 +13,7 @@ import Hnvr.Core.CameraStatus (CameraStatus (..))
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Auth ()
 import Hnvr.Web.Authz (currentRoleSet)
+import Hnvr.Web.BasePath (urlFor)
 import Hnvr.Web.CameraStatus (cameraStatusFor, hostDisplayLive)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.PtzPanel (ptzPanel)
@@ -66,7 +67,7 @@ instance View IndexView where
       </div>
 
       {forEach ptzCams renderPtzTemplate}
-      <script src="/static/ptz.js"></script>
+      <script src={urlFor "/static/ptz.js"}></script>
     |]
     where
       nCams = tshow (length cameras) :: Text
@@ -118,7 +119,7 @@ instance View IndexView where
         |]
       renderHost h =
         [hsx|
-          <tr data-href="/Hosts">
+          <tr data-href={urlFor "/Hosts"}>
             <td>{healthLedFor h.lastHealthAt}</td>
             <td class="mono t-strong">{hostIdText}</td>
             <td>{roleBadgeFor h.isLeader}</td>
@@ -146,9 +147,9 @@ instance View IndexView where
       renderCamera cam = card
         where
           cid = tshow (cam |> get #id)
-          frameUrl = "/debug-frame/" <> cid
-          archiveUrl = "/PlayerArchive?cameraId=" <> cid
-          debugUrl = "/DebugCamera?cameraId=" <> cid
+          frameUrl = urlFor ("/debug-frame/" <> cid)
+          archiveUrl = urlFor ("/PlayerArchive?cameraId=" <> cid)
+          debugUrl = urlFor ("/DebugCamera?cameraId=" <> cid)
           hostLabel = fromMaybe "unassigned" cam.assignedHost
           -- Card links follow the same grants as their targets
           -- (design_docs/13 — hide, don't 403). Camera config moved to

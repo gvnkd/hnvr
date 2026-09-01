@@ -9,6 +9,7 @@ module AdminWeb.View.Rules.Edit
   )
 where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import AdminWeb.View.Rules.New (ruleForm)
 import Generated.Types
@@ -29,7 +30,7 @@ instance View EditView where
           <div class="subtitle">{rule.name}</div>
         </div>
       </div>
-      {ruleForm camera (Just rule) ("/UpdateRule?ruleId=" <> rid)}
+      {ruleForm camera (Just rule) (urlFor ("/UpdateRule?ruleId=" <> rid))}
     |]
     where
       rid = tshow (rule |> get #id)

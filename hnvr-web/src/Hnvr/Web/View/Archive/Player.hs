@@ -6,6 +6,7 @@
 module Hnvr.Web.View.Archive.Player (PlayerView (..)) where
 
 import Generated.Types
+import Hnvr.Web.BasePath (urlFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ViewPrelude
 
@@ -50,7 +51,7 @@ instance View PlayerView where
       {scriptTag}
     |]
     where
-      playlistUrl = "/PlaylistArchive?cameraId=" <> cid <> windowParams
+      playlistUrl = urlFor ("/PlaylistArchive?cameraId=" <> cid <> windowParams)
       windowParams = param "from" mFrom <> param "to" mTo
       param _ Nothing = ""
       param name (Just v) = "&" <> name <> "=" <> v
@@ -58,8 +59,8 @@ instance View PlayerView where
         (Just f, Just t) -> "Window " <> f <> " → " <> t
         _ -> "Most recent 1-hour window"
       cid = tshow (camera |> get #id)
-      archiveUrl = "/Timeline"
-      liveUrl = "/ShowLive?cameraId=" <> cid
+      archiveUrl = urlFor "/Timeline"
+      liveUrl = urlFor ("/ShowLive?cameraId=" <> cid)
       -- IHP HSX doesn't splice {…} inside <script> tags (treats script
       -- body as pre-escaped text). Build the entire <script> element
       -- in Haskell and inject as a single body-level splice. See pitfall #63.

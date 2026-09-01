@@ -23,6 +23,7 @@ import Generated.Types
 import Hnvr.Core.Authz (CameraAction (..), cameraAllowed)
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Authz (currentRoleSet)
+import Hnvr.Web.BasePath (urlFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.Time (tzTime)
 import IHP.ModelSupport (Id' (Id))
@@ -54,7 +55,7 @@ instance View IndexView where
                   {presetItem (24 * 3600) "24 hours"}
                 </div>
               </div>
-              <form method="GET" action="/Timeline" class="tl-custom">
+              <form method="GET" action={urlFor "/Timeline"} class="tl-custom">
                 <input class="input" type="datetime-local" name="from" data-tz-dt="1" value={dtLocal winFrom} />
                 <span class="muted">→</span>
                 <input class="input" type="datetime-local" name="to" data-tz-dt="1" value={dtLocal winTo} />
@@ -85,7 +86,7 @@ instance View IndexView where
         </div>
 
         <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
-        <script src="/static/timeline.js"></script>
+        <script src={urlFor "/static/timeline.js"}></script>
       |]
     where
       iso :: UTCTime -> Text
@@ -112,7 +113,7 @@ instance View IndexView where
           width = fromIntegral seconds :: NominalDiffTime
           f = addUTCTime (-half) cursor
           t = addUTCTime half cursor
-          href = "/Timeline?from=" <> iso f <> "&to=" <> iso t <> "&t=" <> iso cursor
+          href = urlFor ("/Timeline?from=" <> iso f <> "&to=" <> iso t <> "&t=" <> iso cursor)
           cls = (if active then "dropdown-item is-active" else "dropdown-item") :: Text
           active = abs (diffUTCTime winTo winFrom - width) < 60
 
@@ -180,5 +181,5 @@ instance View IndexView where
       purgeCamIds = T.intercalate "," (map camIdText purgeCams)
       rs = currentRoleSet
       camId c = case c |> get #id of Id u -> CameraId u
-      purgeAction camera = "/PurgeRecording?purgeCameraId=" <> camIdText camera
+      purgeAction camera = urlFor ("/PurgeRecording?purgeCameraId=" <> camIdText camera)
       confirmText camera = "Purge " <> camera.slug <> " recordings in the current window?"

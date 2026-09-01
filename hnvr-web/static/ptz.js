@@ -20,7 +20,7 @@ HNVR.ptz = function (cameraId, rootEl) {
   var panel = root.id === 'ptz-panel' ? root : root.querySelector('#ptz-panel');
   if (!panel) return { close: function () {} };
 
-  var base = '/PtzCamera?ptzCameraId=' + encodeURIComponent(cameraId);
+  var base = HNVR.u('/PtzCamera?ptzCameraId=' + encodeURIComponent(cameraId));
 
   function send(params) {
     return fetch(base + '&' + params, { method: 'POST' })
@@ -86,7 +86,7 @@ HNVR.ptz = function (cameraId, rootEl) {
     var name = input.value.trim();
     input.remove();
     if (!name) return;
-    fetch('/CreatePtzPreset?ptzCameraId=' + encodeURIComponent(cameraId) + '&format=json&preset_name=' + encodeURIComponent(name), { method: 'POST' })
+    fetch(HNVR.u('/CreatePtzPreset?ptzCameraId=' + encodeURIComponent(cameraId) + '&format=json&preset_name=' + encodeURIComponent(name)), { method: 'POST' })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (res.ok && res.token) {
@@ -107,7 +107,7 @@ HNVR.ptz = function (cameraId, rootEl) {
     var opt = select.options[select.selectedIndex];
     if (!opt || !opt.dataset.presetId) return;
     if (!window.confirm('Delete preset "' + opt.textContent + '"?')) return;
-    fetch('/PurgePtzPreset?ptzPresetId=' + encodeURIComponent(opt.dataset.presetId) + '&format=json', { method: 'POST' })
+    fetch(HNVR.u('/PurgePtzPreset?ptzPresetId=' + encodeURIComponent(opt.dataset.presetId) + '&format=json'), { method: 'POST' })
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (res.ok) select.removeChild(opt);
@@ -119,7 +119,7 @@ HNVR.ptz = function (cameraId, rootEl) {
   var statusEl = panel.querySelector('#ptz-status');
   var pollTimer = null;
   function pollStatus() {
-    fetch('/PtzStatusCamera?ptzCameraId=' + encodeURIComponent(cameraId))
+    fetch(HNVR.u('/PtzStatusCamera?ptzCameraId=' + encodeURIComponent(cameraId)))
       .then(function (r) { return r.json(); })
       .then(function (res) {
         if (res.ok && res.status) {

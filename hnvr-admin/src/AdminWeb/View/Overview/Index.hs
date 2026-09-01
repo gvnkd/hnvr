@@ -6,6 +6,7 @@
 -- | @/@ overview: user/role counts + recent admin_audit entries.
 module AdminWeb.View.Overview.Index (IndexView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Data.Aeson (encode)
 import Data.Text (Text)
@@ -33,8 +34,8 @@ instance View IndexView where
           <div class="subtitle">{tshow nUsers} users · {tshow nRoles} roles · {tshow nHolders} assignments</div>
         </div>
         <div class="actions">
-          <a class="btn" href="/Roles">Roles</a>
-          <a class="btn" href="/Users">Users</a>
+          <a class="btn" href={urlFor "/Roles"}>Roles</a>
+          <a class="btn" href={urlFor "/Users"}>Users</a>
         </div>
       </div>
 

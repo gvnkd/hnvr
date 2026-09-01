@@ -10,6 +10,7 @@ module AdminWeb.View.PtzPresets.Index
   )
 where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Generated.Types
 import IHP.ModelSupport (Id' (Id))
@@ -60,8 +61,8 @@ instance View IndexView where
     |]
     where
       camIdText = tshow (camera |> get #id)
-      showUrl = "/ShowCamera?cameraId=" <> camIdText
-      createUrl = "/CreatePtzPreset?ptzCameraId=" <> camIdText
+      showUrl = urlFor ("/ShowCamera?cameraId=" <> camIdText)
+      createUrl = urlFor ("/CreatePtzPreset?ptzCameraId=" <> camIdText)
 
       renderPreset preset =
         [hsx|
@@ -84,9 +85,9 @@ instance View IndexView where
       |]
         where
           pid = tshow (preset |> get #id)
-          gotoUrl = "/GotoPtzPreset?ptzPresetId=" <> pid
-          homeUrl = "/HomePtzPreset?ptzPresetId=" <> pid
-          purgeUrl = "/PurgePtzPreset?ptzPresetId=" <> pid
+          gotoUrl = urlFor ("/GotoPtzPreset?ptzPresetId=" <> pid)
+          homeUrl = urlFor ("/HomePtzPreset?ptzPresetId=" <> pid)
+          purgeUrl = urlFor ("/PurgePtzPreset?ptzPresetId=" <> pid)
 
       tokenCell (Just t) = t
       tokenCell Nothing = "—"

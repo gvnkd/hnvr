@@ -20,6 +20,7 @@ import Hnvr.Core.CameraStatus (CameraStatus (..))
 import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Auth ()
 import Hnvr.Web.Authz (currentRoleSet)
+import Hnvr.Web.BasePath (requestBasePath, urlFor)
 import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.PtzPanel (ptzPanel)
@@ -73,7 +74,7 @@ instance View ShowView where
       {scriptTag}
     |]
     where
-      archiveUrl = "/PlayerArchive?cameraId=" <> tshow (camera |> get #id)
+      archiveUrl = urlFor ("/PlayerArchive?cameraId=" <> tshow (camera |> get #id))
       archiveBtn =
         if cameraAllowed rs ViewArchive camId
           then [hsx|<a class="btn btn-ghost" href={archiveUrl}>Archive</a>|]
@@ -111,7 +112,7 @@ instance View ShowView where
       scriptTag = preEscapedTextValue ("<script>" <> whepJs camera <> feedJs camera <> "</script>" :: Text)
       ptzScriptTag =
         if showPtz
-          then preEscapedTextValue ("<script src=\"/static/ptz.js\"></script><script>HNVR.ptz('" <> tshow (camera |> get #id) <> "');</script>" :: Text)
+          then preEscapedTextValue ("<script src=\"" <> requestBasePath <> "/static/ptz.js\"></script><script>HNVR.ptz('" <> tshow (camera |> get #id) <> "');</script>" :: Text)
           else mempty
 
       -- PTZ sliding side-panel (shared markup from
@@ -130,10 +131,12 @@ instance View ShowView where
 -- | Live event feed poller: refreshes the panel from the fragment
 -- endpoint every 5 s (design 05 §"Live event feed"; a fetch poller
 -- instead of IHP autoRefresh — our layout doesn't load ihp.js).
-feedJs :: Camera -> Text
+feedJs :: (?request :: Request) => Camera -> Text
 feedJs cam =
   "const feedEl = document.getElementById('hnvr-live-feed');"
-    <> "const feedUrl = '/EventsFeedLive?liveCameraId="
+    <> "const feedUrl = '"
+    <> requestBasePath
+    <> "/EventsFeedLive?liveCameraId="
     <> tshow (cam |> get #id)
     <> "';"
     <> "async function refreshFeed() {"

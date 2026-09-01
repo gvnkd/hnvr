@@ -6,6 +6,7 @@
 -- | /NewRole — blank grant form.
 module AdminWeb.View.Roles.New (NewView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.Grants (RoleGrants)
 import AdminWeb.View.Layout (renderAdminLayout)
 import AdminWeb.View.Roles.Form (roleFormFields)
@@ -24,11 +25,11 @@ instance View NewView where
       [hsx|
       <div class="page-header">
         <div><h1>New role</h1><div class="subtitle">default-deny: nothing is granted until checked</div></div>
-        <div class="actions"><a class="btn btn-ghost" href="/Roles">← Back</a></div>
+        <div class="actions"><a class="btn btn-ghost" href={urlFor "/Roles"}>← Back</a></div>
       </div>
       <div class="card">
         <div class="card-body">
-          <form class="form" method="POST" action="/CreateRole">
+          <form class="form" method="POST" action={urlFor "/CreateRole"}>
             {roleFormFields role grants cameras}
             <div class="mt-6">
               <button class="btn btn-primary" type="submit">Create role</button>

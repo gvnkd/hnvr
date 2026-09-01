@@ -23,6 +23,7 @@ import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.UUID (UUID)
 import Generated.Types
 import Hnvr.Cv.Decode (cocoClassName)
+import Hnvr.Web.BasePath (urlFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.Time (tzTime)
 import IHP.ViewPrelude
@@ -82,7 +83,7 @@ instance View IndexView where
           <span class="chevron">▾</span>
         </button>
         <div class="collapse-body"><div>
-          <form class="form p-4" method="GET" action="/Events">
+          <form class="form p-4" method="GET" action={urlFor "/Events"}>
             <div class="field">
               <label for="cameraId">Camera</label>
               <select class="input" id="cameraId" name="cameraId">
@@ -216,7 +217,7 @@ instance View IndexView where
             Just cid ->
               [hsx|<a class="btn btn-primary btn-sm" href={clipUrl}>▶ clip</a>|]
               where
-                clipUrl = "/PlayerEventClip?clipId=" <> tshow cid
+                clipUrl = urlFor ("/PlayerEventClip?clipId=" <> tshow cid)
             Nothing -> [hsx||]
 
       thumb ev mThumbUrl = case mThumbUrl of
@@ -245,14 +246,16 @@ instance View IndexView where
       playUrl ev =
         let (from, to, t) = (addUTCTime (-3600) ev.erTs, addUTCTime 3600 ev.erTs, ev.erTs)
             fmt = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S"
-         in "/Timeline?from="
-              <> fmt from
-              <> "&to="
-              <> fmt to
-              <> "&t="
-              <> fmt t
-              <> "&active="
-              <> tshow ev.erCameraUuid
+         in urlFor
+              ( "/Timeline?from="
+                  <> fmt from
+                  <> "&to="
+                  <> fmt to
+                  <> "&t="
+                  <> fmt t
+                  <> "&active="
+                  <> tshow ev.erCameraUuid
+              )
 
       fmtTs = T.pack . formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S"
 
@@ -267,7 +270,7 @@ instance View IndexView where
       nextLink
         | hasNext = [hsx|<a class="btn btn-ghost" href={pageUrl (page + 1)}>Next →</a>|]
         | otherwise = [hsx||]
-      pageUrl p = "/Events?" <> filterQuery <> "page=" <> tshow p
+      pageUrl p = urlFor ("/Events?" <> filterQuery <> "page=" <> tshow p)
       filterQuery =
         T.intercalate "&" (catMaybes [qp "cameraId" fltCamera, qp "kind" fltKind, qp "from" fltFrom, qp "to" fltTo])
       qp name = fmap (\v -> name <> "=" <> v)

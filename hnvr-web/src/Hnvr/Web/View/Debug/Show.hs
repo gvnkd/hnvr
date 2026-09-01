@@ -13,6 +13,7 @@ import Generated.Types
 import Hnvr.Cv.DebugRender (trackColorCss)
 import Hnvr.Cv.Decode (cocoClassName)
 import Hnvr.Cv.Tracker.Sort (Track (..), TrackId (..))
+import Hnvr.Web.BasePath (urlFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
@@ -52,7 +53,7 @@ instance View ShowView where
       </table>
     |]
     where
-      streamUrl = "/StreamDebugCamera?cameraId=" <> uuidText
+      streamUrl = urlFor ("/StreamDebugCamera?cameraId=" <> uuidText)
       uuidText = case camera |> get #id of Id uuid -> UUID.toText uuid
 
       renderTrack t =

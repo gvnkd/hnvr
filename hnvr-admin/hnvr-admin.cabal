@@ -21,6 +21,7 @@ build-type:    Simple
 library
   exposed-modules:
     AdminWeb.Audit
+    AdminWeb.BasePath
     AdminWeb.Bootstrap
     AdminWeb.Config
     AdminWeb.FrontController

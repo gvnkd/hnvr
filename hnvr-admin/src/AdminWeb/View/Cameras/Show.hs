@@ -5,6 +5,7 @@
 
 module AdminWeb.View.Cameras.Show (ShowView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Data.Time.Clock (UTCTime)
 import Generated.Types
@@ -75,12 +76,12 @@ instance View ShowView where
       |]
     where
       cid = tshow (camera |> get #id)
-      editUrl = "/EditCamera?cameraId=" <> cid
-      debugUrl = "/DebugCamera?cameraId=" <> cid
-      newRuleUrl = "/NewRule?ruleCameraId=" <> cid
-      archiveUrl = "/PlayerArchive?cameraId=" <> cid
-      assignUrl = "/AssignCamera?cameraId=" <> cid
-      toggleUrl = "/ToggleCameraEnabled?cameraId=" <> cid
+      editUrl = urlFor ("/EditCamera?cameraId=" <> cid)
+      debugUrl = urlFor ("/DebugCamera?cameraId=" <> cid)
+      newRuleUrl = urlFor ("/NewRule?ruleCameraId=" <> cid)
+      archiveUrl = urlFor ("/PlayerArchive?cameraId=" <> cid)
+      assignUrl = urlFor ("/AssignCamera?cameraId=" <> cid)
+      toggleUrl = urlFor ("/ToggleCameraEnabled?cameraId=" <> cid)
       toggleLabel = if camera.enabled then "Disable camera" else "Enable camera"
 
       -- Roles & ACL (design_docs/13): action buttons render only with

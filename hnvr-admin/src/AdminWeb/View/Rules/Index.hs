@@ -10,6 +10,7 @@ module AdminWeb.View.Rules.Index
   )
 where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
@@ -81,8 +82,8 @@ instance View IndexView where
       |]
         where
           rid = tshow (rule |> get #id)
-          editUrl = "/EditRule?ruleId=" <> rid
-          purgeUrl = "/PurgeRule?ruleId=" <> rid
+          editUrl = urlFor ("/EditRule?ruleId=" <> rid)
+          purgeUrl = urlFor ("/PurgeRule?ruleId=" <> rid)
 
       cameraSlug :: UUID -> Text
       cameraSlug uuid =

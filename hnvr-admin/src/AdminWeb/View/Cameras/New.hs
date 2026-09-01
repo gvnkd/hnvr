@@ -5,6 +5,7 @@
 
 module AdminWeb.View.Cameras.New (NewView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import Generated.Types
 import IHP.ViewPrelude
@@ -23,7 +24,7 @@ instance View NewView where
           <div class="subtitle">Register an RTSP source for 24/7 recording</div>
         </div>
         <div class="actions">
-          <a class="btn btn-ghost" href="/Cameras">← Back</a>
+          <a class="btn btn-ghost" href={urlFor "/Cameras"}>← Back</a>
         </div>
       </div>
 
@@ -37,7 +38,7 @@ instance View NewView where
     where
       renderForm camera =
         [hsx|
-          <form class="form" method="POST" action="/CreateCamera">
+          <form class="form" method="POST" action={urlFor "/CreateCamera"}>
             {textFieldFor "slug" "Slug" camera.slug "Unique handle, e.g. floor_2_5"}
             {textFieldFor "name" "Name" camera.name "Human-friendly label"}
             {textFieldFor "rtspUrl" "RTSP URL (main)" camera.rtspUrl "Main stream — typically high-res"}
@@ -88,7 +89,7 @@ instance View NewView where
 
             <div class="flex items-center gap-2 mt-6">
               <button class="btn btn-primary" type="submit">Create Camera</button>
-              <a class="btn btn-ghost" href="/Cameras">Cancel</a>
+              <a class="btn btn-ghost" href={urlFor "/Cameras"}>Cancel</a>
             </div>
           </form>
         |]

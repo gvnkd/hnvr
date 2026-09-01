@@ -6,6 +6,7 @@
 -- | /NewUser — email + password + role checkboxes.
 module AdminWeb.View.Users.New (NewView (..)) where
 
+import AdminWeb.BasePath (urlFor)
 import AdminWeb.View.Layout (renderAdminLayout)
 import AdminWeb.View.Users.RoleBoxes (roleCheckboxes)
 import Data.UUID (UUID)
@@ -24,11 +25,11 @@ instance View NewView where
       [hsx|
       <div class="page-header">
         <div><h1>New user</h1><div class="subtitle">local account; assign roles below</div></div>
-        <div class="actions"><a class="btn btn-ghost" href="/Users">← Back</a></div>
+        <div class="actions"><a class="btn btn-ghost" href={urlFor "/Users"}>← Back</a></div>
       </div>
       <div class="card">
         <div class="card-body">
-          <form class="form" method="POST" action="/CreateUser">
+          <form class="form" method="POST" action={urlFor "/CreateUser"}>
             <div class="field">
               <label for="email">Email</label>
               <input class="input" id="email" name="email" type="email" autocomplete="off" required />
