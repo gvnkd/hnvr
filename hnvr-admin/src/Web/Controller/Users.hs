@@ -22,7 +22,7 @@ import AdminWeb.View.Users.Edit
 import AdminWeb.View.Users.Index
 import AdminWeb.View.Users.New
 import Data.Aeson (object, (.=))
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.UUID (UUID)
@@ -98,7 +98,8 @@ instance Controller UsersController where
         setErrorMessage "Cannot remove the last superadmin grant"
         redirectTo EditUserAction {userId}
       else do
-        user' <- case nonemptyParam "password" of
+        let mNewPw = nonemptyParam "password"
+        user' <- case mNewPw of
           Nothing -> pure user
           Just pw -> do
             hash <- hashPassword pw
@@ -108,7 +109,7 @@ instance Controller UsersController where
           "user.update"
           "user"
           (Just (tshow (uuidOf user')))
-          (Just (object ["email" .= user'.email, "roles" .= map tshow newRoles]))
+          (Just (object ["email" .= user'.email, "roles" .= map tshow newRoles, "password_changed" .= isJust mNewPw]))
         setSuccessMessage ("User updated: " <> user'.email)
         redirectTo UsersAction
   action PurgeUserAction {userId} = do

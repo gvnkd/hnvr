@@ -69,6 +69,28 @@ instance View ShowView where
           </div>
         </form>
       </div>
+
+      <div class="card mt-4">
+        <div class="card-header"><span>Change password</span></div>
+        <form class="form p-4" method="POST" action={urlFor "/UpdatePassword"}>
+          <div class="field">
+            <label for="currentPassword">Current password</label>
+            <input class="input" id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required="1" />
+          </div>
+          <div class="field">
+            <label for="newPassword">New password</label>
+            <input class="input" id="newPassword" name="newPassword" type="password" autocomplete="new-password" required="1" />
+            <div class="text-sm muted">At least 8 characters.</div>
+          </div>
+          <div class="field">
+            <label for="newPasswordConfirm">Repeat new password</label>
+            <input class="input" id="newPasswordConfirm" name="newPasswordConfirm" type="password" autocomplete="new-password" required="1" />
+          </div>
+          <div class="field">
+            <button class="btn btn-primary" type="submit">Change password</button>
+          </div>
+        </form>
+      </div>
     |]
     where
       savedLabel = fromMaybe "browser default" user.timezone

@@ -27,6 +27,7 @@ import Generated.Types
 import Hnvr.Web.Audit (audit)
 import Hnvr.Web.Auth ()
 import Hnvr.Web.View.Profile.Show
+import IHP.AuthSupport.Authentication (hashPassword, verifyPassword)
 import IHP.ControllerPrelude
 import IHP.LoginSupport.Helper.Controller (currentUser, currentUserOrNothing, ensureIsUser)
 import IHP.ModelSupport (Id' (Id))
@@ -34,6 +35,7 @@ import IHP.ModelSupport (Id' (Id))
 data ProfileController
   = ShowProfileAction
   | UpdateProfileAction
+  | UpdatePasswordAction
   deriving stock (Eq, Show, Data)
 
 instance AutoRoute ProfileController
@@ -55,6 +57,21 @@ instance Controller ProfileController where
         audit currentUserUuid "profile.update" "user" (userUuidOf user) (Just (object ["timezone" .= mtz, "locale" .= mloc]))
         setSuccessMessage "Profile saved"
         redirectTo ShowProfileAction
+  action UpdatePasswordAction = do
+    let user = currentUser
+        currentPw = param @Text "currentPassword"
+        newPw = param @Text "newPassword"
+        confirmPw = param @Text "newPasswordConfirm"
+    case passwordChangeError (verifyPassword user currentPw) newPw confirmPw of
+      Just err -> do
+        setErrorMessage err
+        redirectTo ShowProfileAction
+      Nothing -> do
+        hash <- hashPassword newPw
+        _ <- user |> set #passwordHash hash |> updateRecord
+        audit currentUserUuid "profile.password_change" "user" (userUuidOf user) Nothing
+        setSuccessMessage "Password updated"
+        redirectTo ShowProfileAction
 
 -- | Empty → NULL (browser default). Otherwise accept IANA-ish names:
 -- letters/digits plus @_@ @-@ @/@ @+@, 1..64 chars.
@@ -72,6 +89,15 @@ normalizeLocale t
   | T.null t = Just Nothing
   | T.length t > 35 = Nothing
   | T.all (\c -> isAlphaNum c || c `elem` ("-_" :: String)) t = Just (Just t)
+  | otherwise = Nothing
+
+-- | Validation for 'UpdatePasswordAction' (pure): the current password
+-- must match, the new one must be ≥8 chars and repeated identically.
+passwordChangeError :: Bool -> Text -> Text -> Maybe Text
+passwordChangeError currentOk newPw confirmPw
+  | not currentOk = Just "Current password is incorrect"
+  | T.length newPw < 8 = Just "New password must be at least 8 characters"
+  | newPw /= confirmPw = Just "New passwords do not match"
   | otherwise = Nothing
 
 userUuidOf :: User -> Maybe UUID
