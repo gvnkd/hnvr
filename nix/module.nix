@@ -40,6 +40,20 @@ in
         reach it over loopback/SSH forwarding or a mgmt VLAN.
       '';
     };
+
+    baseUrl = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "https://nvr.example.com/admin";
+      description = ''
+        HNVR_ADMIN_BASE_URL: absolute public URL (scheme + host + path)
+        when hnvr-admin is mounted under a sub-path of a reverse-proxied
+        vhost. The app prefixes every generated URL with — and strips —
+        the path itself (AdminWeb.BasePath), so the proxy must forward
+        the ORIGINAL request URI untouched (proxy_pass WITHOUT a URI
+        part: no trailing slash, no rewrite). Null = served at /.
+      '';
+    };
   };
 
   options.services.hnvr.leader = {
@@ -116,6 +130,21 @@ in
         use (for example https://s3.example.com). Null falls back to
         HNVR_S3_ENDPOINT. Superseded by the @public_endpoint@ field of
         the config file (see configFile) — this env var overrides it.
+      '';
+    };
+
+    baseUrl = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "https://nvr.example.com/hnvr";
+      description = ''
+        HNVR_BASE_URL: absolute public URL (scheme + host + path) when
+        the leader is mounted under a sub-path of a reverse-proxied
+        vhost. The app prefixes every generated URL with — and strips —
+        the path itself (Hnvr.Web.BasePath); /healthz, /status,
+        /debug-frame and /whep all move under the prefix (requests
+        outside it 404). The proxy must forward the ORIGINAL request URI
+        untouched (proxy_pass WITHOUT a URI part). Null = served at /.
       '';
     };
 
@@ -246,6 +275,8 @@ in
           HNVR_MODEL_DIR = cfg.modelDir;
         } // lib.optionalAttrs (cfg.s3PublicEndpoint != null) {
           HNVR_S3_PUBLIC_ENDPOINT = cfg.s3PublicEndpoint;
+        } // lib.optionalAttrs (cfg.baseUrl != null) {
+          HNVR_BASE_URL = cfg.baseUrl;
         } // lib.optionalAttrs (cfg.configFile != null) {
           HNVR_CONFIG = toString cfg.configFile;
         } // cfg.environment;
@@ -366,10 +397,12 @@ in
           HNVR_NATS_URI = cfg.natsUri;
           APP_STATIC = "${cfg.dataDir}/static";
           IHP_SESSION_SECRET_FILE = "${cfg.dataDir}/client_session_key.aes";
-          HASQL_DISABLE_PREPARED_STATEMENTS = "1";
-        } // lib.optionalAttrs (cfg.configFile != null) {
-          HNVR_CONFIG = toString cfg.configFile;
-        };
+           HASQL_DISABLE_PREPARED_STATEMENTS = "1";
+         } // lib.optionalAttrs (cfgA.baseUrl != null) {
+           HNVR_ADMIN_BASE_URL = cfgA.baseUrl;
+         } // lib.optionalAttrs (cfg.configFile != null) {
+           HNVR_CONFIG = toString cfg.configFile;
+         };
 
         serviceConfig = {
           ExecStart = "${cfgA.package}/bin/hnvr-admin";
