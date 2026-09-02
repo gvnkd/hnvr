@@ -14,10 +14,9 @@ import Hnvr.Core.Id (CameraId (..))
 import Hnvr.Web.Auth ()
 import Hnvr.Web.Authz (currentRoleSet)
 import Hnvr.Web.BasePath (urlFor)
-import Hnvr.Web.CameraStatus (cameraStatusFor, hostDisplayLive)
+import Hnvr.Web.CameraStatus (cameraStatusFor)
 import Hnvr.Web.View.Layout (renderLayout)
 import Hnvr.Web.View.PtzPanel (ptzPanel)
-import Hnvr.Web.View.Time (tzTime)
 import IHP.ModelSupport (Id' (Id))
 import IHP.ViewPrelude
 
@@ -32,18 +31,7 @@ instance View IndexView where
   html IndexView {..} =
     renderLayout
       [hsx|
-      <div class="page-header">
-        <div>
-          <h1>Dashboard</h1>
-          <div class="subtitle">{nCams} cameras · {nHosts} hosts · click a camera for full live view</div>
-        </div>
-      </div>
-
-      <div class="section-h">Live wall</div>
       {renderCameras cameras}
-
-      <div class="section-h">Hosts</div>
-      {renderHosts hosts}
 
       <div id="live-overlay" class="live-overlay" hidden>
         <div class="live-overlay-panel">
@@ -70,8 +58,6 @@ instance View IndexView where
       <script src={urlFor "/static/ptz.js"}></script>
     |]
     where
-      nCams = tshow (length cameras) :: Text
-      nHosts = tshow (length hosts) :: Text
       -- PTZ drawer templates only for logged-in operators with a PTZ
       -- grant on the camera (design_docs/13): the dashboard is
       -- anonymous-readable and the PTZ POST endpoints are role-gated,
@@ -98,44 +84,6 @@ instance View IndexView where
         |]
       presetsFor cam = filter (\p -> p.cameraId == camUuid cam) ptzPresets
       camUuid c = case c |> get #id of Id u -> u
-
-      renderHosts [] = [hsx|<div class="empty"><span class="empty-icon">⌖</span>No hosts reporting yet.</div>|]
-      renderHosts hs =
-        [hsx|
-          <div class="card">
-            <table class="table" data-sortable="1">
-              <thead>
-                <tr>
-                  <th class="w-4" data-no-sort="1"></th>
-                  <th>Host</th>
-                  <th>Role</th>
-                  <th>Last health</th>
-                  <th class="col-hide-sm">GPU</th>
-                </tr>
-              </thead>
-              <tbody>{forEach hs renderHost}</tbody>
-            </table>
-          </div>
-        |]
-      renderHost h =
-        [hsx|
-          <tr data-href={urlFor "/Hosts"}>
-            <td>{healthLedFor h.lastHealthAt}</td>
-            <td class="mono t-strong">{hostIdText}</td>
-            <td>{roleBadgeFor h.isLeader}</td>
-            <td class="mono">{lastHealthHtml h.lastHealthAt}</td>
-            <td class="mono col-hide-sm">{fromMaybe "—" h.gpuModel}</td>
-          </tr>
-        |]
-        where
-          hostIdText = case h |> get #id of Id t -> t
-      healthLedFor mh
-        | hostDisplayLive now mh = [hsx|<span class="led led-on" title="reporting"></span>|]
-        | otherwise = [hsx|<span class="led led-off" title="disconnected — last health >5 min ago"></span>|]
-      roleBadgeFor True = [hsx|<span class="badge badge-info">LEADER</span>|]
-      roleBadgeFor False = [hsx|<span class="badge badge-mute">WORKER</span>|]
-      lastHealthHtml Nothing = [hsx|—|]
-      lastHealthHtml (Just t) = tzTime t
 
       renderCameras [] = [hsx|<div class="empty"><span class="empty-icon">⌖</span>No cameras yet. Add some via hnvr-admin.</div>|]
       renderCameras cs =
