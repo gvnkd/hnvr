@@ -38,6 +38,36 @@ test.describe('Archive timeline', () => {
     expect(to - from).toBe(3600 * 1000);
   });
 
+  test('range switch keeps the selected camera', async ({loggedInPage: page}) => {
+    await page.goto('/Timeline');
+    const sel = page.locator('[data-tl-camera]');
+    const options = sel.locator('option');
+    test.skip((await options.count()) < 2, 'need 2+ cameras');
+    const secondId = (await options.nth(1).getAttribute('value'))!;
+    // Regression (0.25.13): the preset-nav and custom-form URLs used to
+    // drop the active camera, resetting the player to the first option.
+    await sel.selectOption(secondId);
+    await page.locator('.tl-rangebar [data-dropdown-button]').click();
+    await page.locator('.tl-rangebar .dropdown-item', {hasText: '1 hour'}).click();
+    await page.waitForURL(/\/Timeline\?from=/);
+    await expect(page.locator('[data-tl-camera]')).toHaveValue(secondId);
+    // Custom from/to form carries the camera as a hidden field.
+    await page.locator('form.tl-custom button[type=submit]').click();
+    await page.waitForURL(/\/Timeline\?.*active=/);
+    await expect(page.locator('[data-tl-camera]')).toHaveValue(secondId);
+    // Deep-linked ?active= persists, so later range switches survive.
+    await page.evaluate(() => localStorage.removeItem('hnvr-timeline-active'));
+    await page.goto(`/Timeline?active=${secondId}`);
+    await expect(page.locator('[data-tl-camera]')).toHaveValue(secondId);
+    await page.locator('.tl-rangebar [data-dropdown-button]').click();
+    await page.locator('.tl-rangebar .dropdown-item', {hasText: '24 hours'}).click();
+    await page.waitForURL(/\/Timeline\?from=/);
+    await expect(page.locator('[data-tl-camera]')).toHaveValue(secondId);
+    // Restore default for the shared browser profile.
+    const firstId = (await page.locator('[data-tl-camera] option').nth(0).getAttribute('value'))!;
+    await page.locator('[data-tl-camera]').selectOption(firstId);
+  });
+
   test('player fetches timeline data and settles out of idle', async ({loggedInPage: page}) => {
     await page.goto('/Timeline');
     const resp = await page.waitForResponse(/\/TimelineData\?from=/);

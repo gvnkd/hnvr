@@ -55,6 +55,16 @@
     if (activeParam) activeCamId = activeParam;
     if (!stateOf(activeCamId) && states.length) activeCamId = states[0].camId;
     if (camSelect) camSelect.value = activeCamId || "";
+    // A deep-linked camera must survive later range switches (which
+    // navigate full-page): persist it once honored.
+    if (activeParam) saveActive();
+    // The custom from/to form carries the active camera as a hidden
+    // field so its GET navigation keeps the selection.
+    var activeField = document.querySelector("[data-tl-active-field]");
+    function syncActiveField() {
+      if (activeField) activeField.value = activeCamId || "";
+    }
+    syncActiveField();
 
     function saveActive() {
       try {
@@ -87,6 +97,7 @@
       stopPlayback();
       activeCamId = camId;
       saveActive();
+      syncActiveField();
       if (camSelect && camSelect.value !== camId) camSelect.value = camId;
       syncPurgeForm();
       draw(); // marker lane shows only the active camera
@@ -679,7 +690,8 @@
         window.location.href = HNVR.u(
           "/Timeline?from=" + encodeURIComponent(f) +
           "&to=" + encodeURIComponent(t) +
-          "&t=" + encodeURIComponent(c)
+          "&t=" + encodeURIComponent(c) +
+          "&active=" + encodeURIComponent(activeCamId || "")
         );
       });
     });

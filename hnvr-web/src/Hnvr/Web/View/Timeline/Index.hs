@@ -56,6 +56,7 @@ instance View IndexView where
                 </div>
               </div>
               <form method="GET" action={urlFor "/Timeline"} class="tl-custom">
+                <input type="hidden" name="active" data-tl-active-field="" value="" />
                 <input class="input" type="datetime-local" name="from" data-tz-dt="1" value={dtLocal winFrom} />
                 <span class="muted">→</span>
                 <input class="input" type="datetime-local" name="to" data-tz-dt="1" value={dtLocal winTo} />
