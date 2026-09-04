@@ -7,9 +7,10 @@
 # hnvr system user so they can share /run/hnvr (created via tmpfiles).
 #
 # NOTE: nixpkgs pins mediamtx 1.18.2 (verified Aug 10 2026); the design
-# locks v1.20.0 for WHEP browser compat. The version doesn't matter for
-# packaging — bump via overlay (buildGoModule from v1.20.0 tarball) if
-# Slice 3 verification fails on Chrome 130+. The roadmap decision point
+# locks v1.20.1 for WHEP browser compat + the #6077 config-reload
+# deadlock fix. The version doesn't matter for packaging — bump via
+# overlay (buildGoModule from the release tarball) if Slice 3
+# verification fails on Chrome 130+. The roadmap decision point
 # at Phase 2 kickoff is the trigger for that.
 let
   cfg = config.services.hnvr.mediamtx;
@@ -43,7 +44,7 @@ in
       default = pkgs.mediamtx;
       defaultText = "pkgs.mediamtx";
       description = ''
-        mediamtx derivation. nixpkgs pins v1.18.2; design locks v1.20.0.
+        mediamtx derivation. nixpkgs pins v1.18.2; design locks v1.20.1.
         Bump via overlay if Slice 3 WHEP verification fails on Chrome 130+.
       '';
     };

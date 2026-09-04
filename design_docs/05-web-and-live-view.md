@@ -237,13 +237,13 @@ When auto-track is enabled and the operator clicks any PTZ button, the PtzContro
 
 ### Configuration sync
 
-`MediaMTXConfigSyncer` (leader-only async thread) LISTENs on the Postgres `cameras_events` channel (via pg-simple); whenever a camera row changes, it pushes the path config to MediaMTX's **`/v3` REST API** (`POST /v3/config/paths/add`, `PATCH /v3/config/paths/patch`, `DELETE /v3/config/paths/delete`). The mediamtx.yml-regen + SIGHUP approach was never shipped — MediaMTX v1.20.0's API covers live path management.
+`MediaMTXConfigSyncer` (leader-only async thread) LISTENs on the Postgres `cameras_events` channel (via pg-simple); whenever a camera row changes, it pushes the path config to MediaMTX's **`/v3` REST API** (`POST /v3/config/paths/add`, `PATCH /v3/config/paths/patch`, `DELETE /v3/config/paths/delete`). The mediamtx.yml-regen + SIGHUP approach was never shipped — MediaMTX v1.20.x's API covers live path management.
 
 Equivalent pushed config (shown as YAML for readability):
 
 ```yaml
 # /run/hnvr/mediamtx.yml (managed by hnvr-leader, do not edit)
-apiVersion: 1.20.0
+apiVersion: 1.20.1
 
 ##################################
 # Camera definitions (from Postgres)

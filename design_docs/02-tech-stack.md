@@ -150,7 +150,7 @@ SORT (Bewley et al. 2016) in `Hnvr.Cv.Tracker.Sort`: ~250 LOC. Kalman filter wit
 |----------------|---------|-----|
 | **IHP** | pinned release v1.6.0 | Schema designer, hsx templates, autorefresh, sessions, CSRF. |
 | `wai-websockets` | 3.0 | Optional; IHP autorefresh via SSE is preferred for live event feeds. |
-| **MediaMTX** | **v1.20.0** | Single Go binary, packaged via flake input pinned by revision. RTSP → WebRTC WHEP, HLS. **Runs on leader host only.** |
+| **MediaMTX** | **v1.20.1** | Single Go binary, packaged via flake input pinned by revision. RTSP → WebRTC WHEP, HLS. **Runs on leader host only.** |
 | `hls.js` (vendored via IHP `static/`) | 1.5+ | Fallback for browsers without HEVC-over-WebRTC. |
 | `chart.js` + htmx (vendored) | latest | Dashboard charts; htmx partial refresh. |
 | WHEP client (`/static/whep.js`) | ~50 LOC, browser-native | RTCPeerConnection + fetch SDP; no npm. |

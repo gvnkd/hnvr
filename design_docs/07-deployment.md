@@ -49,7 +49,7 @@ hnvr/
   inputs = {
     nixpkgs.url       = "github:NixOS/nixpkgs/nixos-unstable";  # for GHC 9.12 + TensorRT
     ihp.url           = "github:digitallyinduced/ihp/v1.6.0";  # pinned release
-    mediamtx.url      = "github:bluenviron/mediamtx/v1.20.0";
+    mediamtx.url      = "github:bluenviron/mediamtx/v1.20.1";
     sops-nix.url      = "github:Mic92/sops-nix";
     haskell-flake.url = "github:srid/haskell-flake";
     pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";

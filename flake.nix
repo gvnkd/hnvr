@@ -18,7 +18,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Phase 2 (live view): mediamtx bumped to v1.20.0 (design lock) via
+    # Phase 2 (live view): mediamtx bumped to v1.20.1 (design lock) via
     # the mediamtxOverlay defined below — nixpkgs pins 1.18.2 but the
     # overlay rebuilds from source via buildGo126Module.
     # M4 (Aug 11 2026): sops-nix for production secrets. Dev (devenv)
@@ -161,16 +161,18 @@
         };
 
       # -------------------------------------------------------------
-      # MediaMTX v1.20.0 — design lock (design_docs/02-tech-stack.md).
-      # nixpkgs pins 1.18.2; we override to 1.20.0 to (a) match the
+      # MediaMTX v1.20.1 — design lock (design_docs/02-tech-stack.md).
+      # nixpkgs pins 1.18.2; we override to 1.20.1 to (a) match the
       # locked version and (b) align the REST API surface with the
-      # `Hnvr.Web.MediaMTXConfigSyncer` consumer (1.18.2 vs 1.20.0 both
-      # use /v3/* so this is forward-compatible, but 1.20.0 also ships
+      # `Hnvr.Web.MediaMTXConfigSyncer` consumer (1.18.2 vs 1.20.x both
+      # use /v3/* so this is forward-compatible, but 1.20.x also ships
       # the v1.20 WHEP improvements Chrome 130+ wants — Phase 2 Slice 3
-      # decision point).
+      # decision point). 1.20.1 specifically fixes the file+API config-
+      # change deadlock (upstream #6077/#6101, seen on snp-srv 2026-08-31
+      # — pitfall #133).
       #
       # The rpicamera patches nixpkgs-1.18.2 needs are NOT required for
-      # 1.20.0 on x86_64: the build constraints naturally exclude arm-
+      # 1.20.x on x86_64: the build constraints naturally exclude arm-
       # only files, and the renamed `source_other.go` stub matches our
       # arch without substitution.
       # -------------------------------------------------------------
@@ -178,22 +180,22 @@
         mediamtx = prev.mediamtx.overrideAttrs (old:
           let
             hlsJs = final.fetchurl {
-              url = "https://cdn.jsdelivr.net/npm/hls.js@v1.6.16/dist/hls.min.js";
-              hash = "sha256-RC9ZnDTxA8M1WzdaI73/VgWS1xF9CajIRyQuo94tQOA=";
+              url = "https://cdn.jsdelivr.net/npm/hls.js@v1.7.0/dist/hls.min.js";
+              hash = "sha256-HyjGpD3u3dvVmupMEZvXiPXiNHdywZ2h9vkvjQAy2dw=";
             };
           in
           {
-            version = "1.20.0";
+            version = "1.20.1";
             src = final.fetchFromGitHub {
               owner = "bluenviron";
               repo = "mediamtx";
-              tag = "v1.20.0";
-              hash = "sha256-bnbuIf3GdT+TCUHzAqvsS9wLPjDUGunpJoQBJFY4aTo=";
+              tag = "v1.20.1";
+              hash = "sha256-L9dRwOD5JCu3ZczTxeb3a6ShHMXGWNXVN5KAa/7bcjM=";
             };
-            vendorHash = "sha256-uXwfIeE95g8isjR3ll0pcXnRtr/dbhp9B0HyH47WgWU=";
+            vendorHash = "sha256-15ERQ4TYJ+atLS3ZrOMtSq5UDWh0Q2xejepQlEJWPL4=";
             postPatch = ''
               cp ${hlsJs} internal/servers/hls/hls.min.js
-              echo "v1.20.0" > internal/core/VERSION
+              echo "v1.20.1" > internal/core/VERSION
             '';
           });
       };

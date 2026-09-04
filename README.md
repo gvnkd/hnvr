@@ -188,7 +188,7 @@ web tier is down, but reassignment stops).
 | CV | ONNX Runtime via internal FFI binding; YOLOv8n-320 / YOLOv8s-640; pure-Haskell SORT |
 | PTZ | ONVIF SOAP client (WSSE + Basic), per-camera command loops |
 | Storage | S3 via minio-hs (vendored, patched); PostgreSQL 18 |
-| Live | MediaMTX v1.20.0 sidecar |
+| Live | MediaMTX v1.20.1 sidecar |
 | Deploy | NixOS flake + modules, sops-nix secrets |
 
 ## Requirements
