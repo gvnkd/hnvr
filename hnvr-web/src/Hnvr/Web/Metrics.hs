@@ -95,6 +95,7 @@ newMetrics :: Store -> IO Metrics
 newMetrics store = do
   counters <- newMVar Map.empty
   dists <- newMVar Map.empty
+  gauges <- newMVar Map.empty
   let counter name = modifyMVar counters $ \m ->
         case Map.lookup name m of
           Just c -> pure (m, c)
@@ -107,6 +108,12 @@ newMetrics store = do
           Nothing -> do
             d <- createDistribution name store
             pure (Map.insert name d m, d)
+      gauge name = modifyMVar gauges $ \m ->
+        case Map.lookup name m of
+          Just g -> pure (m, g)
+          Nothing -> do
+            g <- createGauge name store
+            pure (Map.insert name g m, g)
   pure
     Metrics
       { mFrameDecoded = \slug ->
@@ -120,7 +127,11 @@ newMetrics store = do
         mPtzCommand = \slug cmd source ->
           counter ("hnvr_ptz_commands_total{camera=\"" <> slug <> "\",command=\"" <> cmd <> "\",source=\"" <> source <> "\"}") >>= Counter.inc,
         mPtzCommandSeconds = \slug secs ->
-          dist ("hnvr_ptz_command_seconds{camera=\"" <> slug <> "\"}") >>= \d -> Dist.add d secs
+          dist ("hnvr_ptz_command_seconds{camera=\"" <> slug <> "\"}") >>= \d -> Dist.add d secs,
+        mRuleEvent = \slug ->
+          counter ("hnvr_rule_events_total{camera=\"" <> slug <> "\"}") >>= Counter.inc,
+        mTracksActive = \slug n ->
+          gauge ("hnvr_tracks_active{camera=\"" <> slug <> "\"}") >>= \g -> Gauge.set g (fromIntegral n)
       }
 
 -- | Serve @GET \/metrics@ in Prometheus text format on

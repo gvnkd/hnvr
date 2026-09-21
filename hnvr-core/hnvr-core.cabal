@@ -7,6 +7,7 @@ build-type:    Simple
 
 library
   exposed-modules:
+    Hnvr.Core.AnalysisLiveness
     Hnvr.Core.ArchiveBrowser
     Hnvr.Core.Assignment
     Hnvr.Core.AudioProbe
@@ -71,6 +72,7 @@ test-suite hnvr-core-test
   main-is:          Main.hs
   hs-source-dirs:   test
   other-modules:
+    Hnvr.Core.AnalysisLivenessSpec
     Hnvr.Core.ArchiveBrowserSpec
     Hnvr.Core.AssignmentSpec
     Hnvr.Core.AudioProbeSpec

@@ -49,7 +49,14 @@ data Metrics = Metrics
     -- command name, source (@web_ui@\/@idle_timeout@\/...).
     mPtzCommand :: !(Text -> Text -> Text -> IO ()),
     -- | Wall seconds of one PTZ SOAP round-trip. Arg: camera slug.
-    mPtzCommandSeconds :: !(Text -> Double -> IO ())
+    mPtzCommandSeconds :: !(Text -> Double -> IO ()),
+    -- | One rule event emitted by an analysis pair. Arg: camera slug.
+    -- The blind-watchdog companion of 'mFrameDecoded' (pitfall #135):
+    -- frames flowing while this counter is flat = alive-but-blind.
+    mRuleEvent :: !(Text -> IO ()),
+    -- | Confirmed-track count of the newest analyzed frame.
+    -- Args: camera slug, track count. Gauge, set per frame.
+    mTracksActive :: !(Text -> Int -> IO ())
   }
 
 noOpMetrics :: Metrics
@@ -60,7 +67,9 @@ noOpMetrics =
       mRecordInference = \_ _ -> pure (),
       mSubstreamFallback = \_ -> pure (),
       mPtzCommand = \_ _ _ -> pure (),
-      mPtzCommandSeconds = \_ _ -> pure ()
+      mPtzCommandSeconds = \_ _ -> pure (),
+      mRuleEvent = \_ -> pure (),
+      mTracksActive = \_ _ -> pure ()
     }
 
 -- | Distribution statistics snapshot (mirror of ekg-core's

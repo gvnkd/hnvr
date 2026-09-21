@@ -74,7 +74,7 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (forM, forM_, forever, void, when)
+import Control.Monad (forM, forM_, forever, unless, void, when)
 import Data.Aeson (object, (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef
@@ -105,6 +105,7 @@ import Hnvr.Capture.Worker
     CaptureState (..),
     captureWorkerWithStop,
   )
+import Hnvr.Core.AnalysisLiveness (BlindParams (..), BlindVerdict (..), RuleActivity (..), blindVerdict, defaultBlindParams)
 import Hnvr.Core.AudioProbe (ProbedAudio (..))
 import Hnvr.Core.CameraSnapshot (CameraSnapshot (..), PtzSnapshot (..))
 import qualified Hnvr.Core.CameraSnapshot as Snap
@@ -191,7 +192,12 @@ data CaptureSupervisor = CaptureSupervisor
     -- analysis watchdog uses it to restart a dead\/wedged pair without
     -- touching the capture worker (recording must not flap because the
     -- CV side hiccuped).
-    csAssignments :: !(IORef (Map CameraId (CameraSnapshot, Text)))
+    csAssignments :: !(IORef (Map CameraId (CameraSnapshot, Text))),
+    -- | Per-camera rule-activity timestamps for the blind-pair check
+    -- (pitfall #135): updated by 'analysisSink' (last frame with
+    -- confirmed tracks / last emitted rule event), read by the
+    -- analysis watchdog. Entries are dropped with the analysis pair.
+    csRuleActivity :: !(IORef (Map CameraId RuleActivity))
   }
 
 -- | Publishes at most one JPEG per @fpMinInterval@ seconds per camera
@@ -255,6 +261,7 @@ startCaptureSupervisor cfg = do
   probesRef <- newIORef Map.empty
   thumbTv <- newTVarIO 0
   assignRef <- newIORef Map.empty
+  ruleActRef <- newIORef Map.empty
   let sup =
         CaptureSupervisor
           { csConfig = cfg,
@@ -267,12 +274,15 @@ startCaptureSupervisor cfg = do
             csFramePub = framePub,
             csAudioProbes = probesRef,
             csThumbInFlight = thumbTv,
-            csAssignments = assignRef
+            csAssignments = assignRef,
+            csRuleActivity = ruleActRef
           }
   wdOff <- (== Just "1") <$> lookupEnv "HNVR_DISABLE_ANALYSISWATCHDOG"
   if wdOff
     then logInfo "CaptureSupervisor: analysis watchdog disabled (HNVR_DISABLE_ANALYSISWATCHDOG=1)"
-    else void $ async (analysisWatchdog sup)
+    else do
+      blindParams <- readBlindParams
+      void $ async (analysisWatchdog blindParams sup)
   logInfo "CaptureSupervisor: started"
   pure sup
 
@@ -524,6 +534,21 @@ analysisSink ::
   IO ()
 analysisSink sup snap rules clipRules rulesRef latest frame tracks = do
   atomically (writeTVar latest (Just (frame, tracks)))
+  let metrics = capMetrics sup.csConfig
+      slug = csSlug snap
+      ts = frameTimestamp frame
+  mTracksActive metrics slug (length tracks)
+  -- Rule-activity record for the blind-pair watchdog (pitfall #135):
+  -- last frame with confirmed tracks / last emitted event. Lazily
+  -- seeded at the pair's first frame so a fresh pair gets a full
+  -- bpEventQuietSec grace.
+  atomicModifyIORef' sup.csRuleActivity $ \m ->
+    let seed = RuleActivity {raLastTrackSeen = ts, raLastEvent = ts}
+        prev = fromMaybe seed (Map.lookup (csId snap) m)
+        prev'
+          | null tracks = prev
+          | otherwise = prev {raLastTrackSeen = ts}
+     in (Map.insert (csId snap) prev' m, ())
   forM_ sup.csFramePub $ \fp -> publishFrame fp (csId snap) frame
   forM_ sup.csSnapshots $ \st -> SnapWr.maybeSnapshot st sup.csConfig snap frame
   evs <-
@@ -531,6 +556,12 @@ analysisSink sup snap rules clipRules rulesRef latest frame tracks = do
       evalTracks st rules (frameWidth frame) (frameHeight frame) tracks (frameTimestamp frame)
   forM_ evs $ \(_rule, _track, ev) ->
     Clip.onRuleFired sup.csClipState (csId snap) (csSlug snap) clipRules (reRuleId ev) (reTs ev)
+  forM_ evs $ \_ -> mRuleEvent metrics slug
+  unless (null evs) $
+    atomicModifyIORef' sup.csRuleActivity $ \m ->
+      case Map.lookup (csId snap) m of
+        Just prev -> (Map.insert (csId snap) prev {raLastEvent = ts} m, ())
+        Nothing -> (m, ())
   case capBus sup.csConfig of
     Nothing -> pure ()
     Just bus ->
@@ -751,6 +782,7 @@ stopAnalysisPairLocked sup camId = do
     atomicModifyIORef'
       sup.csAnalysis
       (\m -> (Map.delete camId m, Map.lookup camId m))
+  atomicModifyIORef' sup.csRuleActivity (\m -> (Map.delete camId m, ()))
   forM_ mAna $ \h -> do
     cancel h.ahSource
     cancel h.ahAnalyzer
@@ -758,6 +790,17 @@ stopAnalysisPairLocked sup camId = do
 -- | How often the analysis watchdog scans the pair table.
 watchdogIntervalUs :: Int
 watchdogIntervalUs = 30_000_000
+
+-- | Tunables for the blind-pair check (pitfall #135), read once at
+-- watchdog start: @HNVR_BLIND_TRACK_QUIET_SEC@ (no tracks for this
+-- long ⇒ quiet camera, never restart on missing events; default 1800)
+-- and @HNVR_BLIND_EVENT_QUIET_SEC@ (tracks active but no rule event
+-- for this long ⇒ alive-but-blind, restart; default 7200).
+readBlindParams :: IO BlindParams
+readBlindParams = do
+  trackQ <- fromMaybe (bpTrackQuietSec defaultBlindParams) . (>>= readMaybe) <$> lookupEnv "HNVR_BLIND_TRACK_QUIET_SEC"
+  eventQ <- fromMaybe (bpEventQuietSec defaultBlindParams) . (>>= readMaybe) <$> lookupEnv "HNVR_BLIND_EVENT_QUIET_SEC"
+  pure BlindParams {bpTrackQuietSec = trackQ, bpEventQuietSec = eventQ}
 
 -- | A pair whose newest analyzed frame is older than this while its
 -- capture worker reports 'Running' is considered wedged (the pitfall
@@ -769,13 +812,16 @@ watchdogStaleSec = 120
 -- | Auto-heal loop for analysis pairs (pitfall #131). Restarts a pair
 -- when either async has died or the pair has stopped producing
 -- analyzed frames while the camera's capture worker is 'Running'.
--- Restarts go through the per-camera lifecycle lock and re-check
--- 'csAssignments' so a concurrent 'stopCamera' can't be resurrected.
--- The capture worker is deliberately NOT touched — recording must not
--- flap because the CV side hiccuped. Kill switch:
--- @HNVR_DISABLE_ANALYSISWATCHDOG=1@.
-analysisWatchdog :: CaptureSupervisor -> IO ()
-analysisWatchdog sup = forever $ do
+-- Also restarts an /alive-but-blind/ pair (pitfall #135): frames flow
+-- and inference runs, but the rule engine emits nothing while tracks
+-- are present — the Sep 19 2026 two-day silence. Restarts go through
+-- the per-camera lifecycle lock and re-check 'csAssignments' so a
+-- concurrent 'stopCamera' can't be resurrected. The capture worker is
+-- deliberately NOT touched — recording must not flap because the CV
+-- side hiccuped. Kill switch: @HNVR_DISABLE_ANALYSISWATCHDOG=1@
+-- (disables the blind check too).
+analysisWatchdog :: BlindParams -> CaptureSupervisor -> IO ()
+analysisWatchdog blindParams sup = forever $ do
   threadDelay watchdogIntervalUs
   r <- try scan
   case r of
@@ -800,13 +846,24 @@ analysisWatchdog sup = forever $ do
               Just (frame, _) ->
                 running && realToFrac (diffUTCTime now (frameTimestamp frame)) > watchdogStaleSec
               Nothing -> False
-        when (srcDead || anaDead || stale) $ do
-          let reason
-                | srcDead && anaDead = "frame source + analyzer died"
-                | srcDead = "frame source died"
-                | anaDead = "analyzer died"
-                | otherwise = "no analyzed frame for " <> T.pack (show (round watchdogStaleSec :: Int)) <> "s while Running"
-          restartPair camId reason
+        blind <- case srcDead || anaDead || stale of
+          True -> pure Nothing
+          False -> do
+            running <- workerRunning camId
+            if not running
+              then pure Nothing
+              else do
+                activity <- Map.lookup camId <$> readIORef sup.csRuleActivity
+                pure $ case blindVerdict blindParams now activity of
+                  BlindWedged reason -> Just ("alive-but-blind: " <> reason)
+                  _ -> Nothing
+        let mReason
+              | srcDead && anaDead = Just "frame source + analyzer died"
+              | srcDead = Just "frame source died"
+              | anaDead = Just "analyzer died"
+              | stale = Just ("no analyzed frame for " <> T.pack (show (round watchdogStaleSec :: Int)) <> "s while Running")
+              | otherwise = blind
+        forM_ mReason (restartPair camId)
     isDead a = do
       m <- poll a
       pure $ case m of

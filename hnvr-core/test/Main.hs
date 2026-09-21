@@ -1,5 +1,6 @@
 module Main (main) where
 
+import qualified Hnvr.Core.AnalysisLivenessSpec as AnalysisLivenessSpec
 import qualified Hnvr.Core.ArchiveBrowserSpec as ArchiveBrowserSpec
 import qualified Hnvr.Core.AssignmentSpec as AssignmentSpec
 import qualified Hnvr.Core.AuthzSpec as AuthzSpec
@@ -32,7 +33,8 @@ main =
   defaultMain $
     testGroup
       "hnvr-core"
-      [ ArchiveBrowserSpec.tests,
+      [ AnalysisLivenessSpec.tests,
+        ArchiveBrowserSpec.tests,
         AssignmentSpec.tests,
         AuthzSpec.tests,
         BasePathSpec.tests,
