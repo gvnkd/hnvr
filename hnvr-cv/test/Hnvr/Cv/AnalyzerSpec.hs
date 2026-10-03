@@ -12,13 +12,18 @@
 module Hnvr.Cv.AnalyzerSpec (tests) where
 
 import Control.Applicative ((<|>))
+import Control.Monad (foldM, when)
+import Data.Aeson (decodeStrict')
 import qualified Data.ByteString as B
+import Data.IORef (atomicModifyIORef', newIORef)
 import qualified Data.IntMap as IM
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
 import Data.Time.Calendar (fromGregorian)
-import Data.Time.Clock (UTCTime (..), secondsToDiffTime)
+import Data.Time.Clock (UTCTime (..), getCurrentTime, secondsToDiffTime)
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word8)
+import Hnvr.Core.CameraSnapshot (RuleSnapshot)
 import Hnvr.Core.Frame (Frame (..))
 import Hnvr.Cv.Analyzer
   ( Analyzer (..),
@@ -35,6 +40,7 @@ import Hnvr.Cv.OnnxRuntime
     sessionInputShape,
     sessionOutputShape,
   )
+import Hnvr.Cv.Rules (emptyEngineState, evalTracks, projectRule)
 import Hnvr.Cv.Tracker.Sort (Track (..), Tracker (..))
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.IO (hPutStrLn, stderr)
@@ -79,7 +85,8 @@ tests =
         eps <- execProvidersFromEnv
         eps @?= [CPU]
         unsetEnv "HNVR_EXEC_PROVIDERS",
-      testCase "pipeline end-to-end (gated)" withModel
+      testCase "pipeline end-to-end (gated)" withModel,
+      testCase "live rules pipeline (gated)" liveRulesRepro
     ]
 
 -- Runs only when HNVR_ONNXRUNTIME_LIB + HNVR_TEST_MODEL are set.
@@ -140,6 +147,69 @@ withModel = do
                     <> " raw detections: "
                     <> show [(tScore t, tClassId t, tBox t) | t <- take 5 allT]
           _ -> pure ()
+    _ -> pure ()
+
+-- Runs only when HNVR_TEST_STREAM=path:WxH (raw RGB24, e.g.
+-- ffmpeg -vf fps=5 -f rawvideo -pix_fmt rgb24), HNVR_TEST_RULES=path
+-- (JSON array of 'RuleSnapshot' — e.g. extracted from a
+-- hnvr.commands.snapshot reply) plus the ORT/model vars. Feeds the
+-- frames through the real pipeline ('analyzeFrame' + 'evalTracks')
+-- and prints every emitted rule event — the pitfall #135 repro
+-- harness ("tracks active, zero rule events" wedge).
+liveRulesRepro :: IO ()
+liveRulesRepro = do
+  mLib <- lookupEnv "HNVR_ONNXRUNTIME_LIB"
+  mModel <- (<|>) <$> lookupEnv "HNVR_TEST_MODEL" <*> lookupEnv "HNVR_MODEL_PATH"
+  mStream <- lookupEnv "HNVR_TEST_STREAM"
+  mRulesPath <- lookupEnv "HNVR_TEST_RULES"
+  case (mLib, mModel, mStream >>= parseFrameSpec, mRulesPath) of
+    (Just _, Just modelPath, Just (path, w, h), Just rulesPath) -> do
+      bytes <- B.readFile path
+      rulesBytes <- B.readFile rulesPath
+      let frameBytes = w * h * (3 :: Int)
+          nFrames = B.length bytes `div` frameBytes
+          snaps = fromMaybe [] (decodeStrict' rulesBytes :: Maybe [RuleSnapshot])
+          rules = mapMaybe projectRule snaps
+      hPutStrLn stderr $
+        "live repro: "
+          <> show nFrames
+          <> " frames, "
+          <> show (length snaps)
+          <> " snapshot rules, "
+          <> show (length rules)
+          <> " projected"
+      (_, totalEvs) <-
+        withAnalyzer defaultAnalyzerConfig (T.pack modelPath) [CPU] $ \an0 -> do
+          stRef <- newIORef emptyEngineState
+          foldM
+            ( \(an, nEvs) i -> do
+                now <- getCurrentTime
+                let frame =
+                      Frame
+                        { frameWidth = w,
+                          frameHeight = h,
+                          frameTimestamp = now,
+                          frameRgb = VS.generate frameBytes (\j -> B.index bytes (i * frameBytes + j))
+                        }
+                (an', tracks) <- analyzeFrame an frame
+                evs <-
+                  atomicModifyIORef' stRef $ \st ->
+                    let (st', evs') = evalTracks st rules w h tracks now
+                     in (st', evs')
+                when (i `mod` 20 == 0 || not (null evs)) $
+                  hPutStrLn stderr $
+                    "frame "
+                      <> show i
+                      <> ": "
+                      <> show (length tracks)
+                      <> " tracks "
+                      <> show [(tId t, tClassId t, tBox t) | t <- take 3 tracks]
+                      <> (if null evs then "" else " EVENTS: " <> show (map (\(_, _, ev) -> ev) evs))
+                pure (an', nEvs + length evs)
+            )
+            (an0, 0 :: Int)
+            [0 .. nFrames - 1]
+      hPutStrLn stderr ("live repro: total events = " <> show totalEvs)
     _ -> pure ()
 
 -- | Parse @HNVR_TEST_FRAME@ of the form @path:WxH@.

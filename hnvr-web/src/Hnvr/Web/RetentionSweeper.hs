@@ -25,6 +25,7 @@ module Hnvr.Web.RetentionSweeper
     sweepOnce,
     sweepEventClips,
     sweepCameraSnapshots,
+    sweepEvents,
     purgeClipObjects,
   )
 where
@@ -87,6 +88,7 @@ sweepOnce = do
         forM_ cams (sweepCamera s3cfg conn)
         sweepEventClips s3cfg conn
         sweepCameraSnapshots s3cfg conn
+        sweepEvents s3cfg conn
 
 -- | Sweep expired event clips (separated event video store) and resume
 -- stale UI-tombstoned clips (90 s grace, same pattern as PendingPurge).
@@ -171,6 +173,64 @@ sweepCameraSnapshots s3cfg conn = do
           <> T.pack (show (length keys))
           <> " S3 object(s)"
       )
+
+-- | Sweep expired rule-event rows and their S3 thumbnails. Without
+-- this the @events@ table grows forever while RetentionSweeper
+-- (sweepCamera) and PendingPurge delete the S3 objects after
+-- @retention_hours@ — every event older than retention 404s on the
+-- Events page (2026-10-03 prod incident: 6577 rows, zero resolvable
+-- thumbnails). Same trust-the-DB pattern as 'sweepCamera': collect
+-- thumbnail keys past the per-camera cutoff, delete the objects,
+-- delete the rows. Runs over ALL cameras (not just enabled) — a
+-- disabled camera's history is still stale data.
+sweepEvents :: S3.S3Config -> PG.Connection -> IO ()
+sweepEvents s3cfg conn = do
+  let ci = S3.connectInfo s3cfg
+      bucket = S3.s3cBucket s3cfg
+  cams <-
+    PG.query_
+      conn
+      "SELECT id, slug, retention_hours FROM cameras ORDER BY slug" ::
+      IO [(UUID, Text, Int)]
+  forM_ cams $ \(cid, slug, retentionHours) -> do
+    rows <-
+      PG.query
+        conn
+        "SELECT thumbnail_key FROM events \
+        \ WHERE camera_id = ? \
+        \   AND ts < NOW() - (? * INTERVAL '1 hour') \
+        \   AND thumbnail_key IS NOT NULL"
+        (cid, retentionHours) ::
+        IO [Only (Maybe Text)]
+    let keys = [k | Only (Just k) <- rows]
+    forM_ keys $ \key ->
+      S3.deleteObject ci bucket key
+        `catch` \(e :: SomeException) ->
+          logWarn
+            ( "RetentionSweeper: event thumbnail delete failed for "
+                <> key
+                <> ": "
+                <> T.pack (show e)
+            )
+    n <-
+      PG.execute
+        conn
+        "DELETE FROM events \
+        \ WHERE camera_id = ? \
+        \   AND ts < NOW() - (? * INTERVAL '1 hour')"
+        (cid, retentionHours)
+    when (n > 0) $
+      logInfo
+        ( "RetentionSweeper: "
+            <> slug
+            <> " deleted "
+            <> T.pack (show n)
+            <> " event row(s) + "
+            <> T.pack (show (length keys))
+            <> " thumbnail object(s) (retention="
+            <> T.pack (show retentionHours)
+            <> "h)"
+        )
 
 -- | Sweep one camera. Both queries use the same cutoff expression
 -- (@NOW() - retention_hours * INTERVAL '1 hour'@) so the S3 keys
