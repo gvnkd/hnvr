@@ -614,6 +614,8 @@
                     pkgs.curl
                     pkgs.jq
                     pkgs.direnv
+                    pkgs.sqlite
+                    pkgs.rlwrap
                   ] ++ lib.optionals (!ci) [
                     # ultralytics CLI (`yolo`) — dev-only, used to export
                     # YOLOv8n-320/YOLOv8s-640 ONNX models for the CV
