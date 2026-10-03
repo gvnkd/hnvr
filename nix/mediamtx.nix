@@ -124,14 +124,6 @@ in
     networking.firewall.allowedUDPPorts = lib.optionals config.networking.firewall.enable
       [ cfg.webrtcUdpMuxPort ];
 
-    # Shared runtime directory — owned by hnvr so both hnvr-leader
-    # (ConfigSyncer writes the YAML) and mediamtx (reads it) can access.
-    # tmpfiles creates it on boot; systemd's per-service RuntimeDirectory=
-    # would be isolated to one service.
-    systemd.tmpfiles.rules = [
-      "d /run/hnvr 0750 ${cfg.user} ${cfg.group} -"
-    ];
-
     systemd.services.mediamtx = {
       description = "MediaMTX (RTSP->WebRTC WHEP) — leader only";
       after = [ "network.target" ];
@@ -167,6 +159,14 @@ in
         ProtectSystem = "strict";
         ProtectHome = true;
         ReadOnlyPaths = "/";
+        # Shared runtime directory for the rendered config — systemd
+        # creates it before the mount namespace (unlike tmpfiles, which
+        # only runs at boot/switch) and reference-counts it across both
+        # this unit and hnvr-leader.service. Owned by hnvr so both the
+        # leader (ConfigSyncer writes the YAML) and mediamtx (reads it)
+        # can access.
+        RuntimeDirectory = "hnvr";
+        RuntimeDirectoryMode = "0750";
         ReadWritePaths = [ "/run/hnvr" ];
       };
     };

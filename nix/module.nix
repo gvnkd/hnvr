@@ -377,6 +377,15 @@ in
             ]
         );
 
+      # Create /run/hnvr before the mount namespace setup — systemd
+      # reference-counts it with mediamtx.service (shared directory).
+      # ReadWritePaths alone fails with status=226/NAMESPACE when the dir
+      # is missing (tmpfiles only runs at boot/switch).
+      systemd.services.hnvr-leader.serviceConfig.RuntimeDirectory =
+        lib.mkIf config.services.hnvr.mediamtx.enable "hnvr";
+      systemd.services.hnvr-leader.serviceConfig.RuntimeDirectoryMode =
+        lib.mkIf config.services.hnvr.mediamtx.enable "0750";
+
       networking.firewall.allowedTCPPorts = lib.optionals config.networking.firewall.enable
         [ cfg.port ];
     })
